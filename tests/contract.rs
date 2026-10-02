@@ -9,16 +9,39 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
+use std::sync::Arc;
 use tucano_time::api::AppState;
+use tucano_time::clock::SystemClock;
+use tucano_time::lock::{EntryLock, LockReason};
 use tucano_time::store::Store;
 
 fn app() -> (axum::Router, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = Store::open(dir.path().join("data")).expect("store");
+    (tucano_time::build_router(AppState::new(store)), dir)
+}
+
+/// A test lock provider that freezes a single entry id.
+struct LockOne(Option<uuid::Uuid>);
+impl EntryLock for LockOne {
+    fn entry_lock(&self, entry_id: uuid::Uuid) -> Option<LockReason> {
+        if self.0 == Some(entry_id) {
+            Some(LockReason::Invoiced { id: "INV-1".into() })
+        } else {
+            None
+        }
+    }
+}
+
+/// Reopen an existing data dir with a custom lock provider.
+fn app_locked(dir_path: &std::path::Path, locks: Arc<dyn EntryLock>) -> axum::Router {
+    let store = Store::open(dir_path.join("data")).expect("store");
     let state = AppState {
-        store: std::sync::Arc::new(store),
+        store: Arc::new(store),
+        clock: Arc::new(SystemClock),
+        locks,
     };
-    (tucano_time::build_router(state), dir)
+    tucano_time::build_router(state)
 }
 
 async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, Value) {
@@ -607,4 +630,68 @@ async fn legacy_entry_document_without_billable_reads_true() {
     let (status, list) = json_req(&app, "GET", "/entries?date=2026-10-04", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list["entries"][0]["billable"], true);
+}
+
+#[tokio::test]
+async fn entry_source_defaults_manual() {
+    let (app, _d) = app();
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    let (_, e) = json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(entry_body(cid, "P1", json!(1), "2026-10-02")),
+    )
+    .await;
+    assert_eq!(e["source"], "manual");
+}
+
+#[tokio::test]
+async fn legacy_entry_document_without_source_reads_manual() {
+    let (app, d) = app();
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    let id = uuid::Uuid::new_v4();
+    let dir = d.path().join("data").join("entries").join("2026-10-05");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(format!("{id}.json")),
+        format!(
+            r#"{{"id":"{id}","date":"2026-10-05","customer_id":"{cid}","project_code":"P1","hours":2,"note":"","billable":true,"created_at":"2026-10-05T09:00:00Z","updated_at":"2026-10-05T09:00:00Z"}}"#
+        ),
+    )
+    .unwrap();
+    let (status, e) = json_req(&app, "GET", &format!("/entries/{id}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(e["source"], "manual");
+}
+
+#[tokio::test]
+async fn locked_entry_rejects_edit_and_delete_but_not_read() {
+    let (app, d) = app();
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    let (_, e) = json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(entry_body(cid, "P1", json!(1), "2026-10-02")),
+    )
+    .await;
+    let eid: uuid::Uuid = e["id"].as_str().unwrap().parse().unwrap();
+    drop(app);
+
+    // Reopen the same data dir with that entry locked (as an invoice would).
+    let app2 = app_locked(d.path(), Arc::new(LockOne(Some(eid))));
+    let body = json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2,"billable":true});
+    let (s_edit, _) = json_req(&app2, "PUT", &format!("/entries/{eid}"), Some(body)).await;
+    assert_eq!(s_edit, StatusCode::CONFLICT);
+    let (s_del, _) = json_req(&app2, "DELETE", &format!("/entries/{eid}"), None).await;
+    assert_eq!(s_del, StatusCode::CONFLICT);
+    let (s_get, _) = json_req(&app2, "GET", &format!("/entries/{eid}"), None).await;
+    assert_eq!(s_get, StatusCode::OK, "locked entries are still readable");
 }

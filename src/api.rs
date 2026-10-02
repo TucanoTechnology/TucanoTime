@@ -69,6 +69,20 @@ fn deser_error(e: serde_json::Error) -> ApiError {
 #[derive(Clone)]
 pub struct AppState {
     pub store: std::sync::Arc<Store>,
+    pub clock: std::sync::Arc<dyn crate::clock::Clock>,
+    pub locks: std::sync::Arc<dyn crate::lock::EntryLock>,
+}
+
+impl AppState {
+    /// Production wiring: real clock, no locks yet (invoices/submissions land
+    /// later and register an `EntryLock` provider here).
+    pub fn new(store: Store) -> Self {
+        Self {
+            store: std::sync::Arc::new(store),
+            clock: std::sync::Arc::new(crate::clock::SystemClock),
+            locks: std::sync::Arc::new(crate::lock::NoLocks),
+        }
+    }
 }
 
 pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {
@@ -288,7 +302,7 @@ pub async fn create_entry(
 ) -> ApiResult {
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
     validate_entry_refs(&app.store, &draft).map_err(ApiError::validation)?;
-    let now = chrono::Utc::now();
+    let now = app.clock.now();
     let entry = Entry {
         id: Uuid::new_v4(),
         date: draft.date,
@@ -297,6 +311,7 @@ pub async fn create_entry(
         hours: draft.hours,
         note: draft.note,
         billable: draft.billable,
+        source: crate::domain::Source::Manual,
         created_at: now,
         updated_at: now,
     };
@@ -321,6 +336,9 @@ pub async fn update_entry(
         .store
         .get_entry(id)?
         .ok_or_else(|| ApiError::not_found("entry"))?;
+    if let Some(reason) = app.locks.entry_lock(id) {
+        return Err(ApiError::conflict(reason.message()));
+    }
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
     validate_entry_refs(&app.store, &draft).map_err(ApiError::validation)?;
     let updated = Entry {
@@ -331,8 +349,9 @@ pub async fn update_entry(
         hours: draft.hours,
         note: draft.note,
         billable: draft.billable,
+        source: existing.source,
         created_at: existing.created_at,
-        updated_at: chrono::Utc::now(),
+        updated_at: app.clock.now(),
     };
     // Moving an entry between days relocates its document: write the new
     // home, then remove the old one.
@@ -348,6 +367,9 @@ pub async fn delete_entry(State(app): State<AppState>, Path(id): Path<Uuid>) -> 
         .store
         .get_entry(id)?
         .ok_or_else(|| ApiError::not_found("entry"))?;
+    if let Some(reason) = app.locks.entry_lock(id) {
+        return Err(ApiError::conflict(reason.message()));
+    }
     app.store.delete_entry(&entry)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }

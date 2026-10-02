@@ -119,7 +119,7 @@
       },
       "Entry": {
         "type": "object",
-        "required": ["id", "date", "customer_id", "project_code", "hours", "note", "billable", "created_at", "updated_at"],
+        "required": ["id", "date", "customer_id", "project_code", "hours", "note", "billable", "source", "created_at", "updated_at"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
@@ -128,6 +128,7 @@
           "hours": { "$ref": "#/components/schemas/Hours" },
           "note": { "type": "string", "maxLength": 500 },
           "billable": { "type": "boolean", "description": "Billable vs non-billable time. Non-billable time is never invoiced." },
+          "source": { "type": "string", "enum": ["manual", "timer", "calendar-import"], "description": "Provenance. Server-set; API clients create manual entries." },
           "created_at": { "type": "string", "format": "date-time" },
           "updated_at": { "type": "string", "format": "date-time" }
         },

@@ -211,6 +211,18 @@ pub fn project_from_bytes(bytes: &[u8], customer: &Customer) -> Result<Project, 
     Ok(doc.resolve(customer))
 }
 
+/// Where a time entry came from. Server-set; clients create `manual` entries.
+/// Timer (#14) and calendar import (#15/#36) write their own value so imported
+/// time is always traceable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Source {
+    #[default]
+    Manual,
+    Timer,
+    CalendarImport,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entry {
     pub id: Uuid,
@@ -223,6 +235,9 @@ pub struct Entry {
     /// pre-#20 documents load as billable (self-heals on next write).
     #[serde(default = "default_true")]
     pub billable: bool,
+    /// Provenance. Defaults to `manual` so pre-#18 documents load unchanged.
+    #[serde(default)]
+    pub source: Source,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -522,6 +537,7 @@ mod tests {
             hours: Hours(100),
             note: String::new(),
             billable: true,
+            source: Source::Manual,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

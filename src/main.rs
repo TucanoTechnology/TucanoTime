@@ -16,9 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = std::env::var("TUCANO_DATA_DIR").unwrap_or_else(|_| "data".to_owned());
     let port = std::env::var("TUCANO_PORT").unwrap_or_else(|_| "8080".to_owned());
     let store = tucano_time::store::Store::open(&data_dir)?;
-    let state = AppState {
-        store: std::sync::Arc::new(store),
-    };
+    let state = AppState::new(store);
 
     let app = tucano_time::build_router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port.parse()?)).await?;
