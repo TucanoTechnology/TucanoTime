@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use chrono::NaiveDate;
 use uuid::Uuid;
 
-use crate::domain::{Customer, Entry, Project};
+use crate::domain::{Customer, Entry, Project, Task};
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
 /// over the whole tree. 400 days covers a year plus buffer.
@@ -206,9 +206,95 @@ impl Store {
         if !path.exists() {
             return Err(StoreError::NotFound);
         }
+        if !self.list_tasks(customer_id, code)?.is_empty() {
+            return Err(StoreError::AlreadyExists(
+                "project still has tasks; delete them first".into(),
+            ));
+        }
         if self.has_entries_for_project(customer_id, code)? {
             return Err(StoreError::AlreadyExists(
                 "project still has time entries; delete or re-point them first".into(),
+            ));
+        }
+        std::fs::remove_file(&path)?;
+        // Remove the project's task folder (tasks live inside it).
+        let _ = std::fs::remove_dir_all(self.tasks_dir(customer_id, code));
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- tasks --
+
+    fn tasks_dir(&self, customer_id: Uuid, project_code: &str) -> PathBuf {
+        self.projects_dir(customer_id)
+            .join(project_code)
+            .join("tasks")
+    }
+
+    fn task_path(&self, customer_id: Uuid, project_code: &str, code: &str) -> PathBuf {
+        self.tasks_dir(customer_id, project_code)
+            .join(format!("{code}.json"))
+    }
+
+    pub fn list_tasks(
+        &self,
+        customer_id: Uuid,
+        project_code: &str,
+    ) -> Result<Vec<Task>, StoreError> {
+        let dir = self.tasks_dir(customer_id, project_code);
+        let mut out = Vec::new();
+        if !dir.exists() {
+            return Ok(out);
+        }
+        for path in dir_entries(&dir)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(t) = read_json::<Task>(&path)? {
+                out.push(t);
+            }
+        }
+        out.sort_by(|a, b| a.code.cmp(&b.code));
+        Ok(out)
+    }
+
+    pub fn get_task(
+        &self,
+        customer_id: Uuid,
+        project_code: &str,
+        code: &str,
+    ) -> Result<Option<Task>, StoreError> {
+        read_json(&self.task_path(customer_id, project_code, code))
+    }
+
+    pub fn put_task(&self, task: &Task) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        std::fs::create_dir_all(self.tasks_dir(task.customer_id, &task.project_code.0))?;
+        write_json(
+            &self.task_path(task.customer_id, &task.project_code.0, &task.code.0),
+            task,
+        )
+    }
+
+    pub fn delete_task(
+        &self,
+        customer_id: Uuid,
+        project_code: &str,
+        code: &str,
+    ) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let path = self.task_path(customer_id, project_code, code);
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        if self.has_entries_for_task(customer_id, project_code, code)? {
+            return Err(StoreError::AlreadyExists(
+                "task still has time entries; delete or re-point them first".into(),
             ));
         }
         std::fs::remove_file(&path)?;
@@ -312,6 +398,19 @@ impl Store {
             .scan_all_entries()?
             .iter()
             .any(|e| e.customer_id == customer_id && e.project_code.0 == code))
+    }
+
+    fn has_entries_for_task(
+        &self,
+        customer_id: Uuid,
+        project_code: &str,
+        task_code: &str,
+    ) -> Result<bool, StoreError> {
+        Ok(self.scan_all_entries()?.iter().any(|e| {
+            e.customer_id == customer_id
+                && e.project_code.0 == project_code
+                && e.task_code.as_ref().is_some_and(|t| t.0 == task_code)
+        }))
     }
 
     fn scan_all_entries(&self) -> Result<Vec<Entry>, StoreError> {

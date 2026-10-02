@@ -142,6 +142,26 @@ async function fillProjectSelect(select, customerId, selectedCode) {
   }
 }
 
+// Loads a project's tasks into the given select, with a leading "None".
+async function fillTaskSelect(select, customerId, projectCode, selectedCode) {
+  select.textContent = '';
+  const ph = document.createElement('option');
+  ph.value = '';
+  ph.textContent = projectCode ? 'None' : 'Choose a project first…';
+  select.appendChild(ph);
+  if (!customerId || !projectCode) return;
+  const data = await api.get(
+    `/customers/${customerId}/projects/${encodeURIComponent(projectCode)}/tasks`,
+  );
+  for (const t of data.tasks || []) {
+    const opt = document.createElement('option');
+    opt.value = t.code;
+    opt.textContent = t.active ? `${t.code} — ${t.name}` : `${t.code} — ${t.name} (inactive)`;
+    if (t.code === selectedCode) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
 // ---------------------------------------------------------------- tabs ---
 
 function initTabs() {
@@ -226,6 +246,7 @@ function startEdit(e) {
   $('entry-date').value = e.date;
   $('entry-customer').value = e.customer_id;
   fillProjectSelect($('entry-project'), e.customer_id, e.project_code);
+  fillTaskSelect($('entry-task'), e.customer_id, e.project_code, e.task_code);
   $('entry-hours').value = e.hours;
   $('entry-note').value = e.note || '';
   $('entry-billable').checked = e.billable !== false;
@@ -244,6 +265,7 @@ function resetEntryForm() {
   $('entry-billable').checked = true;
   $('entry-date').value = $('day-date').value || isoDate(new Date());
   $('entry-project').value = '';
+  fillTaskSelect($('entry-task'), '', null, null);
   $('entry-form-title').textContent = 'Add an entry';
   $('entry-save').textContent = 'Save entry';
   $('entry-cancel').hidden = true;
@@ -275,6 +297,7 @@ async function saveEntry(evt) {
     date: $('entry-date').value,
     customer_id: $('entry-customer').value,
     project_code: projectId,
+    task_code: $('entry-task').value || null,
     hours: Number($('entry-hours').value),
     note: $('entry-note').value,
     billable: $('entry-billable').checked,
@@ -565,6 +588,11 @@ async function refreshProjectTable() {
     status.appendChild(badge);
     const act = document.createElement('td');
     act.className = 'actions-col';
+    const tasks = document.createElement('button');
+    tasks.className = 'link';
+    tasks.type = 'button';
+    tasks.textContent = 'Tasks';
+    tasks.addEventListener('click', () => selectProjectForTasks(p.code));
     const edit = document.createElement('button');
     edit.className = 'link';
     edit.type = 'button';
@@ -575,7 +603,7 @@ async function refreshProjectTable() {
     del.type = 'button';
     del.textContent = 'Delete';
     del.addEventListener('click', () => removeProject(p));
-    act.append(edit, del);
+    act.append(tasks, edit, del);
     tr.append(code, name, cur, rate, status, act);
     tbody.appendChild(tr);
   }
@@ -642,6 +670,125 @@ async function removeProject(p) {
     await api.del(`/customers/${cid}/projects/${encodeURIComponent(p.code)}`);
     await refreshProjectTable();
     announce('Project deleted.');
+  } catch (err) {
+    announce(err.message);
+    window.alert(err.message);
+  }
+}
+
+// ---------------------------------------------------------------- tasks ---
+
+async function selectProjectForTasks(pcode) {
+  state.selectedProjectCode = pcode;
+  const cid = state.selectedCustomerId;
+  const cust = state.customers.find((c) => c.id === cid);
+  $('task-project-label').textContent = `${cust ? cust.name : ''} / ${pcode}`;
+  $('task-form').hidden = false;
+  $('task-table').hidden = false;
+  cancelTaskEdit();
+  await refreshTaskTable();
+}
+
+async function refreshTaskTable() {
+  const cid = state.selectedCustomerId;
+  const pcode = state.selectedProjectCode;
+  if (!cid || !pcode) return;
+  const data = await api.get(
+    `/customers/${cid}/projects/${encodeURIComponent(pcode)}/tasks`,
+  );
+  const tbody = $('task-table').querySelector('tbody');
+  tbody.textContent = '';
+  for (const t of data.tasks || []) {
+    const tr = document.createElement('tr');
+    const code = document.createElement('th');
+    code.scope = 'row';
+    code.textContent = t.code;
+    const name = document.createElement('td');
+    name.textContent = t.name;
+    const cur = document.createElement('td');
+    cur.textContent = t.currency || 'project';
+    const rate = document.createElement('td');
+    rate.className = 'num';
+    rate.textContent = t.rate_minor != null ? formatMoney(t.rate_minor) : 'project';
+    const status = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = t.active ? 'badge on' : 'badge';
+    badge.textContent = t.active ? 'Active' : 'Inactive';
+    status.appendChild(badge);
+    const act = document.createElement('td');
+    act.className = 'actions-col';
+    const edit = document.createElement('button');
+    edit.className = 'link';
+    edit.type = 'button';
+    edit.textContent = 'Edit';
+    edit.addEventListener('click', () => startTaskEdit(t));
+    const del = document.createElement('button');
+    del.className = 'danger';
+    del.type = 'button';
+    del.textContent = 'Delete';
+    del.addEventListener('click', () => removeTask(t));
+    act.append(edit, del);
+    tr.append(code, name, cur, rate, status, act);
+    tbody.appendChild(tr);
+  }
+}
+
+function startTaskEdit(t) {
+  $('task-original-code').value = t.code;
+  $('task-code').value = t.code;
+  $('task-name').value = t.name;
+  $('task-currency').value = t.currency || '';
+  $('task-rate').value = t.rate_minor != null ? formatMoney(t.rate_minor) : '';
+  $('task-active').checked = t.active;
+  $('task-save').textContent = 'Update task';
+  $('task-cancel').hidden = false;
+  clearFormError($('task-error'));
+  $('task-code').focus();
+}
+
+function cancelTaskEdit() {
+  $('task-original-code').value = '';
+  $('task-form').reset();
+  $('task-active').checked = true;
+  $('task-save').textContent = 'Add task';
+  $('task-cancel').hidden = true;
+  clearFormError($('task-error'));
+}
+
+async function saveTask(evt) {
+  evt.preventDefault();
+  clearFormError($('task-error'));
+  const cid = state.selectedCustomerId;
+  const pcode = state.selectedProjectCode;
+  const original = $('task-original-code').value;
+  const code = $('task-code').value.trim().toUpperCase();
+  const body = { code, name: $('task-name').value.trim(), active: $('task-active').checked };
+  const currency = $('task-currency').value.trim().toUpperCase();
+  if (currency) body.currency = currency;
+  const rate = $('task-rate').value.trim();
+  if (rate) body.rate_minor = Math.round(Number(rate) * 100);
+  const base = `/customers/${cid}/projects/${encodeURIComponent(pcode)}/tasks`;
+  try {
+    if (original) await api.put(`${base}/${encodeURIComponent(original)}`, body);
+    else await api.post(base, body);
+    await refreshTaskTable();
+    announce(original ? 'Task updated.' : 'Task added.');
+    cancelTaskEdit();
+  } catch (err) {
+    showFormError($('task-error'), err);
+  }
+}
+
+async function removeTask(t) {
+  if (!window.confirm(`Delete task ${t.code}?`)) return;
+  const cid = state.selectedCustomerId;
+  const pcode = state.selectedProjectCode;
+  try {
+    await api.del(
+      `/customers/${cid}/projects/${encodeURIComponent(pcode)}/tasks/${encodeURIComponent(t.code)}`,
+    );
+    await refreshTaskTable();
+    announce('Task deleted.');
   } catch (err) {
     announce(err.message);
     window.alert(err.message);
@@ -715,7 +862,11 @@ async function boot() {
   $('entry-cancel').addEventListener('click', resetEntryForm);
   $('entry-customer').addEventListener('change', async (e) => {
     await fillProjectSelect($('entry-project'), e.target.value, null);
+    fillTaskSelect($('entry-task'), '', null, null);
     $('entry-project').focus();
+  });
+  $('entry-project').addEventListener('change', async (e) => {
+    await fillTaskSelect($('entry-task'), $('entry-customer').value, e.target.value, null);
   });
 
   $('week-picker').addEventListener('submit', (e) => { e.preventDefault(); refreshWeek(); });
@@ -724,6 +875,8 @@ async function boot() {
   $('customer-cancel').addEventListener('click', cancelCustomerEdit);
   $('project-form').addEventListener('submit', saveProject);
   $('project-cancel').addEventListener('click', cancelProjectEdit);
+  $('task-form').addEventListener('submit', saveTask);
+  $('task-cancel').addEventListener('click', cancelTaskEdit);
 
   $('report-form').addEventListener('submit', runReport);
 

@@ -51,6 +51,16 @@ pub fn build_router(state: AppState) -> Router {
                 .put(api::update_project)
                 .delete(api::delete_project),
         )
+        .route(
+            "/customers/{cid}/projects/{pcode}/tasks",
+            get(api::list_tasks).post(api::create_task),
+        )
+        .route(
+            "/customers/{cid}/projects/{pcode}/tasks/{code}",
+            get(api::get_task_handler)
+                .put(api::update_task)
+                .delete(api::delete_task),
+        )
         .route("/entries", get(api::list_entries).post(api::create_entry))
         .route(
             "/entries/{id}",

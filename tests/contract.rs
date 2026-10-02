@@ -695,3 +695,121 @@ async fn locked_entry_rejects_edit_and_delete_but_not_read() {
     let (s_get, _) = json_req(&app2, "GET", &format!("/entries/{eid}"), None).await;
     assert_eq!(s_get, StatusCode::OK, "locked entries are still readable");
 }
+
+// ------------------------------------------------------------------ tasks --
+
+async fn new_task(app: &axum::Router, cid: &str, pcode: &str, code: &str, extra: Value) -> Value {
+    let mut body = json!({"code": code});
+    if let Value::Object(map) = extra {
+        for (k, v) in map {
+            body[k] = v;
+        }
+    }
+    let (status, created) = json_req(
+        app,
+        "POST",
+        &format!("/customers/{cid}/projects/{pcode}/tasks"),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "create task: {created}");
+    created
+}
+
+#[tokio::test]
+async fn task_crud_and_entry_reference() {
+    let (app, _d) = app();
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+
+    let t = new_task(&app, cid, "P1", "t-9", json!({"name": "Design"})).await;
+    assert_eq!(t["code"], "T-9", "task code normalised");
+
+    // Entry referencing the task.
+    let body = json!({
+        "date": "2026-10-02", "customer_id": cid, "project_code": "P1",
+        "task_code": "T-9", "hours": 2
+    });
+    let (s, e) = json_req(&app, "POST", "/entries", Some(body)).await;
+    assert_eq!(s, StatusCode::CREATED, "{e}");
+    assert_eq!(e["task_code"], "T-9");
+
+    // Task delete blocked while an entry references it.
+    let (s_del, _) = json_req(
+        &app,
+        "DELETE",
+        &format!("/customers/{cid}/projects/P1/tasks/T-9"),
+        None,
+    )
+    .await;
+    assert_eq!(s_del, StatusCode::CONFLICT);
+
+    // Project delete blocked while a task exists.
+    let (s_pdel, _) = json_req(
+        &app,
+        "DELETE",
+        &format!("/customers/{cid}/projects/P1"),
+        None,
+    )
+    .await;
+    assert_eq!(s_pdel, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn entry_task_must_belong_to_project() {
+    let (app, _d) = app();
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    new_project(&app, cid, "P2", json!({})).await;
+    new_task(&app, cid, "P2", "T1", json!({})).await;
+    // Reference P2's task under P1.
+    let body = json!({
+        "date": "2026-10-02", "customer_id": cid, "project_code": "P1",
+        "task_code": "T1", "hours": 1
+    });
+    let (s, b) = json_req(&app, "POST", "/entries", Some(body)).await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        b["error"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["field"] == "task_code")
+    );
+}
+
+#[tokio::test]
+async fn report_uses_task_rate_override() {
+    let (app, _d) = app();
+    let c = new_customer(&app, "ACME", "EUR", 6000).await; // 60/h default
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    new_task(&app, cid, "P1", "PREM", json!({"rate_minor": 9500})).await; // 95/h
+
+    let body = json!({
+        "date": "2026-10-02", "customer_id": cid, "project_code": "P1",
+        "task_code": "PREM", "hours": 2
+    });
+    json_req(&app, "POST", "/entries", Some(body)).await;
+    // Same project, no task -> project rate.
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":1})),
+    )
+    .await;
+
+    let (s, summary) = json_req(
+        &app,
+        "GET",
+        "/reports/summary?from=2026-10-01&to=2026-10-07&group=customer",
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    // 2h * 95 + 1h * 60 = 190 + 60 = 250.00 = 25000 minor.
+    assert_eq!(summary["rows"][0]["amount_minor"], 25000);
+}

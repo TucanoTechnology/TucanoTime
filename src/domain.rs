@@ -211,6 +211,21 @@ pub fn project_from_bytes(bytes: &[u8], customer: &Customer) -> Result<Project, 
     Ok(doc.resolve(customer))
 }
 
+/// An optional work level under a project (#38). A task may override the
+/// project's currency/rate; otherwise it inherits the project's values.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Task {
+    pub customer_id: Uuid,
+    pub project_code: ProjectCode,
+    pub code: ProjectCode,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub currency: Option<Currency>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub rate_minor: Option<u64>,
+    pub active: bool,
+}
+
 /// Where a time entry came from. Server-set; clients create `manual` entries.
 /// Timer (#14) and calendar import (#15/#36) write their own value so imported
 /// time is always traceable.
@@ -229,6 +244,9 @@ pub struct Entry {
     pub date: NaiveDate,
     pub customer_id: Uuid,
     pub project_code: ProjectCode,
+    /// Optional task within the project (#38). Must belong to `project_code`.
+    #[serde(default)]
+    pub task_code: Option<ProjectCode>,
     pub hours: Hours,
     pub note: String,
     /// Billable vs non-billable. Always serialised; defaults to true on read so
@@ -242,18 +260,24 @@ pub struct Entry {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Effective (currency, rate) of an entry: the project's own values. The
-/// customer default is only used when a project document is missing (defensive;
-/// entries always reference an existing project).
+/// Effective (currency, rate) of an entry. Precedence: task override → project
+/// (which always carries its own values since #11) → customer default (used only
+/// when the project document is missing, defensive).
 pub fn effective_rates<'a>(
     _entry: &Entry,
     customer: &'a Customer,
     project: Option<&'a Project>,
+    task: Option<&'a Task>,
 ) -> (Currency, u64) {
-    match project {
-        Some(p) => (p.currency.clone(), p.rate_minor),
-        None => (customer.currency.clone(), customer.default_rate_minor),
-    }
+    let currency = task
+        .and_then(|t| t.currency.clone())
+        .or_else(|| project.map(|p| p.currency.clone()))
+        .unwrap_or_else(|| customer.currency.clone());
+    let rate = task
+        .and_then(|t| t.rate_minor)
+        .or_else(|| project.map(|p| p.rate_minor))
+        .unwrap_or(customer.default_rate_minor);
+    (currency, rate)
 }
 
 // ---------------------------------------------------------------- inputs ---
@@ -284,10 +308,28 @@ pub struct ProjectInput {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct TaskInput {
+    pub code: ProjectCode,
+    #[serde(default)]
+    pub name: String,
+    /// Optional override of the project currency.
+    #[serde(default)]
+    pub currency: Option<Currency>,
+    /// Optional override of the project rate (minor units per hour).
+    #[serde(default)]
+    pub rate_minor: Option<u64>,
+    #[serde(default = "default_active")]
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EntryInput {
     pub date: String,
     pub customer_id: Uuid,
     pub project_code: ProjectCode,
+    #[serde(default)]
+    pub task_code: Option<ProjectCode>,
     pub hours: Hours,
     #[serde(default)]
     pub note: String,
@@ -391,6 +433,7 @@ pub fn validate_entry_input(input: &EntryInput) -> Result<EntryDraft, Vec<FieldE
             date,
             customer_id: input.customer_id,
             project_code: input.project_code.0.clone(),
+            task_code: input.task_code.as_ref().map(|c| c.0.clone()),
             hours: input.hours,
             note: input.note.clone(),
             billable: input.billable,
@@ -422,9 +465,45 @@ pub struct EntryDraft {
     pub date: NaiveDate,
     pub customer_id: Uuid,
     pub project_code: String,
+    pub task_code: Option<String>,
     pub hours: Hours,
     pub note: String,
     pub billable: bool,
+}
+
+#[derive(Debug)]
+pub struct TaskDraft {
+    pub code: String,
+    pub name: String,
+    pub currency: Option<String>,
+    pub rate_minor: Option<u64>,
+    pub active: bool,
+}
+
+pub fn validate_task_input(input: &TaskInput) -> Result<TaskDraft, Vec<FieldError>> {
+    let mut errors = Vec::new();
+    let name = if input.name.trim().is_empty() {
+        input.code.0.clone()
+    } else if input.name.chars().count() <= 120 {
+        input.name.trim().to_owned()
+    } else {
+        errors.push(FieldError::new("name", "at most 120 characters"));
+        String::new()
+    };
+    if let Some(rate) = input.rate_minor {
+        validate_rate_minor(rate, "rate_minor", &mut errors);
+    }
+    if errors.is_empty() {
+        Ok(TaskDraft {
+            code: input.code.0.clone(),
+            name,
+            currency: input.currency.as_ref().map(|c| c.0.clone()),
+            rate_minor: input.rate_minor,
+            active: input.active,
+        })
+    } else {
+        Err(errors)
+    }
 }
 
 #[cfg(test)]
@@ -509,6 +588,7 @@ mod tests {
             date: "2026-13-01".into(),
             customer_id: Uuid::new_v4(),
             project_code: ProjectCode::parse("P1").unwrap(),
+            task_code: None,
             hours: Hours(100),
             note: "x".repeat(501),
             billable: true,
@@ -534,6 +614,7 @@ mod tests {
             date: chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
             customer_id: Uuid::new_v4(),
             project_code: ProjectCode::parse("P1").unwrap(),
+            task_code: None,
             hours: Hours(100),
             note: String::new(),
             billable: true,
@@ -557,12 +638,26 @@ mod tests {
             active: true,
         };
         assert_eq!(
-            effective_rates(&entry, &customer, Some(&project)),
+            effective_rates(&entry, &customer, Some(&project), None),
             (Currency("USD".into()), 3000)
         );
         assert_eq!(
-            effective_rates(&entry, &customer, None),
+            effective_rates(&entry, &customer, None, None),
             (Currency("EUR".into()), 6000)
+        );
+        // A task override beats the project.
+        let task = Task {
+            customer_id: customer.id,
+            project_code: entry.project_code.clone(),
+            code: ProjectCode::parse("T1").unwrap(),
+            name: "T1".into(),
+            currency: Some(Currency("GBP".into())),
+            rate_minor: Some(5000),
+            active: true,
+        };
+        assert_eq!(
+            effective_rates(&entry, &customer, Some(&project), Some(&task)),
+            (Currency("GBP".into()), 5000)
         );
     }
 }
