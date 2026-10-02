@@ -14,7 +14,8 @@ use uuid::Uuid;
 
 use crate::domain::{
     Currency, Customer, CustomerInput, Entry, EntryInput, FieldError, Project, ProjectCode,
-    ProjectInput, validate_customer_input, validate_entry_input, validate_project_input,
+    ProjectInput, Task, TaskInput, validate_customer_input, validate_entry_input,
+    validate_project_input, validate_task_input,
 };
 use crate::error::ApiError;
 use crate::report;
@@ -241,6 +242,95 @@ pub async fn delete_project(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+// ----------------------------------------------------------------- tasks --
+
+pub async fn list_tasks(
+    State(app): State<AppState>,
+    Path((cid, pcode)): Path<(Uuid, ProjectCode)>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    if app.store.get_project(cid, &pcode.0)?.is_none() {
+        return Err(ApiError::not_found("project"));
+    }
+    let tasks = app.store.list_tasks(cid, &pcode.0)?;
+    Ok(Json(serde_json::json!({ "tasks": tasks })).into_response())
+}
+
+pub async fn create_task(
+    State(app): State<AppState>,
+    Path((cid, pcode)): Path<(Uuid, ProjectCode)>,
+    ValidJson(input): ValidJson<TaskInput>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    if app.store.get_project(cid, &pcode.0)?.is_none() {
+        return Err(ApiError::not_found("project"));
+    }
+    let draft = validate_task_input(&input).map_err(ApiError::validation)?;
+    if app.store.get_task(cid, &pcode.0, &draft.code)?.is_some() {
+        return Err(ApiError::conflict(format!(
+            "task {} already exists",
+            draft.code
+        )));
+    }
+    let task = build_task(cid, &pcode, &draft);
+    app.store.put_task(&task)?;
+    Ok((StatusCode::CREATED, Json(&task)).into_response())
+}
+
+fn build_task(cid: Uuid, pcode: &ProjectCode, draft: &crate::domain::TaskDraft) -> Task {
+    Task {
+        customer_id: cid,
+        project_code: pcode.clone(),
+        code: ProjectCode(draft.code.clone()),
+        name: draft.name.clone(),
+        currency: draft.currency.as_ref().map(|c| Currency(c.clone())),
+        rate_minor: draft.rate_minor,
+        active: draft.active,
+    }
+}
+
+pub async fn get_task_handler(
+    State(app): State<AppState>,
+    Path((cid, pcode, code)): Path<(Uuid, ProjectCode, ProjectCode)>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    let task = app
+        .store
+        .get_task(cid, &pcode.0, &code.0)?
+        .ok_or_else(|| ApiError::not_found("task"))?;
+    Ok(Json(task).into_response())
+}
+
+pub async fn update_task(
+    State(app): State<AppState>,
+    Path((cid, pcode, code)): Path<(Uuid, ProjectCode, ProjectCode)>,
+    ValidJson(input): ValidJson<TaskInput>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    if app.store.get_task(cid, &pcode.0, &code.0)?.is_none() {
+        return Err(ApiError::not_found("task"));
+    }
+    if input.code != code {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "code",
+            "path is authoritative; body code must match it",
+        )]));
+    }
+    let draft = validate_task_input(&input).map_err(ApiError::validation)?;
+    let task = build_task(cid, &pcode, &draft);
+    app.store.put_task(&task)?;
+    Ok(Json(&task).into_response())
+}
+
+pub async fn delete_task(
+    State(app): State<AppState>,
+    Path((cid, pcode, code)): Path<(Uuid, ProjectCode, ProjectCode)>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    app.store.delete_task(cid, &pcode.0, &code.0)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 // --------------------------------------------------------------- entries --
 
 /// Entry cross-references: the customer must exist and the project must
@@ -264,6 +354,19 @@ fn validate_entry_refs(
             "project_code",
             "project does not exist for this customer",
         ));
+    }
+    // A task, when present, must belong to the entry's project.
+    if let Some(task_code) = &draft.task_code {
+        let task = store
+            .get_task(draft.customer_id, &draft.project_code, task_code)
+            .ok()
+            .flatten();
+        if task.is_none() {
+            errors.push(FieldError::new(
+                "task_code",
+                "task does not exist for this project",
+            ));
+        }
     }
     if errors.is_empty() {
         Ok(())
@@ -308,6 +411,7 @@ pub async fn create_entry(
         date: draft.date,
         customer_id: draft.customer_id,
         project_code: ProjectCode(draft.project_code),
+        task_code: draft.task_code.map(ProjectCode),
         hours: draft.hours,
         note: draft.note,
         billable: draft.billable,
@@ -346,6 +450,7 @@ pub async fn update_entry(
         date: draft.date,
         customer_id: draft.customer_id,
         project_code: ProjectCode(draft.project_code),
+        task_code: draft.task_code.map(ProjectCode),
         hours: draft.hours,
         note: draft.note,
         billable: draft.billable,
@@ -394,14 +499,25 @@ pub async fn summary(
     };
     let entries = app.store.list_range(from, to)?;
     let customers: Vec<Customer> = app.store.list_customers()?.into_iter().collect();
+    let (projects, tasks) = gather_hierarchy(&app, &customers)?;
+    let rows = report::summarise(&entries, &customers, &projects, &tasks, kind);
+    Ok(Json(rows).into_response())
+}
+
+/// Every project and task for a set of customers, loaded once for reports.
+type Hierarchy = (Vec<(Uuid, Project)>, Vec<Task>);
+
+/// Load every project and task once, for report rate resolution.
+fn gather_hierarchy(app: &AppState, customers: &[Customer]) -> Result<Hierarchy, ApiError> {
     let mut projects: Vec<(Uuid, Project)> = Vec::new();
-    for c in &customers {
+    let mut tasks: Vec<Task> = Vec::new();
+    for c in customers {
         for p in app.store.list_projects(c.id)? {
+            tasks.extend(app.store.list_tasks(c.id, &p.code.0)?);
             projects.push((c.id, p));
         }
     }
-    let rows = report::summarise(&entries, &customers, &projects, kind);
-    Ok(Json(rows).into_response())
+    Ok((projects, tasks))
 }
 
 pub async fn export_csv(
@@ -418,13 +534,8 @@ pub async fn export_csv(
     };
     let entries = app.store.list_range(from, to)?;
     let customers = app.store.list_customers()?;
-    let mut projects: Vec<(Uuid, Project)> = Vec::new();
-    for c in &customers {
-        for p in app.store.list_projects(c.id)? {
-            projects.push((c.id, p));
-        }
-    }
-    let csv = report::export_csv(&entries, &customers, &projects, filter);
+    let (projects, tasks) = gather_hierarchy(&app, &customers)?;
+    let csv = report::export_csv(&entries, &customers, &projects, &tasks, filter);
     Ok((
         [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
         csv,

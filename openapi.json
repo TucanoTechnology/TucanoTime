@@ -117,6 +117,32 @@
         },
         "additionalProperties": false
       },
+      "Task": {
+        "type": "object",
+        "required": ["customer_id", "project_code", "code", "name", "active"],
+        "properties": {
+          "customer_id": { "type": "string", "format": "uuid" },
+          "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "code": { "$ref": "#/components/schemas/ProjectCode" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "active": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "TaskInput": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": { "$ref": "#/components/schemas/ProjectCode" },
+          "name": { "type": "string", "maxLength": 120, "default": "" },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "active": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": false
+      },
       "Entry": {
         "type": "object",
         "required": ["id", "date", "customer_id", "project_code", "hours", "note", "billable", "source", "created_at", "updated_at"],
@@ -125,6 +151,7 @@
           "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
           "customer_id": { "type": "string", "format": "uuid" },
           "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ], "description": "Optional task within the project (#38)." },
           "hours": { "$ref": "#/components/schemas/Hours" },
           "note": { "type": "string", "maxLength": 500 },
           "billable": { "type": "boolean", "description": "Billable vs non-billable time. Non-billable time is never invoiced." },
@@ -141,6 +168,7 @@
           "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
           "customer_id": { "type": "string", "format": "uuid" },
           "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
           "hours": { "$ref": "#/components/schemas/Hours" },
           "note": { "type": "string", "maxLength": 500, "default": "" },
           "billable": { "type": "boolean", "default": true }
@@ -388,6 +416,73 @@
         "operationId": "deleteProject",
         "tags": ["projects"],
         "summary": "Delete a project (must have no entries)",
+        "responses": {
+          "204": { "description": "Deleted." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/customers/{cid}/projects/{pcode}/tasks": {
+      "parameters": [
+        { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+        { "name": "pcode", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } }
+      ],
+      "get": {
+        "operationId": "listTasks",
+        "tags": ["projects"],
+        "summary": "List a project's tasks",
+        "responses": {
+          "200": {
+            "description": "Tasks of this project.",
+            "content": { "application/json": { "schema": { "type": "object", "required": ["tasks"], "properties": { "tasks": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } } }, "additionalProperties": false } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "post": {
+        "operationId": "createTask",
+        "tags": ["projects"],
+        "summary": "Add a task to a project",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskInput" } } } },
+        "responses": {
+          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/customers/{cid}/projects/{pcode}/tasks/{code}": {
+      "parameters": [
+        { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+        { "name": "pcode", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } },
+        { "name": "code", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } }
+      ],
+      "get": {
+        "operationId": "getTask",
+        "tags": ["projects"],
+        "summary": "Fetch one task",
+        "responses": {
+          "200": { "description": "The task.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "operationId": "updateTask",
+        "tags": ["projects"],
+        "summary": "Full replacement; body code must match the path code",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskInput" } } } },
+        "responses": {
+          "200": { "description": "Updated.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTask",
+        "tags": ["projects"],
+        "summary": "Delete a task (must have no entries)",
         "responses": {
           "204": { "description": "Deleted." },
           "404": { "$ref": "#/components/responses/NotFound" },

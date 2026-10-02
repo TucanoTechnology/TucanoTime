@@ -54,6 +54,10 @@
           <select id="entry-project" name="project_code" required></select>
         </div>
         <div class="field">
+          <label for="entry-task">Task (optional)</label>
+          <select id="entry-task" name="task_code"></select>
+        </div>
+        <div class="field">
           <label for="entry-date">Date</label>
           <input type="date" id="entry-date" name="date" required>
         </div>
@@ -122,6 +126,23 @@
       </form>
       <table id="project-table" hidden>
         <caption class="sr-only">Projects for the selected customer</caption>
+        <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <h2>Tasks for <span id="task-project-label">— select a project —</span></h2>
+      <form id="task-form" class="card" hidden>
+        <input type="hidden" id="task-original-code">
+        <div class="field"><label for="task-code">Task code</label><input id="task-code" maxlength="24" required></div>
+        <div class="field"><label for="task-name">Name</label><input id="task-name" maxlength="120"></div>
+        <div class="field"><label for="task-currency">Currency override (optional)</label><input id="task-currency" maxlength="3" placeholder="(project)"></div>
+        <div class="field"><label for="task-rate">Rate override (optional, minor/h)</label><input id="task-rate" type="number" min="0" step="0.01" placeholder="(project default)" inputmode="decimal"></div>
+        <div class="field checkbox"><label for="task-active"><input type="checkbox" id="task-active" checked> Active</label></div>
+        <p class="form-error" id="task-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="task-save">Add task</button><button type="button" class="secondary" id="task-cancel" hidden>Cancel</button></div>
+      </form>
+      <table id="task-table" hidden>
+        <caption class="sr-only">Tasks for the selected project</caption>
         <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table>
