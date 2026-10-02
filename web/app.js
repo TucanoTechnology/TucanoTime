@@ -522,6 +522,12 @@ async function selectCustomerForProjects(cid) {
   $('project-original-code').value = '';
   $('project-save').textContent = 'Add project';
   $('project-cancel').hidden = true;
+  // Prefill the required currency + rate from the customer default (#11).
+  const cust = state.customers.find((c) => c.id === cid);
+  if (cust) {
+    $('project-currency').value = cust.currency;
+    $('project-rate').value = (cust.default_rate_minor / 100).toFixed(2);
+  }
   await refreshProjectTable();
 }
 
@@ -585,15 +591,21 @@ async function saveProject(evt) {
   const cid = state.selectedCustomerId;
   const original = $('project-original-code').value;
   const code = $('project-code').value.trim().toUpperCase();
+  const currency = $('project-currency').value.trim().toUpperCase();
+  const rate = $('project-rate').value.trim();
+  if (!currency || !rate) {
+    showFormError($('project-error'), {
+      message: 'Currency and hourly rate are required for a project.',
+    });
+    return;
+  }
   const body = {
     code,
     name: $('project-name').value.trim(),
+    currency,
+    rate_minor: Math.round(Number(rate) * 100),
     active: $('project-active').checked,
   };
-  const currency = $('project-currency').value.trim().toUpperCase();
-  if (currency) body.currency = currency;
-  const rate = $('project-rate').value.trim();
-  if (rate) body.rate_minor = Math.round(Number(rate) * 100);
   try {
     if (original) await api.put(`/customers/${cid}/projects/${encodeURIComponent(original)}`, body);
     else await api.post(`/customers/${cid}/projects`, body);

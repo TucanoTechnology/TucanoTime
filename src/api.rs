@@ -179,7 +179,7 @@ fn build_project(cid: Uuid, draft: &crate::domain::ProjectDraft) -> Project {
         customer_id: cid,
         code: ProjectCode(draft.code.clone()),
         name: draft.name.clone(),
-        currency: draft.currency.as_ref().map(|c| Currency(c.clone())),
+        currency: Currency(draft.currency.clone()),
         rate_minor: draft.rate_minor,
         active: draft.active,
     }

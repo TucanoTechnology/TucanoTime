@@ -136,6 +136,9 @@ impl Store {
     }
 
     pub fn list_projects(&self, customer_id: Uuid) -> Result<Vec<Project>, StoreError> {
+        let customer = self
+            .get_customer(customer_id)?
+            .ok_or(StoreError::NotFound)?;
         let mut out = Vec::new();
         let dir = self.projects_dir(customer_id);
         if !dir.exists() {
@@ -145,7 +148,7 @@ impl Store {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            if let Some(p) = read_json::<Project>(&path)? {
+            if let Some(p) = self.read_project(&path, &customer)? {
                 out.push(p);
             }
         }
@@ -153,12 +156,33 @@ impl Store {
         Ok(out)
     }
 
+    /// Read one project document, resolving any pre-#11 missing currency/rate
+    /// from the owning customer.
+    fn read_project(
+        &self,
+        path: &Path,
+        customer: &Customer,
+    ) -> Result<Option<Project>, StoreError> {
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                let project = crate::domain::project_from_bytes(&bytes, customer)
+                    .map_err(|e| StoreError::Io(format!("corrupt project document: {e}")))?;
+                Ok(Some(project))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     pub fn get_project(
         &self,
         customer_id: Uuid,
         code: &str,
     ) -> Result<Option<Project>, StoreError> {
-        read_json(&self.project_path(customer_id, code))
+        let customer = self
+            .get_customer(customer_id)?
+            .ok_or(StoreError::NotFound)?;
+        self.read_project(&self.project_path(customer_id, code), &customer)
     }
 
     pub fn put_project(&self, project: &Project) -> Result<(), StoreError> {
