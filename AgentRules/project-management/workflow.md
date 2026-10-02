@@ -19,7 +19,7 @@ Every change has a ticket before implementation begins — if none exists, creat
 - Close only once the work is verified against the definition of done and merged: add a final
   summary comment, reference the pull request and merged commits on the ticket, reference the
   ticket number in the pull request description and commit messages, and move the item to Done on
-  the project board.
+  the project board where the repository uses one.
 
 ## CI/CD validation
 
