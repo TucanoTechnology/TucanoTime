@@ -296,6 +296,7 @@ pub async fn create_entry(
         project_code: ProjectCode(draft.project_code),
         hours: draft.hours,
         note: draft.note,
+        billable: draft.billable,
         created_at: now,
         updated_at: now,
     };
@@ -329,6 +330,7 @@ pub async fn update_entry(
         project_code: ProjectCode(draft.project_code),
         hours: draft.hours,
         note: draft.note,
+        billable: draft.billable,
         created_at: existing.created_at,
         updated_at: chrono::Utc::now(),
     };

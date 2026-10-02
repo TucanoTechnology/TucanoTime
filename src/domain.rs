@@ -219,6 +219,10 @@ pub struct Entry {
     pub project_code: ProjectCode,
     pub hours: Hours,
     pub note: String,
+    /// Billable vs non-billable. Always serialised; defaults to true on read so
+    /// pre-#20 documents load as billable (self-heals on next write).
+    #[serde(default = "default_true")]
+    pub billable: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -272,9 +276,15 @@ pub struct EntryInput {
     pub hours: Hours,
     #[serde(default)]
     pub note: String,
+    #[serde(default = "default_true")]
+    pub billable: bool,
 }
 
 fn default_active() -> bool {
+    true
+}
+
+fn default_true() -> bool {
     true
 }
 
@@ -368,6 +378,7 @@ pub fn validate_entry_input(input: &EntryInput) -> Result<EntryDraft, Vec<FieldE
             project_code: input.project_code.0.clone(),
             hours: input.hours,
             note: input.note.clone(),
+            billable: input.billable,
         }),
         _ => Err(errors),
     }
@@ -398,6 +409,7 @@ pub struct EntryDraft {
     pub project_code: String,
     pub hours: Hours,
     pub note: String,
+    pub billable: bool,
 }
 
 #[cfg(test)]
@@ -484,6 +496,7 @@ mod tests {
             project_code: ProjectCode::parse("P1").unwrap(),
             hours: Hours(100),
             note: "x".repeat(501),
+            billable: true,
         };
         let errs = validate_entry_input(&input).unwrap_err();
         assert!(errs.iter().any(|e| e.field == "date"));
@@ -500,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    fn effective_rate_prefers_project_override() {
+    fn effective_rate_uses_project_values() {
         let entry = Entry {
             id: Uuid::new_v4(),
             date: chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
@@ -508,6 +521,7 @@ mod tests {
             project_code: ProjectCode::parse("P1").unwrap(),
             hours: Hours(100),
             note: String::new(),
+            billable: true,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

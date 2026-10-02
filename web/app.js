@@ -192,6 +192,12 @@ async function refreshDay() {
     tdHrs.textContent = e.hours.toFixed(2);
     const tdNote = document.createElement('td');
     tdNote.textContent = e.note || '';
+    if (!e.billable) {
+      const nb = document.createElement('span');
+      nb.className = 'badge';
+      nb.textContent = ' non-billable';
+      tdNote.appendChild(nb);
+    }
     const tdAct = document.createElement('td');
     tdAct.className = 'actions-col';
 
@@ -222,6 +228,7 @@ function startEdit(e) {
   fillProjectSelect($('entry-project'), e.customer_id, e.project_code);
   $('entry-hours').value = e.hours;
   $('entry-note').value = e.note || '';
+  $('entry-billable').checked = e.billable !== false;
   $('entry-form-title').textContent = `Edit entry ${e.id.slice(0, 8)}`;
   $('entry-save').textContent = 'Update entry';
   $('entry-cancel').hidden = false;
@@ -234,6 +241,7 @@ function resetEntryForm() {
   $('entry-id').value = '';
   $('entry-hours').value = '';
   $('entry-note').value = '';
+  $('entry-billable').checked = true;
   $('entry-date').value = $('day-date').value || isoDate(new Date());
   $('entry-project').value = '';
   $('entry-form-title').textContent = 'Add an entry';
@@ -269,6 +277,7 @@ async function saveEntry(evt) {
     project_code: projectId,
     hours: Number($('entry-hours').value),
     note: $('entry-note').value,
+    billable: $('entry-billable').checked,
   };
   try {
     if (id) {

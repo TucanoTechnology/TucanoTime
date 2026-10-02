@@ -557,3 +557,54 @@ async fn legacy_project_document_resolves_from_customer() {
     assert_eq!(ls, StatusCode::OK);
     assert_eq!(list["projects"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn entry_billable_defaults_true_and_persists_false() {
+    let (app, _d) = app();
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+
+    // Omitted -> billable true.
+    let (_, def) = json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(entry_body(cid, "P1", json!(1), "2026-10-02")),
+    )
+    .await;
+    assert_eq!(def["billable"], true);
+
+    // Explicit false persists.
+    let body = json!({
+        "date": "2026-10-03", "customer_id": cid, "project_code": "P1",
+        "hours": 2, "note": "internal", "billable": false
+    });
+    let (_, nb) = json_req(&app, "POST", "/entries", Some(body)).await;
+    assert_eq!(nb["billable"], false);
+    let eid = nb["id"].as_str().unwrap();
+    let (_, got) = json_req(&app, "GET", &format!("/entries/{eid}"), None).await;
+    assert_eq!(got["billable"], false);
+}
+
+#[tokio::test]
+async fn legacy_entry_document_without_billable_reads_true() {
+    let (app, d) = app();
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    // Craft a pre-#20 entry document (no `billable` field) directly on disk.
+    let id = uuid::Uuid::new_v4();
+    let dir = d.path().join("data").join("entries").join("2026-10-04");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(format!("{id}.json")),
+        format!(
+            r#"{{"id":"{id}","date":"2026-10-04","customer_id":"{cid}","project_code":"P1","hours":3,"note":"","created_at":"2026-10-04T09:00:00Z","updated_at":"2026-10-04T09:00:00Z"}}"#
+        ),
+    )
+    .unwrap();
+    let (status, list) = json_req(&app, "GET", "/entries?date=2026-10-04", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["entries"][0]["billable"], true);
+}
