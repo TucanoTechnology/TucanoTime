@@ -19,7 +19,7 @@ jobs:
       image: rust:1.98.0-slim-trixie
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -34,7 +34,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # A build-only check; pushing to a registry starts once releases do.
       - name: Docker build
@@ -44,7 +44,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Lint workflows
         run: docker run --rm -v "$PWD:/repo:ro" --workdir /repo rhysd/actionlint:1.7.12 -color
