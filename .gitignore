@@ -1,0 +1,6 @@
+/target/
+/data/
+
+# Local editor and scratch artifacts.
+*.json.tmp
+.DS_Store
