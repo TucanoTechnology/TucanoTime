@@ -1,6 +1,6 @@
 ---
 load-when: writing or changing end-to-end or UI tests
-applies-to: every repository
+applies-to: repositories with a user interface
 title: Browser & end-to-end tests
 ---
 
