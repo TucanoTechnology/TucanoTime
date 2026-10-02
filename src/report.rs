@@ -150,7 +150,7 @@ pub fn export_csv(
     };
 
     let mut out = String::new();
-    out.push_str("date,customer,project_code,hours,currency,hourly_rate,amount,note\n");
+    out.push_str("date,customer,project_code,hours,billable,currency,hourly_rate,amount,note\n");
     for e in entries {
         if let Some(fid) = customer_filter
             && e.customer_id != fid
@@ -169,6 +169,11 @@ pub fn export_csv(
             customer.name.clone(),
             e.project_code.0.clone(),
             format!("{:.2}", hours),
+            if e.billable {
+                "yes".to_string()
+            } else {
+                "no".to_string()
+            },
             currency.0.clone(),
             format!("{:.2}", rate as f64 / 100.0),
             format!("{:.2}", amount as f64 / 100.0),
