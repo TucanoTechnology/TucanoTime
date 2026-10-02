@@ -10,8 +10,11 @@ use rust_embed::RustEmbed;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub mod api;
+pub mod clock;
 pub mod domain;
 pub mod error;
+pub mod lock;
+pub mod notify;
 pub mod report;
 pub mod store;
 
