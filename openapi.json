@@ -1,0 +1,517 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TucanoTime API",
+    "version": "0.1.0",
+    "license": { "name": "AGPL-3.0-or-later", "identifier": "AGPL-3.0-or-later" },
+    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR."
+  },
+  "servers": [{ "url": "/" }],
+  "tags": [
+    { "name": "customers" },
+    { "name": "projects" },
+    { "name": "entries" },
+    { "name": "reports" },
+    { "name": "meta" }
+  ],
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "type": "string", "enum": ["validation_failed", "not_found", "conflict", "bad_request", "internal", "invalid_json"] },
+              "message": { "type": "string", "description": "Human-readable; never contains paths, stack traces or raw filesystem errors." },
+              "fields": {
+                "type": "array",
+                "description": "Per-field problems for validation_failed.",
+                "items": { "$ref": "#/components/schemas/FieldError" }
+              }
+            }
+          }
+        }
+      },
+      "FieldError": {
+        "type": "object",
+        "required": ["field", "message"],
+        "properties": {
+          "field": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "Currency": {
+        "type": "string",
+        "pattern": "^[A-Z]{3}$",
+        "description": "ISO-4217 alpha-3 code, upper case.",
+        "examples": ["EUR", "USD"]
+      },
+      "ProjectCode": {
+        "type": "string",
+        "pattern": "^[A-Z0-9][A-Z0-9_-]{0,23}$",
+        "description": "Normalised upper case; letters and digits, dashes and underscores after the first character; at most 24 characters.",
+        "examples": ["ACME-42"]
+      },
+      "Hours": {
+        "type": "number",
+        "minimum": 0.01,
+        "maximum": 24,
+        "description": "Hours as a decimal with at most two fractional digits (0.01–24.00). Stored as integer hundredths.",
+        "examples": [7.5]
+      },
+      "RateMinor": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000000,
+        "description": "Hourly rate in currency minor units (cents). 6000 = 60.00.",
+        "examples": [6000]
+      },
+      "Customer": {
+        "type": "object",
+        "required": ["id", "name", "currency", "default_rate_minor", "active"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "active": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "CustomerInput": {
+        "type": "object",
+        "required": ["name", "currency", "default_rate_minor"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "active": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": false
+      },
+      "Project": {
+        "type": "object",
+        "required": ["customer_id", "code", "name", "active"],
+        "properties": {
+          "customer_id": { "type": "string", "format": "uuid" },
+          "code": { "$ref": "#/components/schemas/ProjectCode" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "active": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "ProjectInput": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": { "$ref": "#/components/schemas/ProjectCode" },
+          "name": { "type": "string", "maxLength": 120, "default": "" },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "active": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": false
+      },
+      "Entry": {
+        "type": "object",
+        "required": ["id", "date", "customer_id", "project_code", "hours", "note", "created_at", "updated_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "customer_id": { "type": "string", "format": "uuid" },
+          "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "hours": { "$ref": "#/components/schemas/Hours" },
+          "note": { "type": "string", "maxLength": 500 },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "EntryInput": {
+        "type": "object",
+        "required": ["date", "customer_id", "project_code", "hours"],
+        "properties": {
+          "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "customer_id": { "type": "string", "format": "uuid" },
+          "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "hours": { "$ref": "#/components/schemas/Hours" },
+          "note": { "type": "string", "maxLength": 500, "default": "" }
+        },
+        "additionalProperties": false
+      },
+      "SummaryRow": {
+        "type": "object",
+        "required": ["key", "label", "currency", "hours", "amount_minor", "entries"],
+        "properties": {
+          "key": { "type": "string" },
+          "label": { "type": "string" },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "hours": { "type": "number" },
+          "amount_minor": { "type": "integer", "minimum": 0 },
+          "entries": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "Summary": {
+        "type": "object",
+        "required": ["group", "rows", "total_hours"],
+        "properties": {
+          "group": { "type": "string", "enum": ["customer", "project", "week"] },
+          "rows": { "type": "array", "items": { "$ref": "#/components/schemas/SummaryRow" } },
+          "total_hours": { "type": "number" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "ValidationError": {
+        "description": "Payload failed validation before any write or side effect.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "The resource does not exist.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Conflict": {
+        "description": "The operation conflicts with existing state (duplicate, or referenced by entries).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "BadRequest": {
+        "description": "Malformed query or body.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    },
+    "parameters": {
+      "DateParam": {
+        "name": "date",
+        "in": "query",
+        "required": false,
+        "schema": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "description": "Single day, YYYY-MM-DD. Exactly one of date or from+to."
+      },
+      "FromParam": {
+        "name": "from",
+        "in": "query",
+        "required": false,
+        "schema": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "description": "Inclusive start of a range. Requires to; at most 400 days."
+      },
+      "ToParam": {
+        "name": "to",
+        "in": "query",
+        "required": false,
+        "schema": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "description": "Inclusive end of a range."
+      }
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "tags": ["meta"],
+        "summary": "Liveness",
+        "responses": {
+          "200": {
+            "description": "Server is up.",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" } }, "required": ["status"], "additionalProperties": false } } }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "tags": ["meta"],
+        "summary": "This machine-readable contract",
+        "responses": { "200": { "description": "The OpenAPI document.", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/docs": {
+      "get": {
+        "operationId": "docs",
+        "tags": ["meta"],
+        "summary": "Interactive documentation UI (Swagger), rendered from /openapi.json",
+        "responses": { "200": { "description": "HTML page.", "content": { "text/html": { "schema": { "type": "string" } } } } }
+      }
+    },
+    "/customers": {
+      "get": {
+        "operationId": "listCustomers",
+        "tags": ["customers"],
+        "summary": "List customers, sorted by name",
+        "responses": {
+          "200": {
+            "description": "All customers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["customers"],
+                  "properties": { "customers": { "type": "array", "items": { "$ref": "#/components/schemas/Customer" } } },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCustomer",
+        "tags": ["customers"],
+        "summary": "Create a customer",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerInput" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Created; server assigns the id.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } }
+          },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/customers/{id}": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "get": {
+        "operationId": "getCustomer",
+        "tags": ["customers"],
+        "summary": "Fetch one customer",
+        "responses": {
+          "200": { "description": "The customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "operationId": "updateCustomer",
+        "tags": ["customers"],
+        "summary": "Full replacement of a customer (id stays fixed)",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerInput" } } }
+        },
+        "responses": {
+          "200": { "description": "The updated customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCustomer",
+        "tags": ["customers"],
+        "summary": "Delete a customer (must own no projects or entries)",
+        "responses": {
+          "204": { "description": "Deleted." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/customers/{cid}/projects": {
+      "parameters": [ { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "get": {
+        "operationId": "listProjects",
+        "tags": ["projects"],
+        "summary": "List a customer's projects, sorted by code",
+        "responses": {
+          "200": {
+            "description": "Projects of this customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["projects"],
+                  "properties": { "projects": { "type": "array", "items": { "$ref": "#/components/schemas/Project" } } },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "post": {
+        "operationId": "createProject",
+        "tags": ["projects"],
+        "summary": "Add a project code to a customer",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectInput" } } }
+        },
+        "responses": {
+          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/customers/{cid}/projects/{code}": {
+      "parameters": [
+        { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+        { "name": "code", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } }
+      ],
+      "get": {
+        "operationId": "getProject",
+        "tags": ["projects"],
+        "summary": "Fetch one project",
+        "responses": {
+          "200": { "description": "The project.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "operationId": "updateProject",
+        "tags": ["projects"],
+        "summary": "Full replacement; body code must match the path code",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteProject",
+        "tags": ["projects"],
+        "summary": "Delete a project (must have no entries)",
+        "responses": {
+          "204": { "description": "Deleted." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/entries": {
+      "parameters": [
+        { "$ref": "#/components/parameters/DateParam" },
+        { "$ref": "#/components/parameters/FromParam" },
+        { "$ref": "#/components/parameters/ToParam" }
+      ],
+      "get": {
+        "operationId": "listEntries",
+        "tags": ["entries"],
+        "summary": "List entries for a day or an inclusive date range",
+        "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 days).",
+        "responses": {
+          "200": {
+            "description": "Matching entries, ordered by date then creation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["entries"],
+                  "properties": { "entries": { "type": "array", "items": { "$ref": "#/components/schemas/Entry" } } },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      },
+      "post": {
+        "operationId": "createEntry",
+        "tags": ["entries"],
+        "summary": "Add a time entry",
+        "description": "Cross-references are validated before any write: the customer must exist and the project must belong to it.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EntryInput" } } }
+        },
+        "responses": {
+          "201": { "description": "Created; server assigns id and timestamps.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/entries/{id}": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "get": {
+        "operationId": "getEntry",
+        "tags": ["entries"],
+        "summary": "Fetch one entry",
+        "responses": {
+          "200": { "description": "The entry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "operationId": "updateEntry",
+        "tags": ["entries"],
+        "summary": "Full replacement of an entry (may change its day)",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EntryInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteEntry",
+        "tags": ["entries"],
+        "summary": "Delete an entry",
+        "responses": {
+          "204": { "description": "Deleted." },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/reports/summary": {
+      "parameters": [
+        { "$ref": "#/components/parameters/FromParam" },
+        { "$ref": "#/components/parameters/ToParam" },
+        {
+          "name": "group",
+          "in": "query",
+          "required": false,
+          "schema": { "type": "string", "enum": ["customer", "project", "week"], "default": "customer" }
+        }
+      ],
+      "get": {
+        "operationId": "summary",
+        "tags": ["reports"],
+        "summary": "Hours and amounts grouped by customer, project or ISO week",
+        "description": "Amounts are computed with each entry's effective rate (project override, else customer default) at read time.",
+        "responses": {
+          "200": { "description": "Aggregated rows.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Summary" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/reports/export.csv": {
+      "parameters": [
+        { "$ref": "#/components/parameters/FromParam" },
+        { "$ref": "#/components/parameters/ToParam" },
+        {
+          "name": "customer_id",
+          "in": "query",
+          "required": false,
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "operationId": "exportCsv",
+        "tags": ["reports"],
+        "summary": "One CSV row per entry: date, customer, code, hours, currency, hourly_rate, amount, note",
+        "responses": {
+          "200": { "description": "CSV document (formula-injection escaped).", "content": { "text/csv": { "schema": { "type": "string" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    }
+  }
+}

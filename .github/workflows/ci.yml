@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Self-hosted, as in every other workflow in the organisation: GitHub-hosted
+# runners are billing-gated on this account. The lint/test job runs inside the
+# same pinned Rust image the Dockerfile builds with, so CI, image and local
+# `cargo test` share one toolchain.
+jobs:
+  lint-test:
+    runs-on: [self-hosted, Linux, X64]
+    container:
+      image: rust:1.98.0-slim-trixie
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --all-targets
+
+  build-image:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # A build-only check; pushing to a registry starts once releases do.
+      - name: Docker build
+        run: docker build --pull -t tucanotime:${{ github.sha }} .
+
+  actionlint:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint workflows
+        run: docker run --rm -v "$PWD:/repo:ro" --workdir /repo rhysd/actionlint:1.7.12 -color

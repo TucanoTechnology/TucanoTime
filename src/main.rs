@@ -1,0 +1,28 @@
+// TucanoTime — timesheet server: one binary serves the REST API, the web
+// GUI, the machine-readable contract (openapi.json) and its docs UI.
+// Data lives in one folder tree below TUCANO_DATA_DIR (no database).
+
+use tucano_time::api::AppState;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+    let data_dir = std::env::var("TUCANO_DATA_DIR").unwrap_or_else(|_| "data".to_owned());
+    let port = std::env::var("TUCANO_PORT").unwrap_or_else(|_| "8080".to_owned());
+    let store = tucano_time::store::Store::open(&data_dir)?;
+    let state = AppState {
+        store: std::sync::Arc::new(store),
+    };
+
+    let app = tucano_time::build_router(state);
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port.parse()?)).await?;
+    tracing::info!("tucano-time listening on :{port}, data dir {data_dir}");
+    axum::serve(listener, app).await?;
+    Ok(())
+}

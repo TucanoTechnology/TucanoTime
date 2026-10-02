@@ -18,10 +18,59 @@ they will arrive here as an automated pull request.**
 
 ## Repository-specific rules
 
-Tucano Time is a new repository; its scope and architecture are not defined yet. Record project
-philosophy and repository-specific rules here as they are decided. Organisation-wide changes belong
-in [TucanoAgentRules](https://github.com/TucanoTechnology/TucanoAgentRules) and arrive here through
-the sync workflow.
+### What this project is
+
+TucanoTime is a timesheet system: time entries recorded per day/week against a
+customer and project code, with per-customer and per-project currency and hourly
+rate. A single Rust binary serves the REST API, the browser GUI and the API docs;
+data is file-based JSON (no database), mirroring the TucanoTest suite philosophy.
+The GUI is a presentation layer and nothing more — it never reads storage.
+
+### Architecture invariants
+
+- Money is **minor units** (`u64` cents) and hours are **hundredths** (`u32`);
+  floats never touch persisted values. Rate resolution: project override →
+  customer default (see `domain::effective_rates`).
+- Storage layout below `TUCANO_DATA_DIR` (the API is the only writer):
+  `customers/<id>.json`, `customers/<id>/projects/<CODE>.json`,
+  `entries/<YYYY-MM-DD>/<id>.json`. Atomic writes (tmp + rename).
+- Every payload is validated against the contract before any write
+  (`deny_unknown_fields` + `domain::validate_*`); no partial persistence.
+  Errors use the single JSON shape in `openapi.json`; responses never expose
+  paths or raw filesystem errors.
+- The **contract is `openapi.json`** (checked in, served at `/openapi.json`,
+  rendered at `/docs`). Route changes and contract changes land in the same
+  commit. Range queries are capped at 400 days.
+- `web/` is dependency-free vanilla HTML/CSS/JS embedded via rust-embed (no
+  build step). All DOM data is inserted with `textContent`, never `innerHTML`.
+- Invoices (M2, planned): snapshot entries + reference entry ids and lock
+  referenced entries from edits/deletes. Keep entry ids stable — invoices
+  depend on them.
+
+### Commands
+
+| Task | Command |
+| --- | --- |
+| Run (GUI + API on :8080, data in `./data`) | `cargo run` |
+| All tests (domain units + HTTP contract) | `cargo test --all-targets` |
+| Format check / apply | `cargo fmt --all -- --check` / `cargo fmt --all` |
+| Lint (CI treats all clippy lints as errors) | `cargo clippy --all-targets -- -D warnings` |
+| Latest version of a crate | `cargo info <crate>` (or crates.io API) |
+| Container image | `docker build -t tucanotime .` |
+| Container run | `docker run -d -p 8080:8080 -v tucanotime-data:/data tucanotime` |
+
+The toolchain is pinned by `rust-toolchain.toml` and the Dockerfile/CI images
+carry the same version; bump all three in one intentional PR.
+
+### Test policy beyond the shared rules
+
+- Behaviour changes ship with contract tests in `tests/contract.rs` (in-process
+  router, temp data dir); cover the invalid shapes too — rejection without
+  persistence is part of the contract.
+- Accessibility: the GUI keeps keyboard-navigable tabs, labelled fields,
+  `aria-live` announcements and passing contrast in light/dark themes; check
+  new views against the same bar.
+
 
 <!-- shared-rules-table:begin -->
 | Area | Rules |

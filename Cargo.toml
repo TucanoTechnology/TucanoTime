@@ -1,0 +1,31 @@
+[package]
+name = "tucano-time"
+version = "0.1.0"
+description = "Timesheet system: daily and weekly time entries, customers and project codes with currencies and rates"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+rust-version = "1.98"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+axum = "0.8.9"
+tokio = { version = "1.53.1", features = ["full"] }
+tower-http = { version = "0.7.1", features = ["limit"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.26.1", features = ["v4", "serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+thiserror = "2.0.21"
+rust-embed = "8.12.0"
+
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }
+http-body-util = "0.1.5"
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"

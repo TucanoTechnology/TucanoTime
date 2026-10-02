@@ -1,0 +1,118 @@
+// Library surface: everything `main.rs` wires up, exposed so integration
+// tests can build the router against a temp data dir without spawning a
+// process.
+
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::{Json, Router};
+use rust_embed::RustEmbed;
+use tower_http::limit::RequestBodyLimitLayer;
+
+pub mod api;
+pub mod domain;
+pub mod error;
+pub mod report;
+pub mod store;
+
+use api::AppState;
+
+#[derive(RustEmbed)]
+#[folder = "web/"]
+struct Assets;
+
+const OPENAPI: &str = include_str!("../openapi.json");
+
+pub fn build_router(state: AppState) -> Router {
+    Router::new()
+        .route("/healthz", get(api::healthz))
+        .route("/openapi.json", get(openapi))
+        .route("/docs", get(docs))
+        .route(
+            "/customers",
+            get(api::list_customers).post(api::create_customer),
+        )
+        .route(
+            "/customers/{id}",
+            get(api::get_customer_handler)
+                .put(api::update_customer)
+                .delete(api::delete_customer),
+        )
+        .route(
+            "/customers/{cid}/projects",
+            get(api::list_projects).post(api::create_project),
+        )
+        .route(
+            "/customers/{cid}/projects/{code}",
+            get(api::get_project_handler)
+                .put(api::update_project)
+                .delete(api::delete_project),
+        )
+        .route("/entries", get(api::list_entries).post(api::create_entry))
+        .route(
+            "/entries/{id}",
+            get(api::get_entry)
+                .put(api::update_entry)
+                .delete(api::delete_entry),
+        )
+        .route("/reports/summary", get(api::summary))
+        .route("/reports/export.csv", get(api::export_csv))
+        .fallback(static_assets)
+        .layer(RequestBodyLimitLayer::new(256 * 1024))
+        .with_state(state)
+}
+
+async fn openapi() -> impl IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        OPENAPI,
+    )
+}
+
+async fn docs() -> Response {
+    match Assets::get("swagger.html") {
+        Some(file) => (
+            [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            String::from_utf8_lossy(file.data.as_ref()).into_owned(),
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Serves the embedded GUI. Unknown non-API paths 404 with the JSON error
+/// shape so no path or asset enumeration leaks internals.
+async fn static_assets(uri: axum::http::Uri) -> Response {
+    let path = match uri.path() {
+        "/" => "index.html",
+        p => p.trim_start_matches('/'),
+    };
+    match Assets::get(path) {
+        Some(file) => (
+            [(axum::http::header::CONTENT_TYPE, content_type(path))],
+            file.data,
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": { "code": "not_found", "message": "resource does not exist" }
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// Content type by extension. The web set is fixed and owned, so a small map
+/// beats pulling a MIME-guessing dependency into the tree.
+fn content_type(path: &str) -> &'static str {
+    match path.rsplit('.').next().unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "json" => "application/json",
+        "ico" => "image/x-icon",
+        _ => "application/octet-stream",
+    }
+}
