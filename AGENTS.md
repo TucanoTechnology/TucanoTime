@@ -29,8 +29,10 @@ The GUI is a presentation layer and nothing more — it never reads storage.
 ### Architecture invariants
 
 - Money is **minor units** (`u64` cents) and hours are **hundredths** (`u32`);
-  floats never touch persisted values. Rate resolution: project override →
-  customer default (see `domain::effective_rates`).
+  floats never touch persisted values. Rate resolution: a project always
+  carries its own currency + rate (required, #11); the customer holds the
+  *default* used only to prefill new projects and to resolve legacy documents
+  (see `domain::effective_rates`, `domain::project_from_bytes`).
 - Storage layout below `TUCANO_DATA_DIR` (the API is the only writer):
   `customers/<id>.json`, `customers/<id>/projects/<CODE>.json`,
   `entries/<YYYY-MM-DD>/<id>.json`. Atomic writes (tmp + rename).

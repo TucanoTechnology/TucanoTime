@@ -9,7 +9,7 @@ suite — file-based (no database), one container, browser GUI.
 
 - **Day view** — add, edit and delete line items for a single date.
 - **Week grid** — Mon–Sun overview per customer/project; click a cell to add or adjust.
-- **Customers & project codes** — first-class entities; a project may override its customer's currency or rate.
+- **Customers & project codes** — first-class entities; a customer sets the default currency/rate and each project carries its own currency and rate.
 - **Exact money** — rates in minor units and hours in hundredths; no floats on persisted values.
 - **Reports** — totals grouped by customer, project or ISO week; **CSV export** (formula-injection safe).
 - **Invoices (planned, M2)** — snapshot entries into an invoice and lock the entries used.

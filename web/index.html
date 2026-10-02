@@ -94,7 +94,7 @@
       <form id="customer-form" class="card">
         <input type="hidden" id="customer-id">
         <div class="field"><label for="customer-name">Name</label><input id="customer-name" maxlength="120" required></div>
-        <div class="field"><label for="customer-currency">Currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="field"><label for="customer-currency">Default currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
         <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
         <p class="form-error" id="customer-error" role="alert" hidden></p>
@@ -111,8 +111,8 @@
         <input type="hidden" id="project-original-code">
         <div class="field"><label for="project-code">Project code</label><input id="project-code" maxlength="24" required></div>
         <div class="field"><label for="project-name">Name</label><input id="project-name" maxlength="120"></div>
-        <div class="field"><label for="project-currency">Currency override (optional)</label><input id="project-currency" maxlength="3" placeholder="(customer)"></div>
-        <div class="field"><label for="project-rate">Rate override (optional, e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="(customer default)" inputmode="decimal"></div>
+        <div class="field"><label for="project-currency">Currency (ISO-4217)</label><input id="project-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="field"><label for="project-rate">Hourly rate (e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
         <div class="field checkbox"><label for="project-active"><input type="checkbox" id="project-active" checked> Active</label></div>
         <p class="form-error" id="project-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="project-save">Add project</button><button type="button" class="secondary" id="project-cancel" hidden>Cancel</button></div>

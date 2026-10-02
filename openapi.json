@@ -94,7 +94,7 @@
       },
       "Project": {
         "type": "object",
-        "required": ["customer_id", "code", "name", "active"],
+        "required": ["customer_id", "code", "name", "currency", "rate_minor", "active"],
         "properties": {
           "customer_id": { "type": "string", "format": "uuid" },
           "code": { "$ref": "#/components/schemas/ProjectCode" },
@@ -107,7 +107,7 @@
       },
       "ProjectInput": {
         "type": "object",
-        "required": ["code"],
+        "required": ["code", "currency", "rate_minor"],
         "properties": {
           "code": { "$ref": "#/components/schemas/ProjectCode" },
           "name": { "type": "string", "maxLength": 120, "default": "" },

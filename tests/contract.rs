@@ -65,7 +65,9 @@ async fn new_customer(app: &axum::Router, name: &str, currency: &str, rate: u64)
 }
 
 async fn new_project(app: &axum::Router, cid: &str, code: &str, extra: Value) -> Value {
-    let mut body = json!({"code": code});
+    // currency + rate_minor are required since #11; default to the customer's
+    // values and let `extra` override (e.g. a project-specific rate).
+    let mut body = json!({"code": code, "currency": "EUR", "rate_minor": 6000});
     if let Value::Object(map) = extra {
         for (k, v) in map {
             body[k] = v;
@@ -314,7 +316,7 @@ async fn duplicate_project_conflicts() {
         &app,
         "POST",
         &format!("/customers/{cid}/projects"),
-        Some(json!({"code":"P1"})),
+        Some(json!({"code": "P1", "currency": "EUR", "rate_minor": 6000})),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -494,4 +496,64 @@ async fn oversized_note_rejected() {
     });
     let (status, _) = json_req(&app, "POST", "/entries", Some(body)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn project_requires_currency_and_rate() {
+    let (app, _d) = app();
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    // Missing rate_minor.
+    let (s1, b1) = json_req(
+        &app,
+        "POST",
+        &format!("/customers/{cid}/projects"),
+        Some(json!({"code": "P1", "currency": "EUR"})),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::UNPROCESSABLE_ENTITY, "{b1}");
+    // Missing currency.
+    let (s2, _) = json_req(
+        &app,
+        "POST",
+        &format!("/customers/{cid}/projects"),
+        Some(json!({"code": "P1", "rate_minor": 6000})),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn legacy_project_document_resolves_from_customer() {
+    let (app, d) = app();
+    let c = new_customer(&app, "ACME", "USD", 4500).await;
+    let cid = c["id"].as_str().unwrap();
+    // Write a pre-#11 project document that omits currency and rate_minor.
+    let dir = d
+        .path()
+        .join("data")
+        .join("customers")
+        .join(cid)
+        .join("projects");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("OLD-1.json"),
+        format!(r#"{{"customer_id":"{cid}","code":"OLD-1","name":"Old","active":true}}"#),
+    )
+    .unwrap();
+    // Reading it back resolves currency/rate from the customer (USD / 4500).
+    let (status, project) = json_req(
+        &app,
+        "GET",
+        &format!("/customers/{cid}/projects/OLD-1"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(project["currency"], "USD");
+    assert_eq!(project["rate_minor"], 4500);
+    // And it appears in the list with the same resolved values.
+    let (ls, list) = json_req(&app, "GET", &format!("/customers/{cid}/projects"), None).await;
+    assert_eq!(ls, StatusCode::OK);
+    assert_eq!(list["projects"].as_array().unwrap().len(), 1);
 }

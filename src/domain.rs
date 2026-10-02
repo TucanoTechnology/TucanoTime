@@ -162,13 +162,53 @@ pub struct Project {
     pub customer_id: Uuid,
     pub code: ProjectCode,
     pub name: String,
-    /// Overrides the customer currency when set.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub currency: Option<Currency>,
-    /// Overrides the customer default rate when set. Minor units per hour.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub rate_minor: Option<u64>,
+    /// The project's own currency (required). Billing reads this directly.
+    pub currency: Currency,
+    /// The project's own hourly rate in minor units (required).
+    pub rate_minor: u64,
     pub active: bool,
+}
+
+/// On-disk shape used only for reading. Pre-#11 project documents may omit
+/// `currency`/`rate_minor`; `resolve` fills them from the owning customer so a
+/// legacy document is never rejected (self-heals on the next write).
+#[derive(Debug, Clone, Deserialize)]
+struct ProjectDoc {
+    customer_id: Uuid,
+    code: ProjectCode,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    currency: Option<Currency>,
+    #[serde(default)]
+    rate_minor: Option<u64>,
+    #[serde(default = "default_active")]
+    active: bool,
+}
+
+impl ProjectDoc {
+    fn resolve(self, customer: &Customer) -> Project {
+        let name = if self.name.trim().is_empty() {
+            self.code.0.clone()
+        } else {
+            self.name
+        };
+        Project {
+            customer_id: self.customer_id,
+            code: self.code,
+            name,
+            currency: self.currency.unwrap_or_else(|| customer.currency.clone()),
+            rate_minor: self.rate_minor.unwrap_or(customer.default_rate_minor),
+            active: self.active,
+        }
+    }
+}
+
+/// Parse a stored project document, filling any pre-#11 missing currency/rate
+/// from the owning customer.
+pub fn project_from_bytes(bytes: &[u8], customer: &Customer) -> Result<Project, serde_json::Error> {
+    let doc: ProjectDoc = serde_json::from_slice(bytes)?;
+    Ok(doc.resolve(customer))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -183,21 +223,16 @@ pub struct Entry {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Effective (currency, rate) of an entry: project override, else customer.
-/// `entry` is taken for context/logging but only the customer and project
-/// actually determine the rate.
+/// Effective (currency, rate) of an entry: the project's own values. The
+/// customer default is only used when a project document is missing (defensive;
+/// entries always reference an existing project).
 pub fn effective_rates<'a>(
     _entry: &Entry,
     customer: &'a Customer,
     project: Option<&'a Project>,
 ) -> (Currency, u64) {
     match project {
-        Some(p) => (
-            p.currency
-                .clone()
-                .unwrap_or_else(|| customer.currency.clone()),
-            p.rate_minor.unwrap_or(customer.default_rate_minor),
-        ),
+        Some(p) => (p.currency.clone(), p.rate_minor),
         None => (customer.currency.clone(), customer.default_rate_minor),
     }
 }
@@ -220,10 +255,10 @@ pub struct ProjectInput {
     pub code: ProjectCode,
     #[serde(default)]
     pub name: String,
-    #[serde(default)]
-    pub currency: Option<Currency>,
-    #[serde(default)]
-    pub rate_minor: Option<u64>,
+    /// Required: the project's own currency (prefilled from the customer in the GUI).
+    pub currency: Currency,
+    /// Required: the project's own hourly rate in minor units.
+    pub rate_minor: u64,
     #[serde(default = "default_active")]
     pub active: bool,
 }
@@ -298,14 +333,12 @@ pub fn validate_project_input(input: &ProjectInput) -> Result<ProjectDraft, Vec<
         errors.push(FieldError::new("name", "at most 120 characters"));
         String::new()
     };
-    if let Some(rate) = input.rate_minor {
-        validate_rate_minor(rate, "rate_minor", &mut errors);
-    }
+    validate_rate_minor(input.rate_minor, "rate_minor", &mut errors);
     if errors.is_empty() {
         Ok(ProjectDraft {
             code: input.code.0.clone(),
             name,
-            currency: input.currency.as_ref().map(|c| c.0.clone()),
+            currency: input.currency.0.clone(),
             rate_minor: input.rate_minor,
             active: input.active,
         })
@@ -353,8 +386,8 @@ pub struct CustomerDraft {
 pub struct ProjectDraft {
     pub code: String,
     pub name: String,
-    pub currency: Option<String>,
-    pub rate_minor: Option<u64>,
+    pub currency: String,
+    pub rate_minor: u64,
     pub active: bool,
 }
 
@@ -489,8 +522,8 @@ mod tests {
             customer_id: customer.id,
             code: entry.project_code.clone(),
             name: "P1".into(),
-            currency: Some(Currency("USD".into())),
-            rate_minor: Some(3000),
+            currency: Currency("USD".into()),
+            rate_minor: 3000,
             active: true,
         };
         assert_eq!(
