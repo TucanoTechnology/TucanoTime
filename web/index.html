@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TucanoTime — Timesheets</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="masthead">
+    <h1>TucanoTime</h1>
+    <p class="tagline">Time entries by day and week, per customer and project code.</p>
+    <nav aria-label="Sections">
+      <div class="tabs" role="tablist" id="tabs">
+        <button role="tab" id="tab-day" aria-controls="panel-day" aria-selected="true">Day</button>
+        <button role="tab" id="tab-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
+        <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
+        <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <p class="sr-only" role="status" aria-live="polite" id="live-region"></p>
+
+    <!-- DAY -->
+    <section id="panel-day" role="tabpanel" aria-labelledby="tab-day" tabindex="0">
+      <form id="day-picker" class="bar">
+        <label for="day-date">Date</label>
+        <input type="date" id="day-date" name="date" required>
+        <button type="submit" class="secondary">Show day</button>
+      </form>
+      <h2>Entries for <span id="day-label"></span></h2>
+      <table id="day-table">
+        <caption class="sr-only">Time entries for the selected day</caption>
+        <thead>
+          <tr><th scope="col">Customer</th><th scope="col">Project</th><th scope="col">Hours</th><th scope="col">Note</th><th scope="col" class="actions-col">Actions</th></tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot><tr><th scope="row" colspan="2">Total</th><td id="day-total"></td><td colspan="2"></td></tr></tfoot>
+      </table>
+      <p id="day-empty" hidden>No entries recorded for this day yet.</p>
+
+      <h2 id="entry-form-title">Add an entry</h2>
+      <form id="entry-form" class="card">
+        <input type="hidden" id="entry-id">
+        <div class="field">
+          <label for="entry-customer">Customer</label>
+          <select id="entry-customer" name="customer_id" required></select>
+        </div>
+        <div class="field">
+          <label for="entry-project">Project code</label>
+          <select id="entry-project" name="project_code" required></select>
+        </div>
+        <div class="field">
+          <label for="entry-date">Date</label>
+          <input type="date" id="entry-date" name="date" required>
+        </div>
+        <div class="field">
+          <label for="entry-hours">Hours (0.01–24.00)</label>
+          <input type="number" id="entry-hours" name="hours" min="0.01" max="24" step="0.01" required inputmode="decimal">
+        </div>
+        <div class="field">
+          <label for="entry-note">Note</label>
+          <textarea id="entry-note" name="note" maxlength="500" rows="2"></textarea>
+        </div>
+        <p class="form-error" id="entry-error" role="alert" hidden></p>
+        <div class="buttons">
+          <button type="submit" id="entry-save">Save entry</button>
+          <button type="button" class="secondary" id="entry-cancel" hidden>Cancel edit</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- WEEK -->
+    <section id="panel-week" role="tabpanel" aria-labelledby="tab-week" tabindex="0" hidden>
+      <form id="week-picker" class="bar">
+        <label for="week-date">Any day of the week</label>
+        <input type="date" id="week-date" name="date" required>
+        <button type="submit" class="secondary">Show week</button>
+      </form>
+      <h2>Week <span id="week-label"></span></h2>
+      <p class="hint">Totals per project by day. Click a cell to add or edit that day's entry for the project.</p>
+      <div class="table-scroll">
+        <table id="week-table"></table>
+      </div>
+      <p id="week-empty" hidden>No entries this week.</p>
+    </section>
+
+    <!-- CUSTOMERS -->
+    <section id="panel-customers" role="tabpanel" aria-labelledby="tab-customers" tabindex="0" hidden>
+      <h2>Customers</h2>
+      <form id="customer-form" class="card">
+        <input type="hidden" id="customer-id">
+        <div class="field"><label for="customer-name">Name</label><input id="customer-name" maxlength="120" required></div>
+        <div class="field"><label for="customer-currency">Currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
+        <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
+        <p class="form-error" id="customer-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="customer-save">Add customer</button><button type="button" class="secondary" id="customer-cancel" hidden>Cancel</button></div>
+      </form>
+      <table id="customer-table">
+        <caption class="sr-only">All customers</caption>
+        <thead><tr><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Default rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <h2>Projects for <span id="project-customer-label">— select a customer —</span></h2>
+      <form id="project-form" class="card" hidden>
+        <input type="hidden" id="project-original-code">
+        <div class="field"><label for="project-code">Project code</label><input id="project-code" maxlength="24" required></div>
+        <div class="field"><label for="project-name">Name</label><input id="project-name" maxlength="120"></div>
+        <div class="field"><label for="project-currency">Currency override (optional)</label><input id="project-currency" maxlength="3" placeholder="(customer)"></div>
+        <div class="field"><label for="project-rate">Rate override (optional, e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="(customer default)" inputmode="decimal"></div>
+        <div class="field checkbox"><label for="project-active"><input type="checkbox" id="project-active" checked> Active</label></div>
+        <p class="form-error" id="project-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="project-save">Add project</button><button type="button" class="secondary" id="project-cancel" hidden>Cancel</button></div>
+      </form>
+      <table id="project-table" hidden>
+        <caption class="sr-only">Projects for the selected customer</caption>
+        <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- REPORTS -->
+    <section id="panel-reports" role="tabpanel" aria-labelledby="tab-reports" tabindex="0" hidden>
+      <h2>Reports</h2>
+      <form id="report-form" class="bar">
+        <label for="report-from">From</label><input type="date" id="report-from" required>
+        <label for="report-to">To</label><input type="date" id="report-to" required>
+        <label for="report-group">Group by</label>
+        <select id="report-group"><option value="customer">Customer</option><option value="project">Project</option><option value="week">ISO week</option></select>
+        <button type="submit" class="secondary">Run</button>
+        <a id="csv-link" class="button-link" href="#" download="timesheet.csv" hidden>Download CSV</a>
+      </form>
+      <table id="report-table">
+        <caption class="sr-only">Report results</caption>
+        <thead><tr><th scope="col">Group</th><th scope="col">Currency</th><th scope="col">Hours</th><th scope="col">Amount</th><th scope="col">Entries</th></tr></thead>
+        <tbody></tbody>
+        <tfoot><tr><th scope="row" colspan="2">Total hours</th><td id="report-total"></td><td colspan="2"></td></tr></tfoot>
+      </table>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p><a href="/docs">API documentation</a> · <span id="version"></span></p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
