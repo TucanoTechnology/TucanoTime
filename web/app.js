@@ -847,7 +847,8 @@ function switchTab(tabId) {
   if (tab) tab.click();
 }
 
-async function boot() {
+// Wires the app listeners and loads the first data. Called once authenticated.
+async function startApp() {
   const today = isoDate(new Date());
   $('day-date').value = today;
   $('entry-date').value = today;
@@ -888,6 +889,83 @@ async function boot() {
   $('version').textContent = 'TucanoTime';
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  boot().catch((err) => announce(`Failed to start: ${err.message}`));
+// ----------------------------------------------------------------- auth ---
+
+let authMode = 'login';
+
+function showAuth(mode) {
+  authMode = mode;
+  $('auth-overlay').hidden = false;
+  if (mode === 'setup') {
+    $('auth-title').textContent = 'Create the first administrator';
+    $('auth-sub').textContent = 'No accounts exist yet — set up the admin login.';
+    $('auth-name-field').hidden = false;
+    $('auth-submit').textContent = 'Create admin';
+    $('auth-password').setAttribute('autocomplete', 'new-password');
+  } else {
+    $('auth-title').textContent = 'Sign in';
+    $('auth-sub').textContent = '';
+    $('auth-name-field').hidden = true;
+    $('auth-submit').textContent = 'Sign in';
+    $('auth-password').setAttribute('autocomplete', 'current-password');
+  }
+  $('auth-email').focus();
+}
+
+function showAccount(me) {
+  $('auth-overlay').hidden = true;
+  $('account').hidden = false;
+  $('who').textContent = me.name || me.email;
+}
+
+async function initAuth() {
+  const st = await api.get('/auth/status');
+  if (!st.initialised) {
+    showAuth('setup');
+    return false;
+  }
+  try {
+    const me = await api.get('/auth/me');
+    showAccount(me);
+    return true;
+  } catch {
+    showAuth('login');
+    return false;
+  }
+}
+
+async function onAuthSubmit(evt) {
+  evt.preventDefault();
+  clearFormError($('auth-error'));
+  const email = $('auth-email').value.trim();
+  const password = $('auth-password').value;
+  try {
+    const me =
+      authMode === 'setup'
+        ? await api.post('/auth/bootstrap', { name: $('auth-name').value.trim(), email, password })
+        : await api.post('/auth/login', { email, password });
+    showAccount(me);
+    await startApp();
+  } catch (err) {
+    showFormError($('auth-error'), err);
+  }
+}
+
+async function logout() {
+  try {
+    await api.post('/auth/logout');
+  } catch {
+    /* best effort */
+  }
+  window.location.reload();
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  $('auth-form').addEventListener('submit', onAuthSubmit);
+  $('logout').addEventListener('click', logout);
+  try {
+    if (await initAuth()) await startApp();
+  } catch (err) {
+    announce(`Failed to start: ${err.message}`);
+  }
 });

@@ -24,6 +24,25 @@ docker run -d -p 8080:8080 -v tucanotime-data:/data --name tucanotime tucanotime
 Open <http://localhost:8080/> — the API docs are at <http://localhost:8080/docs>.
 All data lives in the mounted volume; back it up like any document folder.
 
+## Authentication
+
+TucanoTime is single- or multi-user with **session-cookie auth** (argon2-hashed
+passwords, HMAC-signed HttpOnly cookies). No users exist initially:
+
+- On first visit the app shows a **create-administrator** form (the first account
+  becomes an `admin`). After that, login is required for all data.
+- Set `TUCANO_SESSION_SECRET` (e.g. `openssl rand -hex 32`) so sessions survive
+  restarts; unset, a random per-process key is used (restart logs everyone out).
+- `TUCANO_ENV=production` marks session cookies `Secure` (serve over TLS).
+
+```sh
+docker run -d -p 8080:8080 \
+  -e TUCANO_SESSION_SECRET="$(openssl rand -hex 32)" \
+  -v tucanotime-data:/data --name tucanotime tucano-time
+```
+
+Roles: `admin` (user management) and `member` (timesheet work).
+
 ## Development
 
 ```sh

@@ -2,7 +2,10 @@
 // GUI, the machine-readable contract (openapi.json) and its docs UI.
 // Data lives in one folder tree below TUCANO_DATA_DIR (no database).
 
+use std::sync::Arc;
+
 use tucano_time::api::AppState;
+use tucano_time::auth::Session;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,7 +19,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = std::env::var("TUCANO_DATA_DIR").unwrap_or_else(|_| "data".to_owned());
     let port = std::env::var("TUCANO_PORT").unwrap_or_else(|_| "8080".to_owned());
     let store = tucano_time::store::Store::open(&data_dir)?;
-    let state = AppState::new(store);
+
+    // Session key: a configured secret, or an ephemeral per-process key (dev).
+    let secure = std::env::var("TUCANO_ENV").as_deref() == Ok("production");
+    let session = match std::env::var("TUCANO_SESSION_SECRET")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
+        Some(secret) => {
+            tracing::info!("using configured session secret");
+            Session::new(secret.into_bytes(), 60 * 60 * 24, secure)
+        }
+        None => {
+            tracing::warn!(
+                "TUCANO_SESSION_SECRET unset: sessions are ephemeral (restart logs everyone out)"
+            );
+            let mut key = [0u8; 32];
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut key);
+            Session::new(key.to_vec(), 60 * 60 * 24, secure)
+        }
+    };
+    let state = AppState::with_session(store, Arc::new(session));
 
     let app = tucano_time::build_router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port.parse()?)).await?;

@@ -7,6 +7,7 @@
     "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR."
   },
   "servers": [{ "url": "/" }],
+  "security": [{ "cookieAuth": [] }],
   "tags": [
     { "name": "customers" },
     { "name": "projects" },
@@ -15,6 +16,14 @@
     { "name": "meta" }
   ],
   "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "tt_session",
+        "description": "HttpOnly session cookie issued by /auth/login or /auth/bootstrap."
+      }
+    },
     "schemas": {
       "Error": {
         "type": "object",
@@ -197,11 +206,53 @@
           "total_hours": { "type": "number" }
         },
         "additionalProperties": false
+      },
+      "PublicUser": {
+        "type": "object",
+        "required": ["id", "name", "email", "role", "active"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "role": { "type": "string", "enum": ["admin", "member"] },
+          "active": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "LoginInput": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "BootstrapInput": {
+        "type": "object",
+        "required": ["name", "email", "password"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 120 },
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 }
+        },
+        "additionalProperties": false
+      },
+      "UserInput": {
+        "type": "object",
+        "required": ["name", "email", "password"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 120 },
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 },
+          "role": { "type": "string", "enum": ["admin", "member"] },
+          "active": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
-      "ValidationError": {
-        "description": "Payload failed validation before any write or side effect.",
+      "ValidationError": {        "description": "Payload failed validation before any write or side effect.",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
       "NotFound": {
@@ -242,11 +293,110 @@
     }
   },
   "paths": {
+    "/auth/status": {
+      "get": {
+        "operationId": "authStatus",
+        "tags": ["auth"],
+        "summary": "Whether an administrator exists yet (drives first-run setup)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Initialisation state.",
+            "content": { "application/json": { "schema": { "type": "object", "required": ["initialised"], "properties": { "initialised": { "type": "boolean" } }, "additionalProperties": false } } }
+          }
+        }
+      }
+    },
+    "/auth/bootstrap": {
+      "post": {
+        "operationId": "bootstrap",
+        "tags": ["auth"],
+        "summary": "Create the first administrator (only while no users exist)",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BootstrapInput" } } } },
+        "responses": {
+          "201": { "description": "Admin created; session cookie set.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
+          "403": { "description": "Already initialised." },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "tags": ["auth"],
+        "summary": "Authenticate and receive a session cookie",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginInput" } } } },
+        "responses": {
+          "200": { "description": "Authenticated; session cookie set.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
+          "401": { "description": "Invalid credentials." }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "tags": ["auth"],
+        "summary": "Clear the session cookie",
+        "security": [],
+        "responses": { "204": { "description": "Logged out." } }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "me",
+        "tags": ["auth"],
+        "summary": "The current authenticated user",
+        "responses": {
+          "200": { "description": "Current user.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
+          "401": { "description": "Not authenticated." }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "operationId": "listUsers",
+        "tags": ["users"],
+        "summary": "List users (admin only)",
+        "responses": {
+          "200": { "description": "All users.", "content": { "application/json": { "schema": { "type": "object", "required": ["users"], "properties": { "users": { "type": "array", "items": { "$ref": "#/components/schemas/PublicUser" } } }, "additionalProperties": false } } } },
+          "403": { "description": "Admin role required." }
+        }
+      },
+      "post": {
+        "operationId": "createUser",
+        "tags": ["users"],
+        "summary": "Create a user (admin only)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserInput" } } } },
+        "responses": {
+          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
+          "403": { "description": "Admin role required." },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/users/{id}": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "delete": {
+        "operationId": "deleteUser",
+        "tags": ["users"],
+        "summary": "Delete a user (admin only)",
+        "responses": {
+          "204": { "description": "Deleted." },
+          "403": { "description": "Admin role required." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "healthz",
         "tags": ["meta"],
         "summary": "Liveness",
+        "security": [],
         "responses": {
           "200": {
             "description": "Server is up.",
@@ -260,6 +410,7 @@
         "operationId": "openapi",
         "tags": ["meta"],
         "summary": "This machine-readable contract",
+        "security": [],
         "responses": { "200": { "description": "The OpenAPI document.", "content": { "application/json": { "schema": { "type": "object" } } } } }
       }
     },
@@ -268,6 +419,7 @@
         "operationId": "docs",
         "tags": ["meta"],
         "summary": "Interactive documentation UI (Swagger), rendered from /openapi.json",
+        "security": [],
         "responses": { "200": { "description": "HTML page.", "content": { "text/html": { "schema": { "type": "string" } } } } }
       }
     },

@@ -10,6 +10,7 @@ use rust_embed::RustEmbed;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub mod api;
+pub mod auth;
 pub mod clock;
 pub mod domain;
 pub mod error;
@@ -27,10 +28,20 @@ struct Assets;
 const OPENAPI: &str = include_str!("../openapi.json");
 
 pub fn build_router(state: AppState) -> Router {
-    Router::new()
+    // Public: liveness, the contract + docs, and the auth endpoints. The GUI
+    // assets (fallback) are public so the login screen can load.
+    let public = Router::new()
         .route("/healthz", get(api::healthz))
         .route("/openapi.json", get(openapi))
         .route("/docs", get(docs))
+        .route("/auth/bootstrap", axum::routing::post(api::bootstrap))
+        .route("/auth/login", axum::routing::post(api::login))
+        .route("/auth/logout", axum::routing::post(api::logout))
+        .route("/auth/status", get(api::auth_status))
+        .route("/auth/me", get(api::me));
+
+    // Authenticated: all timesheet data.
+    let protected = Router::new()
         .route(
             "/customers",
             get(api::list_customers).post(api::create_customer),
@@ -70,6 +81,23 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/reports/summary", get(api::summary))
         .route("/reports/export.csv", get(api::export_csv))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            api::require_auth,
+        ));
+
+    // Admin-only: user management.
+    let admin = Router::new()
+        .route("/users", get(api::list_users).post(api::create_user))
+        .route("/users/{id}", axum::routing::delete(api::delete_user))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            api::require_admin,
+        ));
+
+    public
+        .merge(protected)
+        .merge(admin)
         .fallback(static_assets)
         .layer(RequestBodyLimitLayer::new(256 * 1024))
         .with_state(state)
