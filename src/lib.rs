@@ -93,6 +93,22 @@ pub fn build_router(state: AppState) -> Router {
             "/invoices/{id}/issue",
             axum::routing::post(api::issue_invoice),
         )
+        .route(
+            "/categories",
+            get(api::list_categories).post(api::create_category),
+        )
+        .route(
+            "/categories/{id}",
+            axum::routing::delete(api::delete_category),
+        )
+        .route(
+            "/expenses",
+            get(api::list_expenses).post(api::create_expense),
+        )
+        .route(
+            "/expenses/{id}",
+            get(api::get_expense_handler).delete(api::delete_expense),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_auth,

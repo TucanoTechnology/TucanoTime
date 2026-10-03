@@ -18,9 +18,10 @@ use crate::auth::{
     valid_password, verify_password,
 };
 use crate::domain::{
-    Currency, Customer, CustomerInput, Entry, EntryInput, FieldError, InvoiceError, InvoiceStatus,
-    Project, ProjectCode, ProjectInput, Task, TaskInput, generate_invoice, validate_customer_input,
-    validate_entry_input, validate_project_input, validate_task_input,
+    Category, CategoryInput, Currency, Customer, CustomerInput, Entry, EntryInput, Expense,
+    ExpenseInput, FieldError, InvoiceError, InvoiceStatus, Project, ProjectCode, ProjectInput,
+    Task, TaskInput, generate_invoice, validate_category_input, validate_customer_input,
+    validate_entry_input, validate_expense_input, validate_project_input, validate_task_input,
 };
 use crate::error::ApiError;
 use crate::report;
@@ -453,6 +454,108 @@ pub async fn delete_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) -
         return Err(ApiError::conflict("only a draft invoice can be deleted"));
     }
     app.store.delete_invoice(id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+// -------------------------------------------------------------- expenses --
+
+pub async fn list_categories(State(app): State<AppState>) -> ApiResult {
+    let categories = app.store.list_categories()?;
+    Ok(Json(serde_json::json!({ "categories": categories })).into_response())
+}
+
+pub async fn create_category(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<CategoryInput>,
+) -> ApiResult {
+    let draft = validate_category_input(&input).map_err(ApiError::validation)?;
+    let category = Category {
+        id: Uuid::new_v4(),
+        name: draft.name,
+        default_billable: draft.default_billable,
+        active: draft.active,
+    };
+    app.store.put_category(&category)?;
+    Ok((StatusCode::CREATED, Json(category)).into_response())
+}
+
+pub async fn delete_category(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    app.store.delete_category(id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+pub async fn list_expenses(
+    State(app): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> ApiResult {
+    let mut expenses = app.store.list_expenses()?;
+    if let Some(cid) = q.get("customer_id") {
+        let cid = Uuid::parse_str(cid)
+            .map_err(|_| ApiError::bad_request("'customer_id' must be a UUID"))?;
+        expenses.retain(|e| e.customer_id == cid);
+    }
+    if let (Some(from), Some(to)) = (q.get("from"), q.get("to")) {
+        let (from, to) = (parse_date(from)?, parse_date(to)?);
+        expenses.retain(|e| e.date >= from && e.date <= to);
+    }
+    Ok(Json(serde_json::json!({ "expenses": expenses })).into_response())
+}
+
+pub async fn create_expense(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<ExpenseInput>,
+) -> ApiResult {
+    let draft = validate_expense_input(&input).map_err(ApiError::validation)?;
+    let mut errors = Vec::new();
+    if app.store.get_customer(draft.customer_id)?.is_none() {
+        errors.push(FieldError::new("customer_id", "customer does not exist"));
+    }
+    if let Some(code) = &draft.project_code
+        && app.store.get_project(draft.customer_id, code)?.is_none()
+    {
+        errors.push(FieldError::new(
+            "project_code",
+            "project does not exist for this customer",
+        ));
+    }
+    if let Some(cat) = draft.category_id
+        && app.store.get_category(cat)?.is_none()
+    {
+        errors.push(FieldError::new("category_id", "category does not exist"));
+    }
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    let now = app.clock.now();
+    let expense = Expense {
+        id: Uuid::new_v4(),
+        date: draft.date,
+        customer_id: draft.customer_id,
+        project_code: draft.project_code.map(ProjectCode),
+        category_id: draft.category_id,
+        amount_minor: draft.amount_minor,
+        currency: Currency(draft.currency),
+        billable: draft.billable,
+        note: draft.note,
+        receipt_name: draft.receipt_name,
+        receipt_b64: draft.receipt_b64,
+        created_at: now,
+        updated_at: now,
+    };
+    app.store.put_expense(&expense)?;
+    Ok((StatusCode::CREATED, Json(expense)).into_response())
+}
+
+pub async fn get_expense_handler(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    let expense = app
+        .store
+        .get_expense(id)?
+        .ok_or_else(|| ApiError::not_found("expense"))?;
+    Ok(Json(expense).into_response())
+}
+
+pub async fn delete_expense(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    app.store.delete_expense(id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

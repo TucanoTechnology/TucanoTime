@@ -48,6 +48,7 @@
         <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
         <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
         <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
+        <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
       </div>
     </nav>
   </header>
@@ -214,6 +215,37 @@
         <tbody></tbody>
       </table>
       <p id="invoice-empty" hidden>No invoices yet.</p>
+    </section>
+
+    <!-- EXPENSES -->
+    <section id="panel-expenses" role="tabpanel" aria-labelledby="tab-expenses" tabindex="0" hidden>
+      <h2>Expense categories</h2>
+      <form id="category-form" class="bar">
+        <label for="category-name">New category</label>
+        <input id="category-name" maxlength="120" required>
+        <button type="submit" class="secondary">Add</button>
+      </form>
+      <ul id="category-list" class="chips"></ul>
+
+      <h2>Record an expense</h2>
+      <form id="expense-form" class="card">
+        <div class="field"><label for="expense-date">Date</label><input type="date" id="expense-date" required></div>
+        <div class="field"><label for="expense-customer">Customer</label><select id="expense-customer" required></select></div>
+        <div class="field"><label for="expense-project">Project (optional)</label><select id="expense-project"></select></div>
+        <div class="field"><label for="expense-category">Category (optional)</label><select id="expense-category"></select></div>
+        <div class="field"><label for="expense-amount">Amount (e.g. 125.00)</label><input id="expense-amount" type="number" min="0" step="0.01" required inputmode="decimal"></div>
+        <div class="field"><label for="expense-currency">Currency</label><input id="expense-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="field checkbox"><label for="expense-billable"><input type="checkbox" id="expense-billable" checked> Billable</label></div>
+        <div class="field"><label for="expense-note">Note</label><input id="expense-note" maxlength="500"></div>
+        <p class="form-error" id="expense-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit">Add expense</button></div>
+      </form>
+      <table id="expense-table">
+        <caption class="sr-only">Expenses</caption>
+        <thead><tr><th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Project</th><th scope="col">Category</th><th scope="col">Amount</th><th scope="col">Billable</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="expense-empty" hidden>No expenses recorded yet.</p>
     </section>
   </main>
 

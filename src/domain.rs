@@ -289,6 +289,149 @@ pub enum InvoiceError {
     NothingToInvoice,
 }
 
+// ---------------------------------------------------------------- expenses --
+
+/// A cost category (org-wide), e.g. Travel, Software.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Category {
+    pub id: Uuid,
+    pub name: String,
+    pub default_billable: bool,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Expense {
+    pub id: Uuid,
+    pub date: NaiveDate,
+    pub customer_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_code: Option<ProjectCode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<Uuid>,
+    pub amount_minor: u64,
+    pub currency: Currency,
+    pub billable: bool,
+    #[serde(default)]
+    pub note: String,
+    /// Optional receipt stored inline (base64) with its filename (#23).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_b64: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CategoryInput {
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub default_billable: bool,
+    #[serde(default = "default_active")]
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpenseInput {
+    pub date: String,
+    pub customer_id: Uuid,
+    #[serde(default)]
+    pub project_code: Option<ProjectCode>,
+    #[serde(default)]
+    pub category_id: Option<Uuid>,
+    pub amount_minor: u64,
+    pub currency: Currency,
+    #[serde(default = "default_true")]
+    pub billable: bool,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default)]
+    pub receipt_name: Option<String>,
+    #[serde(default)]
+    pub receipt_b64: Option<String>,
+}
+
+pub fn validate_category_input(input: &CategoryInput) -> Result<CategoryDraft, Vec<FieldError>> {
+    let mut errors = Vec::new();
+    let name = validate_name(&input.name).map(str::to_owned);
+    if name.is_none() {
+        errors.push(FieldError::new("name", "required, at most 120 characters"));
+    }
+    if errors.is_empty() {
+        Ok(CategoryDraft {
+            name: name.unwrap(),
+            default_billable: input.default_billable,
+            active: input.active,
+        })
+    } else {
+        Err(errors)
+    }
+}
+
+pub fn validate_expense_input(input: &ExpenseInput) -> Result<ExpenseDraft, Vec<FieldError>> {
+    let mut errors = Vec::new();
+    let date = NaiveDate::parse_from_str(input.date.trim(), "%Y-%m-%d")
+        .map_err(|_| {
+            errors.push(FieldError::new(
+                "date",
+                "must be a calendar date as YYYY-MM-DD",
+            ))
+        })
+        .ok();
+    if input.amount_minor > 100_000_000 {
+        errors.push(FieldError::new("amount_minor", "at most 100000000"));
+    }
+    if validate_note(&input.note).is_none() {
+        errors.push(FieldError::new("note", "at most 500 characters"));
+    }
+    if input
+        .receipt_b64
+        .as_deref()
+        .is_some_and(|b| b.len() > 4_000_000)
+    {
+        errors.push(FieldError::new("receipt_b64", "receipt too large"));
+    }
+    match (date, errors.is_empty()) {
+        (Some(date), true) => Ok(ExpenseDraft {
+            date,
+            customer_id: input.customer_id,
+            project_code: input.project_code.as_ref().map(|c| c.0.clone()),
+            category_id: input.category_id,
+            amount_minor: input.amount_minor,
+            currency: input.currency.0.clone(),
+            billable: input.billable,
+            note: input.note.clone(),
+            receipt_name: input.receipt_name.clone(),
+            receipt_b64: input.receipt_b64.clone(),
+        }),
+        _ => Err(errors),
+    }
+}
+
+#[derive(Debug)]
+pub struct CategoryDraft {
+    pub name: String,
+    pub default_billable: bool,
+    pub active: bool,
+}
+
+#[derive(Debug)]
+pub struct ExpenseDraft {
+    pub date: NaiveDate,
+    pub customer_id: Uuid,
+    pub project_code: Option<String>,
+    pub category_id: Option<Uuid>,
+    pub amount_minor: u64,
+    pub currency: String,
+    pub billable: bool,
+    pub note: String,
+    pub receipt_name: Option<String>,
+    pub receipt_b64: Option<String>,
+}
+
 /// Read-only context for invoice generation, bundled to keep the signature small.
 pub struct InvoiceSources<'a> {
     pub projects: &'a [Project],

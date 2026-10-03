@@ -1182,3 +1182,86 @@ async fn invoice_rejects_mixed_currencies() {
             .contains("currencies")
     );
 }
+
+// ---------------------------------------------------------------- expenses --
+
+#[tokio::test]
+async fn category_and_expense_crud_with_references() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+
+    let (sc, cat) = json_req(&app, "POST", "/categories", Some(json!({"name":"Travel"}))).await;
+    assert_eq!(sc, StatusCode::CREATED);
+    let cat_id = cat["id"].as_str().unwrap();
+
+    let (se, exp) = json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"project_code":"P1","category_id":cat_id,
+            "amount_minor":12500,"currency":"EUR","note":"flight"
+        })),
+    )
+    .await;
+    assert_eq!(se, StatusCode::CREATED, "{exp}");
+    assert_eq!(exp["billable"], true); // default
+
+    // Category can't be deleted while an expense references it.
+    let (sd, _) = json_req(&app, "DELETE", &format!("/categories/{cat_id}"), None).await;
+    assert_eq!(sd, StatusCode::CONFLICT);
+
+    // Filter expenses by customer.
+    let (sf, list) = json_req(&app, "GET", &format!("/expenses?customer_id={cid}"), None).await;
+    assert_eq!(sf, StatusCode::OK);
+    assert_eq!(list["expenses"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn expense_rejects_unknown_project_and_category() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (s, body) = json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"project_code":"NOPE",
+            "category_id":"00000000-0000-0000-0000-000000000000","amount_minor":100,"currency":"EUR"
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let fields: Vec<&str> = body["error"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["field"].as_str().unwrap())
+        .collect();
+    assert!(fields.contains(&"project_code"));
+    assert!(fields.contains(&"category_id"));
+}
+
+#[tokio::test]
+async fn expense_receipt_roundtrips() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (_, e) = json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(json!({
+            "date":"2026-10-02","customer_id":cid,"amount_minor":500,"currency":"EUR",
+            "receipt_name":"hotel.png","receipt_b64":"aGVsbG8="
+        })),
+    )
+    .await;
+    let eid = e["id"].as_str().unwrap();
+    let (_, got) = json_req(&app, "GET", &format!("/expenses/{eid}"), None).await;
+    assert_eq!(got["receipt_name"], "hotel.png");
+    assert_eq!(got["receipt_b64"], "aGVsbG8=");
+}

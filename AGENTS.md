@@ -36,7 +36,8 @@ The GUI is a presentation layer and nothing more — it never reads storage.
 - Storage layout below `TUCANO_DATA_DIR` (the API is the only writer):
   `customers/<id>.json`, `customers/<id>/projects/<CODE>.json`,
   `customers/<id>/projects/<CODE>/tasks/<TASK>.json` (optional task tier, #38),
-  `entries/<YYYY-MM-DD>/<id>.json`. Atomic writes (tmp + rename).
+  `entries/<YYYY-MM-DD>/<id>.json`, `invoices/<id>.json`, `users/<id>.json`,
+  `categories/<id>.json`, `expenses/<id>.json`. Atomic writes (tmp + rename).
 - Every payload is validated against the contract before any write
   (`deny_unknown_fields` + `domain::validate_*`); no partial persistence.
   Errors use the single JSON shape in `openapi.json`; responses never expose
