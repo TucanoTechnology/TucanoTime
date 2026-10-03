@@ -923,6 +923,129 @@ async function removeInvoice(id) {
   }
 }
 
+// ---------------------------------------------------------------- expenses --
+
+async function refreshCategories() {
+  const data = await api.get('/categories');
+  state.categories = data.categories || [];
+  const ul = $('category-list');
+  ul.textContent = '';
+  for (const cat of state.categories) {
+    const li = document.createElement('li');
+    li.className = 'chip';
+    li.textContent = cat.name;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'chip-x';
+    del.setAttribute('aria-label', `Delete category ${cat.name}`);
+    del.textContent = '×';
+    del.addEventListener('click', async () => {
+      try {
+        await api.del(`/categories/${cat.id}`);
+        await refreshCategories();
+        await fillCategorySelect();
+      } catch (err) {
+        announce(err.message);
+      }
+    });
+    li.append(del);
+    ul.appendChild(li);
+  }
+}
+
+async function addCategory(evt) {
+  evt.preventDefault();
+  try {
+    await api.post('/categories', { name: $('category-name').value.trim() });
+    $('category-name').value = '';
+    await refreshCategories();
+    await fillCategorySelect();
+    announce('Category added.');
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
+async function fillCategorySelect() {
+  const select = $('expense-category');
+  select.textContent = '';
+  const ph = document.createElement('option');
+  ph.value = '';
+  ph.textContent = 'None';
+  select.appendChild(ph);
+  for (const cat of state.categories || []) {
+    const opt = document.createElement('option');
+    opt.value = cat.id;
+    opt.textContent = cat.name;
+    select.appendChild(opt);
+  }
+}
+
+async function refreshExpenses() {
+  const data = await api.get('/expenses');
+  const expenses = data.expenses || [];
+  const tbody = $('expense-table').querySelector('tbody');
+  tbody.textContent = '';
+  for (const x of expenses) {
+    const tr = document.createElement('tr');
+    const date = document.createElement('th');
+    date.scope = 'row';
+    date.textContent = x.date;
+    const cust = document.createElement('td');
+    cust.textContent = customerName(x.customer_id);
+    const proj = document.createElement('td');
+    proj.textContent = x.project_code || '';
+    const cat = document.createElement('td');
+    const c = (state.categories || []).find((k) => k.id === x.category_id);
+    cat.textContent = c ? c.name : '';
+    const amt = document.createElement('td');
+    amt.className = 'num';
+    amt.textContent = `${x.currency} ${formatMoney(x.amount_minor)}`;
+    const bill = document.createElement('td');
+    bill.textContent = x.billable ? 'yes' : 'no';
+    const act = document.createElement('td');
+    act.className = 'actions-col';
+    const del = document.createElement('button');
+    del.className = 'danger';
+    del.type = 'button';
+    del.textContent = 'Delete';
+    del.addEventListener('click', async () => {
+      if (!window.confirm('Delete this expense?')) return;
+      await api.del(`/expenses/${x.id}`);
+      await refreshExpenses();
+      announce('Expense deleted.');
+    });
+    act.append(del);
+    tr.append(date, cust, proj, cat, amt, bill, act);
+    tbody.appendChild(tr);
+  }
+  $('expense-empty').hidden = expenses.length !== 0;
+}
+
+async function addExpense(evt) {
+  evt.preventDefault();
+  clearFormError($('expense-error'));
+  const body = {
+    date: $('expense-date').value,
+    customer_id: $('expense-customer').value,
+    amount_minor: Math.round(Number($('expense-amount').value) * 100),
+    currency: $('expense-currency').value.trim().toUpperCase(),
+    billable: $('expense-billable').checked,
+    note: $('expense-note').value,
+  };
+  if ($('expense-project').value) body.project_code = $('expense-project').value;
+  if ($('expense-category').value) body.category_id = $('expense-category').value;
+  try {
+    await api.post('/expenses', body);
+    $('expense-amount').value = '';
+    $('expense-note').value = '';
+    announce('Expense added.');
+    await refreshExpenses();
+  } catch (err) {
+    showFormError($('expense-error'), err);
+  }
+}
+
 // ---------------------------------------------------------------- boot ---
 
 function switchTab(tabId) {
@@ -966,6 +1089,14 @@ async function startApp() {
 
   $('invoice-form').addEventListener('submit', generateInvoice);
 
+  $('category-form').addEventListener('submit', addCategory);
+  $('expense-form').addEventListener('submit', addExpense);
+  $('expense-customer').addEventListener('change', async (e) => {
+    await fillProjectSelect($('expense-project'), e.target.value, null);
+    const c = state.customers.find((x) => x.id === e.target.value);
+    if (c) $('expense-currency').value = c.currency;
+  });
+
   await loadCustomers();
   await refreshCustomerTable();
   await refreshCustomerPickers();
@@ -973,6 +1104,12 @@ async function startApp() {
   await refreshDay();
   fillCustomerSelect($('invoice-customer'), '', true);
   await refreshInvoices();
+  fillCustomerSelect($('expense-customer'), '', true);
+  await fillProjectSelect($('expense-project'), '', null);
+  $('expense-date').value = today;
+  await refreshCategories();
+  await fillCategorySelect();
+  await refreshExpenses();
   $('version').textContent = 'TucanoTime';
 }
 

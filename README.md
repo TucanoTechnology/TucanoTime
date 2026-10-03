@@ -13,6 +13,7 @@ suite — file-based (no database), one container, browser GUI.
 - **Exact money** — rates in minor units and hours in hundredths; no floats on persisted values.
 - **Reports** — totals grouped by customer, project or ISO week; **CSV export** (formula-injection safe).
 - **Invoices** — generate a draft from a period's billable work, snapshotting each entry's rate; issuing an invoice **locks** its entries from edits/deletes.
+- **Expenses** — record costs per project with categories, billable flags, and optional attached receipts; billable expenses roll into invoices (#25).
 
 ## Quick start (Docker)
 

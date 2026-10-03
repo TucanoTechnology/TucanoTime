@@ -16,7 +16,7 @@ use chrono::NaiveDate;
 use uuid::Uuid;
 
 use crate::auth::User;
-use crate::domain::{Customer, Entry, Invoice, Project, Task};
+use crate::domain::{Category, Customer, Entry, Expense, Invoice, Project, Task};
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
 /// over the whole tree. 400 days covers a year plus buffer.
@@ -55,6 +55,8 @@ impl Store {
         std::fs::create_dir_all(root.join("customers"))?;
         std::fs::create_dir_all(root.join("entries"))?;
         std::fs::create_dir_all(root.join("users"))?;
+        std::fs::create_dir_all(root.join("categories"))?;
+        std::fs::create_dir_all(root.join("expenses"))?;
         Ok(Self {
             root,
             write_guard: Mutex::new(()),
@@ -179,6 +181,105 @@ impl Store {
     pub fn next_invoice_number(&self) -> Result<String, StoreError> {
         let n = self.list_invoices()?.len() + 1;
         Ok(format!("INV-{n:04}"))
+    }
+
+    // ----------------------------------------------------------- categories --
+
+    fn category_path(&self, id: Uuid) -> PathBuf {
+        self.root.join("categories").join(format!("{id}.json"))
+    }
+
+    pub fn list_categories(&self) -> Result<Vec<Category>, StoreError> {
+        let mut out = Vec::new();
+        for path in dir_entries(&self.root.join("categories"))? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(c) = read_json::<Category>(&path)? {
+                out.push(c);
+            }
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    pub fn get_category(&self, id: Uuid) -> Result<Option<Category>, StoreError> {
+        read_json(&self.category_path(id))
+    }
+
+    pub fn put_category(&self, category: &Category) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        write_json(&self.category_path(category.id), category)
+    }
+
+    pub fn delete_category(&self, id: Uuid) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let path = self.category_path(id);
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        if self
+            .list_expenses()?
+            .iter()
+            .any(|e| e.category_id == Some(id))
+        {
+            return Err(StoreError::AlreadyExists(
+                "category still used by expenses".into(),
+            ));
+        }
+        std::fs::remove_file(&path)?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------- expenses --
+
+    fn expense_path(&self, id: Uuid) -> PathBuf {
+        self.root.join("expenses").join(format!("{id}.json"))
+    }
+
+    pub fn list_expenses(&self) -> Result<Vec<Expense>, StoreError> {
+        let mut out = Vec::new();
+        for path in dir_entries(&self.root.join("expenses"))? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(e) = read_json::<Expense>(&path)? {
+                out.push(e);
+            }
+        }
+        out.sort_by_key(|e| std::cmp::Reverse((e.date, e.created_at)));
+        Ok(out)
+    }
+
+    pub fn get_expense(&self, id: Uuid) -> Result<Option<Expense>, StoreError> {
+        read_json(&self.expense_path(id))
+    }
+
+    pub fn put_expense(&self, expense: &Expense) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        write_json(&self.expense_path(expense.id), expense)
+    }
+
+    pub fn delete_expense(&self, id: Uuid) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let path = self.expense_path(id);
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        std::fs::remove_file(&path)?;
+        Ok(())
     }
 
     // ------------------------------------------------------------ customers --
