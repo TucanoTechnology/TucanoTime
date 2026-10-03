@@ -8,9 +8,39 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
+
+  <div id="auth-overlay" class="auth-overlay" hidden>
+    <form id="auth-form" class="card auth-card">
+      <h1 id="auth-title" class="auth-title">Sign in</h1>
+      <p id="auth-sub" class="hint"></p>
+      <div class="field" id="auth-name-field" hidden>
+        <label for="auth-name">Your name</label>
+        <input id="auth-name" maxlength="120" autocomplete="name">
+      </div>
+      <div class="field">
+        <label for="auth-email">Email</label>
+        <input id="auth-email" type="email" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="auth-password">Password</label>
+        <input id="auth-password" type="password" autocomplete="current-password" minlength="8" required>
+      </div>
+      <p class="form-error" id="auth-error" role="alert" hidden></p>
+      <button type="submit" id="auth-submit" class="primary">Sign in</button>
+    </form>
+  </div>
+
   <header class="masthead">
-    <h1>TucanoTime</h1>
-    <p class="tagline">Time entries by day and week, per customer and project code.</p>
+    <div class="masthead-top">
+      <div>
+        <h1>TucanoTime</h1>
+        <p class="tagline">Time entries by day and week, per customer and project code.</p>
+      </div>
+      <div id="account" class="account" hidden>
+        <span id="who" class="who"></span>
+        <button type="button" id="logout" class="link">Sign out</button>
+      </div>
+    </div>
     <nav aria-label="Sections">
       <div class="tabs" role="tablist" id="tabs">
         <button role="tab" id="tab-day" aria-controls="panel-day" aria-selected="true">Day</button>

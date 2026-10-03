@@ -3,22 +3,105 @@
 // the guard the shared rules demand: valid and invalid shapes, rejection
 // before persistence, documented error shape, and no server-side leakage.
 
+use axum::Router;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tower::ServiceExt;
 
-use std::sync::Arc;
 use tucano_time::api::AppState;
+use tucano_time::auth::Session;
 use tucano_time::clock::SystemClock;
 use tucano_time::lock::{EntryLock, LockReason};
 use tucano_time::store::Store;
 
-fn app() -> (axum::Router, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path().join("data")).expect("store");
-    (tucano_time::build_router(AppState::new(store)), dir)
+const ADMIN_EMAIL: &str = "admin@test.local";
+const ADMIN_PW: &str = "supersecret1";
+
+/// An in-process client holding a router and an authenticated session cookie.
+struct Client {
+    router: Router,
+    cookie: String,
+}
+
+async fn raw(
+    router: &Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    cookie: Option<&str>,
+) -> (StatusCode, Value, Option<String>) {
+    let mut b = Request::builder().method(method).uri(uri);
+    if let Some(c) = cookie {
+        b = b.header(header::COOKIE, c);
+    }
+    let req = match body {
+        Some(v) => {
+            b = b.header("content-type", "application/json");
+            b.body(Body::from(v.to_string())).unwrap()
+        }
+        None => b.body(Body::empty()).unwrap(),
+    };
+    let res = router.clone().oneshot(req).await.expect("oneshot");
+    let status = res.status();
+    let set_cookie = res
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.split(';').next().unwrap_or("").to_string());
+    let bytes = res.into_body().collect().await.expect("body").to_bytes();
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+    };
+    (status, value, set_cookie)
+}
+
+async fn login_cookie(router: &Router, email: &str, pw: &str) -> String {
+    let (_s, _b, c) = raw(
+        router,
+        "POST",
+        "/auth/login",
+        Some(json!({"email": email, "password": pw})),
+        None,
+    )
+    .await;
+    c.unwrap_or_default()
+}
+
+impl Client {
+    async fn new(store: Store, locks: Option<Arc<dyn EntryLock>>) -> Self {
+        let session = Arc::new(Session::new(
+            b"test-session-secret-0000000000000032".to_vec(),
+            3600,
+            false,
+        ));
+        let state = match locks {
+            Some(l) => AppState {
+                store: Arc::new(store),
+                clock: Arc::new(SystemClock),
+                locks: l,
+                session,
+            },
+            None => AppState::with_session(store, session),
+        };
+        let router = tucano_time::build_router(state);
+        // Bootstrap the first admin (403 if users already exist — fine).
+        let _ = raw(
+            &router,
+            "POST",
+            "/auth/bootstrap",
+            Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+            None,
+        )
+        .await;
+        let cookie = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
+        Self { router, cookie }
+    }
 }
 
 /// A test lock provider that freezes a single entry id.
@@ -33,49 +116,41 @@ impl EntryLock for LockOne {
     }
 }
 
-/// Reopen an existing data dir with a custom lock provider.
-fn app_locked(dir_path: &std::path::Path, locks: Arc<dyn EntryLock>) -> axum::Router {
+async fn app() -> (Client, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("data")).expect("store");
+    (Client::new(store, None).await, dir)
+}
+
+async fn app_locked(dir_path: &std::path::Path, locks: Arc<dyn EntryLock>) -> Client {
     let store = Store::open(dir_path.join("data")).expect("store");
-    let state = AppState {
-        store: Arc::new(store),
-        clock: Arc::new(SystemClock),
-        locks,
-    };
-    tucano_time::build_router(state)
+    Client::new(store, Some(locks)).await
 }
 
-async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, Value) {
-    let res = app.clone().oneshot(req).await.expect("oneshot");
-    let status = res.status();
-    let bytes = res.into_body().collect().await.expect("body").to_bytes();
-    let value = if bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&bytes)
-            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
-    };
-    (status, value)
-}
-
+/// Authenticated request.
 async fn json_req(
-    app: &axum::Router,
+    client: &Client,
     method: &str,
     uri: &str,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
-    let mut builder = Request::builder().method(method).uri(uri);
-    let req = match body {
-        Some(b) => {
-            builder = builder.header("content-type", "application/json");
-            builder.body(Body::from(b.to_string())).unwrap()
-        }
-        None => builder.body(Body::empty()).unwrap(),
-    };
-    send(app, req).await
+    let (s, v, _) = raw(&client.router, method, uri, body, Some(&client.cookie)).await;
+    (s, v)
+}
+
+/// Unauthenticated request (for the auth tests).
+async fn anon_req(
+    client: &Client,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let (s, v, _) = raw(&client.router, method, uri, body, None).await;
+    (s, v)
 }
 
 /// Create a customer and return its object.
-async fn new_customer(app: &axum::Router, name: &str, currency: &str, rate: u64) -> Value {
+async fn new_customer(app: &Client, name: &str, currency: &str, rate: u64) -> Value {
     let (status, body) = json_req(
         app,
         "POST",
@@ -87,7 +162,7 @@ async fn new_customer(app: &axum::Router, name: &str, currency: &str, rate: u64)
     body
 }
 
-async fn new_project(app: &axum::Router, cid: &str, code: &str, extra: Value) -> Value {
+async fn new_project(app: &Client, cid: &str, code: &str, extra: Value) -> Value {
     // currency + rate_minor are required since #11; default to the customer's
     // values and let `extra` override (e.g. a project-specific rate).
     let mut body = json!({"code": code, "currency": "EUR", "rate_minor": 6000});
@@ -115,7 +190,7 @@ fn entry_body(cid: &str, code: &str, hours: Value, date: &str) -> Value {
 
 #[tokio::test]
 async fn healthz_is_ok() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let (status, body) = json_req(&app, "GET", "/healthz", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ok");
@@ -141,7 +216,7 @@ async fn contract_paths_have_documented_responses() {
 
 #[tokio::test]
 async fn unknown_field_rejected_before_persist() {
-    let (app, d) = app();
+    let (app, d) = app().await;
     let (status, body) = json_req(
         &app,
         "POST",
@@ -162,7 +237,7 @@ async fn unknown_field_rejected_before_persist() {
 
 #[tokio::test]
 async fn wrong_type_is_validation_failure() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     // name given as a number
     let (status, body) = json_req(
         &app,
@@ -177,7 +252,7 @@ async fn wrong_type_is_validation_failure() {
 
 #[tokio::test]
 async fn currency_normalised_and_rejected() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let created = new_customer(&app, "ACME", "eur", 6000).await;
     assert_eq!(
         created["currency"], "EUR",
@@ -196,7 +271,7 @@ async fn currency_normalised_and_rejected() {
 
 #[tokio::test]
 async fn full_customer_project_entry_flow() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let cust = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = cust["id"].as_str().unwrap();
 
@@ -226,7 +301,7 @@ async fn full_customer_project_entry_flow() {
 
 #[tokio::test]
 async fn entry_requires_existing_customer_and_project() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let (status, body) = json_req(
         &app,
         "POST",
@@ -247,7 +322,7 @@ async fn entry_requires_existing_customer_and_project() {
 
 #[tokio::test]
 async fn project_must_belong_to_customer() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let a = new_customer(&app, "A", "EUR", 100).await;
     let b = new_customer(&app, "B", "EUR", 100).await;
     new_project(&app, a["id"].as_str().unwrap(), "P1", json!({})).await;
@@ -276,7 +351,7 @@ async fn project_must_belong_to_customer() {
 
 #[tokio::test]
 async fn hours_boundaries() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -314,7 +389,7 @@ async fn hours_boundaries() {
 
 #[tokio::test]
 async fn invalid_date_rejected_with_field_detail() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -331,7 +406,7 @@ async fn invalid_date_rejected_with_field_detail() {
 
 #[tokio::test]
 async fn duplicate_project_conflicts() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -347,7 +422,7 @@ async fn duplicate_project_conflicts() {
 
 #[tokio::test]
 async fn customer_delete_blocked_while_referenced() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -371,7 +446,7 @@ async fn customer_delete_blocked_while_referenced() {
 
 #[tokio::test]
 async fn range_and_date_queries_are_exclusive_forms() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let (status, _) = json_req(&app, "GET", "/entries", None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let (status2, _) = json_req(
@@ -386,7 +461,7 @@ async fn range_and_date_queries_are_exclusive_forms() {
 
 #[tokio::test]
 async fn report_groups_by_project_with_effective_rate() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await; // 60.00/h default
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "STD", json!({})).await;
@@ -430,7 +505,7 @@ async fn report_groups_by_project_with_effective_rate() {
 
 #[tokio::test]
 async fn csv_export_quotes_and_escapes_note() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME, Inc.", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -460,7 +535,7 @@ async fn csv_export_quotes_and_escapes_note() {
 
 #[tokio::test]
 async fn error_shape_never_leaks_internals() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let (status, body) = json_req(
         &app,
         "GET",
@@ -478,7 +553,7 @@ async fn error_shape_never_leaks_internals() {
 
 #[tokio::test]
 async fn update_entry_can_move_day() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -509,7 +584,7 @@ async fn update_entry_can_move_day() {
 
 #[tokio::test]
 async fn oversized_note_rejected() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -523,7 +598,7 @@ async fn oversized_note_rejected() {
 
 #[tokio::test]
 async fn project_requires_currency_and_rate() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     // Missing rate_minor.
@@ -548,7 +623,7 @@ async fn project_requires_currency_and_rate() {
 
 #[tokio::test]
 async fn legacy_project_document_resolves_from_customer() {
-    let (app, d) = app();
+    let (app, d) = app().await;
     let c = new_customer(&app, "ACME", "USD", 4500).await;
     let cid = c["id"].as_str().unwrap();
     // Write a pre-#11 project document that omits currency and rate_minor.
@@ -583,7 +658,7 @@ async fn legacy_project_document_resolves_from_customer() {
 
 #[tokio::test]
 async fn entry_billable_defaults_true_and_persists_false() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -612,7 +687,7 @@ async fn entry_billable_defaults_true_and_persists_false() {
 
 #[tokio::test]
 async fn legacy_entry_document_without_billable_reads_true() {
-    let (app, d) = app();
+    let (app, d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -634,7 +709,7 @@ async fn legacy_entry_document_without_billable_reads_true() {
 
 #[tokio::test]
 async fn entry_source_defaults_manual() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -650,7 +725,7 @@ async fn entry_source_defaults_manual() {
 
 #[tokio::test]
 async fn legacy_entry_document_without_source_reads_manual() {
-    let (app, d) = app();
+    let (app, d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -671,7 +746,7 @@ async fn legacy_entry_document_without_source_reads_manual() {
 
 #[tokio::test]
 async fn locked_entry_rejects_edit_and_delete_but_not_read() {
-    let (app, d) = app();
+    let (app, d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -686,7 +761,7 @@ async fn locked_entry_rejects_edit_and_delete_but_not_read() {
     drop(app);
 
     // Reopen the same data dir with that entry locked (as an invoice would).
-    let app2 = app_locked(d.path(), Arc::new(LockOne(Some(eid))));
+    let app2 = app_locked(d.path(), Arc::new(LockOne(Some(eid)))).await;
     let body = json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2,"billable":true});
     let (s_edit, _) = json_req(&app2, "PUT", &format!("/entries/{eid}"), Some(body)).await;
     assert_eq!(s_edit, StatusCode::CONFLICT);
@@ -698,7 +773,7 @@ async fn locked_entry_rejects_edit_and_delete_but_not_read() {
 
 // ------------------------------------------------------------------ tasks --
 
-async fn new_task(app: &axum::Router, cid: &str, pcode: &str, code: &str, extra: Value) -> Value {
+async fn new_task(app: &Client, cid: &str, pcode: &str, code: &str, extra: Value) -> Value {
     let mut body = json!({"code": code});
     if let Value::Object(map) = extra {
         for (k, v) in map {
@@ -718,7 +793,7 @@ async fn new_task(app: &axum::Router, cid: &str, pcode: &str, code: &str, extra:
 
 #[tokio::test]
 async fn task_crud_and_entry_reference() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -758,7 +833,7 @@ async fn task_crud_and_entry_reference() {
 
 #[tokio::test]
 async fn entry_task_must_belong_to_project() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -782,7 +857,7 @@ async fn entry_task_must_belong_to_project() {
 
 #[tokio::test]
 async fn report_uses_task_rate_override() {
-    let (app, _d) = app();
+    let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await; // 60/h default
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
@@ -812,4 +887,90 @@ async fn report_uses_task_rate_override() {
     assert_eq!(s, StatusCode::OK);
     // 2h * 95 + 1h * 60 = 190 + 60 = 250.00 = 25000 minor.
     assert_eq!(summary["rows"][0]["amount_minor"], 25000);
+}
+
+// ------------------------------------------------------------------- auth --
+
+#[tokio::test]
+async fn protected_routes_require_auth() {
+    let (app, _d) = app().await;
+    // Unauthenticated -> 401.
+    let (s, _) = anon_req(&app, "GET", "/customers", None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // Authenticated -> 200.
+    let (s2, _) = json_req(&app, "GET", "/customers", None).await;
+    assert_eq!(s2, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn bootstrap_only_works_once() {
+    let (app, _d) = app().await;
+    // A second bootstrap must be refused (an admin already exists).
+    let (s, _) = anon_req(
+        &app,
+        "POST",
+        "/auth/bootstrap",
+        Some(json!({"name":"X","email":"x@y.co","password":"whatever12"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn login_rejects_bad_password_without_leaking() {
+    let (app, _d) = app().await;
+    let (s, body) = anon_req(
+        &app,
+        "POST",
+        "/auth/login",
+        Some(json!({"email": ADMIN_EMAIL, "password": "wrong-password"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["code"], "invalid_credentials");
+    // Same generic code for an unknown email (no user enumeration).
+    let (s2, b2) = anon_req(
+        &app,
+        "POST",
+        "/auth/login",
+        Some(json!({"email": "nobody@test.local", "password": "whatever12"})),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::UNAUTHORIZED);
+    assert_eq!(b2["error"]["code"], "invalid_credentials");
+}
+
+#[tokio::test]
+async fn me_returns_current_user() {
+    let (app, _d) = app().await;
+    let (s, me) = json_req(&app, "GET", "/auth/me", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(me["email"], ADMIN_EMAIL);
+    assert_eq!(me["role"], "admin");
+    assert!(
+        me.get("password_hash").is_none(),
+        "the hash must never be returned"
+    );
+}
+
+#[tokio::test]
+async fn member_cannot_manage_users() {
+    let (app, _d) = app().await;
+    // Admin creates a member.
+    let (s, _) = json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(
+            json!({"name":"Pam","email":"pam@test.local","password":"memberpass1","role":"member"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    // Member logs in and is forbidden from /users, but can use /customers.
+    let cookie = login_cookie(&app.router, "pam@test.local", "memberpass1").await;
+    let (s_users, _, _) = raw(&app.router, "GET", "/users", None, Some(&cookie)).await;
+    assert_eq!(s_users, StatusCode::FORBIDDEN);
+    let (s_cust, _, _) = raw(&app.router, "GET", "/customers", None, Some(&cookie)).await;
+    assert_eq!(s_cust, StatusCode::OK);
 }

@@ -15,6 +15,7 @@ use std::sync::Mutex;
 use chrono::NaiveDate;
 use uuid::Uuid;
 
+use crate::auth::User;
 use crate::domain::{Customer, Entry, Project, Task};
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
@@ -53,6 +54,7 @@ impl Store {
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(root.join("customers"))?;
         std::fs::create_dir_all(root.join("entries"))?;
+        std::fs::create_dir_all(root.join("users"))?;
         Ok(Self {
             root,
             write_guard: Mutex::new(()),
@@ -61,6 +63,62 @@ impl Store {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    // ---------------------------------------------------------------- users --
+
+    fn user_path(&self, id: Uuid) -> PathBuf {
+        self.root.join("users").join(format!("{id}.json"))
+    }
+
+    pub fn list_users(&self) -> Result<Vec<User>, StoreError> {
+        let mut out = Vec::new();
+        for path in dir_entries(&self.root.join("users"))? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(u) = read_json::<User>(&path)? {
+                out.push(u);
+            }
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    pub fn has_users(&self) -> Result<bool, StoreError> {
+        Ok(!self.list_users()?.is_empty())
+    }
+
+    pub fn get_user(&self, id: Uuid) -> Result<Option<User>, StoreError> {
+        read_json(&self.user_path(id))
+    }
+
+    pub fn get_user_by_email(&self, email: &str) -> Result<Option<User>, StoreError> {
+        Ok(self
+            .list_users()?
+            .into_iter()
+            .find(|u| u.email.eq_ignore_ascii_case(email)))
+    }
+
+    pub fn put_user(&self, user: &User) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        write_json(&self.user_path(user.id), user)
+    }
+
+    pub fn delete_user(&self, id: Uuid) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let path = self.user_path(id);
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        std::fs::remove_file(&path)?;
+        Ok(())
     }
 
     // ------------------------------------------------------------ customers --

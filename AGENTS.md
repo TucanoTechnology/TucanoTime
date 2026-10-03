@@ -46,6 +46,12 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   commit. Range queries are capped at 400 days.
 - `web/` is dependency-free vanilla HTML/CSS/JS embedded via rust-embed (no
   build step). All DOM data is inserted with `textContent`, never `innerHTML`.
+- **Auth (#19):** users are file-based (`users/<id>.json`), passwords argon2id,
+  sessions are HMAC-signed HttpOnly cookies (`tt_session`). Data routes require a
+  valid session; `/users` requires `admin`. First-run `/auth/bootstrap` creates
+  the initial admin only while no users exist. Key from `TUCANO_SESSION_SECRET`
+  (ephemeral if unset); `TUCANO_ENV=production` sets the `Secure` cookie flag.
+  `password_hash` is never serialised to clients.
 - Invoices (M2, planned): snapshot entries + reference entry ids and lock
   referenced entries from edits/deletes. Keep entry ids stable — invoices
   depend on them.
