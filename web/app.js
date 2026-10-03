@@ -840,6 +840,89 @@ async function runReport(evt) {
   announce(`Report ready: ${summary.rows.length} rows.`);
 }
 
+// -------------------------------------------------------------- invoices ---
+
+async function refreshInvoices() {
+  const data = await api.get('/invoices');
+  const invoices = data.invoices || [];
+  const tbody = $('invoice-table').querySelector('tbody');
+  tbody.textContent = '';
+  for (const inv of invoices) {
+    const tr = document.createElement('tr');
+    const num = document.createElement('th');
+    num.scope = 'row';
+    num.textContent = inv.number;
+    const cust = document.createElement('td');
+    cust.textContent = customerName(inv.customer_id);
+    const period = document.createElement('td');
+    period.textContent = `${inv.period_from} → ${inv.period_to}`;
+    const total = document.createElement('td');
+    total.className = 'num';
+    total.textContent = `${inv.currency} ${formatMoney(inv.total_minor)}`;
+    const status = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = inv.status === 'issued' ? 'badge on' : 'badge';
+    badge.textContent = inv.status;
+    status.appendChild(badge);
+    const act = document.createElement('td');
+    act.className = 'actions-col';
+    if (inv.status === 'draft') {
+      const issue = document.createElement('button');
+      issue.className = 'link';
+      issue.type = 'button';
+      issue.textContent = 'Issue';
+      issue.addEventListener('click', () => issueInvoice(inv.id));
+      const del = document.createElement('button');
+      del.className = 'danger';
+      del.type = 'button';
+      del.textContent = 'Delete';
+      del.addEventListener('click', () => removeInvoice(inv.id));
+      act.append(issue, del);
+    }
+    tr.append(num, cust, period, total, status, act);
+    tbody.appendChild(tr);
+  }
+  $('invoice-empty').hidden = invoices.length !== 0;
+}
+
+async function generateInvoice(evt) {
+  evt.preventDefault();
+  clearFormError($('invoice-error'));
+  try {
+    await api.post('/invoices', {
+      customer_id: $('invoice-customer').value,
+      from: $('invoice-from').value,
+      to: $('invoice-to').value,
+    });
+    announce('Draft invoice generated.');
+    await refreshInvoices();
+  } catch (err) {
+    showFormError($('invoice-error'), err);
+  }
+}
+
+async function issueInvoice(id) {
+  if (!window.confirm('Issue this invoice? Its entries will be locked from editing.')) return;
+  try {
+    await api.post(`/invoices/${id}/issue`);
+    announce('Invoice issued.');
+    await refreshInvoices();
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
+async function removeInvoice(id) {
+  if (!window.confirm('Delete this draft invoice?')) return;
+  try {
+    await api.del(`/invoices/${id}`);
+    await refreshInvoices();
+    announce('Invoice deleted.');
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
 // ---------------------------------------------------------------- boot ---
 
 function switchTab(tabId) {
@@ -881,11 +964,15 @@ async function startApp() {
 
   $('report-form').addEventListener('submit', runReport);
 
+  $('invoice-form').addEventListener('submit', generateInvoice);
+
   await loadCustomers();
   await refreshCustomerTable();
   await refreshCustomerPickers();
   await fillProjectSelect($('entry-project'), '', null);
   await refreshDay();
+  fillCustomerSelect($('invoice-customer'), '', true);
+  await refreshInvoices();
   $('version').textContent = 'TucanoTime';
 }
 

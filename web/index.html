@@ -47,6 +47,7 @@
         <button role="tab" id="tab-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
         <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
         <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
+        <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
       </div>
     </nav>
   </header>
@@ -195,6 +196,24 @@
         <tbody></tbody>
         <tfoot><tr><th scope="row" colspan="2">Total hours</th><td id="report-total"></td><td colspan="2"></td></tr></tfoot>
       </table>
+    </section>
+
+    <!-- INVOICES -->
+    <section id="panel-invoices" role="tabpanel" aria-labelledby="tab-invoices" tabindex="0" hidden>
+      <h2>Invoices</h2>
+      <form id="invoice-form" class="card">
+        <div class="field"><label for="invoice-customer">Customer</label><select id="invoice-customer" required></select></div>
+        <div class="field"><label for="invoice-from">From</label><input type="date" id="invoice-from" required></div>
+        <div class="field"><label for="invoice-to">To</label><input type="date" id="invoice-to" required></div>
+        <p class="form-error" id="invoice-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="invoice-generate">Generate draft invoice</button></div>
+      </form>
+      <table id="invoice-table">
+        <caption class="sr-only">Invoices</caption>
+        <thead><tr><th scope="col">Number</th><th scope="col">Customer</th><th scope="col">Period</th><th scope="col">Total</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="invoice-empty" hidden>No invoices yet.</p>
     </section>
   </main>
 

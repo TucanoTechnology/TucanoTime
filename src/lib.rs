@@ -81,6 +81,18 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/reports/summary", get(api::summary))
         .route("/reports/export.csv", get(api::export_csv))
+        .route(
+            "/invoices",
+            get(api::list_invoices).post(api::create_invoice),
+        )
+        .route(
+            "/invoices/{id}",
+            get(api::get_invoice_handler).delete(api::delete_invoice),
+        )
+        .route(
+            "/invoices/{id}/issue",
+            axum::routing::post(api::issue_invoice),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_auth,

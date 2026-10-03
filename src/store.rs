@@ -16,7 +16,7 @@ use chrono::NaiveDate;
 use uuid::Uuid;
 
 use crate::auth::User;
-use crate::domain::{Customer, Entry, Project, Task};
+use crate::domain::{Customer, Entry, Invoice, Project, Task};
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
 /// over the whole tree. 400 days covers a year plus buffer.
@@ -119,6 +119,66 @@ impl Store {
         }
         std::fs::remove_file(&path)?;
         Ok(())
+    }
+
+    // ------------------------------------------------------------- invoices --
+
+    fn invoice_path(&self, id: Uuid) -> PathBuf {
+        self.root.join("invoices").join(format!("{id}.json"))
+    }
+
+    pub fn list_invoices(&self) -> Result<Vec<Invoice>, StoreError> {
+        let dir = self.root.join("invoices");
+        let mut out = Vec::new();
+        if !dir.exists() {
+            return Ok(out);
+        }
+        for path in dir_entries(&dir)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(inv) = read_json::<Invoice>(&path)? {
+                out.push(inv);
+            }
+        }
+        out.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then(a.number.cmp(&b.number))
+        });
+        Ok(out)
+    }
+
+    pub fn get_invoice(&self, id: Uuid) -> Result<Option<Invoice>, StoreError> {
+        read_json(&self.invoice_path(id))
+    }
+
+    pub fn put_invoice(&self, invoice: &Invoice) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        std::fs::create_dir_all(self.root.join("invoices"))?;
+        write_json(&self.invoice_path(invoice.id), invoice)
+    }
+
+    pub fn delete_invoice(&self, id: Uuid) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let path = self.invoice_path(id);
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        std::fs::remove_file(&path)?;
+        Ok(())
+    }
+
+    /// Next sequential invoice number (`INV-0001`, …).
+    pub fn next_invoice_number(&self) -> Result<String, StoreError> {
+        let n = self.list_invoices()?.len() + 1;
+        Ok(format!("INV-{n:04}"))
     }
 
     // ------------------------------------------------------------ customers --

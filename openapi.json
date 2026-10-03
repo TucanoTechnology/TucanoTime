@@ -13,6 +13,9 @@
     { "name": "projects" },
     { "name": "entries" },
     { "name": "reports" },
+    { "name": "auth" },
+    { "name": "users" },
+    { "name": "invoices" },
     { "name": "meta" }
   ],
   "components": {
@@ -250,6 +253,50 @@
           "role": { "type": "string", "enum": ["admin", "member"] },
           "active": { "type": "boolean", "default": true },
           "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" }
+        },
+        "additionalProperties": false
+      },
+      "InvoiceStatus": { "type": "string", "enum": ["draft", "issued", "paid"] },
+      "InvoiceLine": {
+        "type": "object",
+        "required": ["entry_id", "date", "project_code", "hours", "rate_minor", "amount_minor", "note"],
+        "properties": {
+          "entry_id": { "type": "string", "format": "uuid" },
+          "date": { "type": "string", "format": "date" },
+          "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
+          "hours": { "$ref": "#/components/schemas/Hours" },
+          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "amount_minor": { "type": "integer", "minimum": 0 },
+          "note": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "Invoice": {
+        "type": "object",
+        "required": ["id", "number", "customer_id", "currency", "period_from", "period_to", "lines", "total_minor", "status", "created_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "number": { "type": "string" },
+          "customer_id": { "type": "string", "format": "uuid" },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "period_from": { "type": "string", "format": "date" },
+          "period_to": { "type": "string", "format": "date" },
+          "lines": { "type": "array", "items": { "$ref": "#/components/schemas/InvoiceLine" } },
+          "total_minor": { "type": "integer", "minimum": 0 },
+          "status": { "$ref": "#/components/schemas/InvoiceStatus" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "issued_at": { "type": [ "string", "null" ], "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "InvoiceInput": {
+        "type": "object",
+        "required": ["customer_id", "from", "to"],
+        "properties": {
+          "customer_id": { "type": "string", "format": "uuid" },
+          "from": { "type": "string", "format": "date" },
+          "to": { "type": "string", "format": "date" }
         },
         "additionalProperties": false
       }
@@ -763,6 +810,62 @@
         "responses": {
           "200": { "description": "CSV document (formula-injection escaped).", "content": { "text/csv": { "schema": { "type": "string" } } } },
           "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/invoices": {
+      "get": {
+        "operationId": "listInvoices",
+        "tags": ["invoices"],
+        "summary": "List invoices",
+        "responses": {
+          "200": { "description": "All invoices.", "content": { "application/json": { "schema": { "type": "object", "required": ["invoices"], "properties": { "invoices": { "type": "array", "items": { "$ref": "#/components/schemas/Invoice" } } }, "additionalProperties": false } } } }
+        }
+      },
+      "post": {
+        "operationId": "createInvoice",
+        "tags": ["invoices"],
+        "summary": "Generate a draft invoice from billable, not-yet-invoiced work in a period",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvoiceInput" } } } },
+        "responses": {
+          "201": { "description": "Draft invoice.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/invoices/{id}": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "get": {
+        "operationId": "getInvoice",
+        "tags": ["invoices"],
+        "summary": "Fetch one invoice",
+        "responses": {
+          "200": { "description": "The invoice.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteInvoice",
+        "tags": ["invoices"],
+        "summary": "Delete a draft invoice",
+        "responses": {
+          "204": { "description": "Deleted." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/invoices/{id}/issue": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "post": {
+        "operationId": "issueInvoice",
+        "tags": ["invoices"],
+        "summary": "Issue a draft invoice, locking its entries from edits/deletes",
+        "responses": {
+          "200": { "description": "Issued invoice.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
         }
       }
     }

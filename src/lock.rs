@@ -59,3 +59,32 @@ impl EntryLock for CombinedLocks {
         self.providers.iter().find_map(|p| p.entry_lock(entry_id))
     }
 }
+
+/// Lock provider backed by issued invoices: an entry referenced by an
+/// `issued` invoice is frozen (#8). Reads are unaffected; only edit/delete
+/// consult this.
+pub struct InvoiceLock {
+    store: std::sync::Arc<crate::store::Store>,
+}
+
+impl InvoiceLock {
+    pub fn new(store: std::sync::Arc<crate::store::Store>) -> Self {
+        Self { store }
+    }
+}
+
+impl EntryLock for InvoiceLock {
+    fn entry_lock(&self, entry_id: Uuid) -> Option<LockReason> {
+        self.store
+            .list_invoices()
+            .ok()?
+            .iter()
+            .find(|inv| {
+                inv.status == crate::domain::InvoiceStatus::Issued
+                    && inv.lines.iter().any(|l| l.entry_id == entry_id)
+            })
+            .map(|inv| LockReason::Invoiced {
+                id: inv.number.clone(),
+            })
+    }
+}

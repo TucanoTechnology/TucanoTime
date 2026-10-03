@@ -12,7 +12,7 @@ suite — file-based (no database), one container, browser GUI.
 - **Customers & project codes** — first-class entities; a customer sets the default currency/rate and each project carries its own currency and rate.
 - **Exact money** — rates in minor units and hours in hundredths; no floats on persisted values.
 - **Reports** — totals grouped by customer, project or ISO week; **CSV export** (formula-injection safe).
-- **Invoices (planned, M2)** — snapshot entries into an invoice and lock the entries used.
+- **Invoices** — generate a draft from a period's billable work, snapshotting each entry's rate; issuing an invoice **locks** its entries from edits/deletes.
 
 ## Quick start (Docker)
 

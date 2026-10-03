@@ -18,9 +18,9 @@ use crate::auth::{
     valid_password, verify_password,
 };
 use crate::domain::{
-    Currency, Customer, CustomerInput, Entry, EntryInput, FieldError, Project, ProjectCode,
-    ProjectInput, Task, TaskInput, validate_customer_input, validate_entry_input,
-    validate_project_input, validate_task_input,
+    Currency, Customer, CustomerInput, Entry, EntryInput, FieldError, InvoiceError, InvoiceStatus,
+    Project, ProjectCode, ProjectInput, Task, TaskInput, generate_invoice, validate_customer_input,
+    validate_entry_input, validate_project_input, validate_task_input,
 };
 use crate::error::ApiError;
 use crate::report;
@@ -103,10 +103,14 @@ impl AppState {
     }
 
     pub fn with_session(store: Store, session: Arc<Session>) -> Self {
+        let store = Arc::new(store);
+        let locks = Arc::new(crate::lock::CombinedLocks::new(vec![Box::new(
+            crate::lock::InvoiceLock::new(store.clone()),
+        )]));
         Self {
-            store: Arc::new(store),
+            store,
             clock: Arc::new(crate::clock::SystemClock),
-            locks: Arc::new(crate::lock::NoLocks),
+            locks,
             session,
         }
     }
@@ -348,6 +352,107 @@ pub async fn delete_user(
         return Err(ApiError::conflict("you cannot delete your own account"));
     }
     app.store.delete_user(id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+// --------------------------------------------------------------- invoices --
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvoiceInput {
+    pub customer_id: Uuid,
+    pub from: String,
+    pub to: String,
+}
+
+pub async fn list_invoices(State(app): State<AppState>) -> ApiResult {
+    let invoices = app.store.list_invoices()?;
+    Ok(Json(serde_json::json!({ "invoices": invoices })).into_response())
+}
+
+/// Generate a draft invoice from the billable, not-yet-invoiced work in a period.
+pub async fn create_invoice(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<InvoiceInput>,
+) -> ApiResult {
+    let customer = get_customer(&app.store, input.customer_id)?;
+    let from = parse_date(&input.from)?;
+    let to = parse_date(&input.to)?;
+    if from > to {
+        return Err(ApiError::bad_request("'from' must not be after 'to'"));
+    }
+    let projects = app.store.list_projects(customer.id)?;
+    let mut tasks = Vec::new();
+    for p in &projects {
+        tasks.extend(app.store.list_tasks(customer.id, &p.code.0)?);
+    }
+    let users = app.store.list_users()?;
+    let entries = app.store.list_range(from, to)?;
+    // Entries already on an issued invoice are excluded from a new one.
+    let excluded: Vec<Uuid> = app
+        .store
+        .list_invoices()?
+        .iter()
+        .filter(|i| i.status == InvoiceStatus::Issued)
+        .flat_map(|i| i.lines.iter().map(|l| l.entry_id))
+        .collect();
+    let number = app.store.next_invoice_number()?;
+    let sources = crate::domain::InvoiceSources {
+        projects: &projects,
+        tasks: &tasks,
+        users: &users,
+        entries: &entries,
+        excluded: &excluded,
+    };
+    let invoice = generate_invoice(number, &customer, &sources, from, to, app.clock.now())
+        .map_err(invoice_error)?;
+    app.store.put_invoice(&invoice)?;
+    Ok((StatusCode::CREATED, Json(invoice)).into_response())
+}
+
+fn invoice_error(e: InvoiceError) -> ApiError {
+    match e {
+        InvoiceError::NothingToInvoice => {
+            ApiError::conflict("no billable, not-yet-invoiced work in this period")
+        }
+        InvoiceError::MixedCurrency { a, b } => ApiError::conflict(format!(
+            "the period mixes currencies ({a} and {b}); an invoice is single-currency"
+        )),
+    }
+}
+
+pub async fn get_invoice_handler(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    let invoice = app
+        .store
+        .get_invoice(id)?
+        .ok_or_else(|| ApiError::not_found("invoice"))?;
+    Ok(Json(invoice).into_response())
+}
+
+/// Issue a draft invoice: this locks its entries from edits/deletes (#18 seam).
+pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    let mut invoice = app
+        .store
+        .get_invoice(id)?
+        .ok_or_else(|| ApiError::not_found("invoice"))?;
+    if invoice.status != InvoiceStatus::Draft {
+        return Err(ApiError::conflict("only a draft invoice can be issued"));
+    }
+    invoice.status = InvoiceStatus::Issued;
+    invoice.issued_at = Some(app.clock.now());
+    app.store.put_invoice(&invoice)?;
+    Ok(Json(invoice).into_response())
+}
+
+pub async fn delete_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    let invoice = app
+        .store
+        .get_invoice(id)?
+        .ok_or_else(|| ApiError::not_found("invoice"))?;
+    if invoice.status != InvoiceStatus::Draft {
+        return Err(ApiError::conflict("only a draft invoice can be deleted"));
+    }
+    app.store.delete_invoice(id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
