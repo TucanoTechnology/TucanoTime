@@ -37,7 +37,11 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   `customers/<id>.json`, `customers/<id>/projects/<CODE>.json`,
   `customers/<id>/projects/<CODE>/tasks/<TASK>.json` (optional task tier, #38),
   `entries/<YYYY-MM-DD>/<id>.json`, `invoices/<id>.json`, `users/<id>.json`,
-  `categories/<id>.json`, `expenses/<id>.json`. Atomic writes (tmp + rename).
+  `categories/<id>.json`, `expenses/<id>.json`, `submissions/<id>.json`.
+  Atomic writes (tmp + rename).
+- **Locking (#18 seam):** entry edits/deletes consult `CombinedLocks`, which
+  composes `InvoiceLock` (entries on an issued invoice, #8) and `SubmissionLock`
+  (entries in a submitted/approved week, #16). Reads are never blocked.
 - Every payload is validated against the contract before any write
   (`deny_unknown_fields` + `domain::validate_*`); no partial persistence.
   Errors use the single JSON shape in `openapi.json`; responses never expose

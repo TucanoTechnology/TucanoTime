@@ -1046,6 +1046,72 @@ async function addExpense(evt) {
   }
 }
 
+// ------------------------------------------------------------ submissions --
+
+async function refreshSubmissions() {
+  const data = await api.get('/submissions');
+  const subs = data.submissions || [];
+  const tbody = $('submission-table').querySelector('tbody');
+  tbody.textContent = '';
+  for (const s of subs) {
+    const tr = document.createElement('tr');
+    const week = document.createElement('th');
+    week.scope = 'row';
+    week.textContent = `${s.week_start} → ${s.week_end}`;
+    const count = document.createElement('td');
+    count.className = 'num';
+    count.textContent = String(s.entry_ids.length);
+    const state = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = s.state === 'approved' ? 'badge on' : 'badge';
+    badge.textContent = s.state;
+    state.appendChild(badge);
+    const comment = document.createElement('td');
+    comment.textContent = s.comment || '';
+    const act = document.createElement('td');
+    act.className = 'actions-col';
+    if (s.state === 'submitted') {
+      const approve = document.createElement('button');
+      approve.className = 'link';
+      approve.type = 'button';
+      approve.textContent = 'Approve';
+      approve.addEventListener('click', () => decideSubmission(s.id, 'approve'));
+      const reject = document.createElement('button');
+      reject.className = 'danger';
+      reject.type = 'button';
+      reject.textContent = 'Reject';
+      reject.addEventListener('click', () => decideSubmission(s.id, 'reject'));
+      act.append(approve, reject);
+    }
+    tr.append(week, count, state, comment, act);
+    tbody.appendChild(tr);
+  }
+  $('submission-empty').hidden = subs.length !== 0;
+}
+
+async function submitWeek(evt) {
+  evt.preventDefault();
+  clearFormError($('submission-error'));
+  try {
+    await api.post('/submissions', { week_start: $('submission-week').value });
+    announce('Timesheet submitted.');
+    await refreshSubmissions();
+    await refreshDay();
+  } catch (err) {
+    showFormError($('submission-error'), err);
+  }
+}
+
+async function decideSubmission(id, decision) {
+  try {
+    await api.post(`/submissions/${id}/decision`, { decision, comment: '' });
+    announce(`Timesheet ${decision === 'approve' ? 'approved' : 'rejected'}.`);
+    await refreshSubmissions();
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
 // ---------------------------------------------------------------- boot ---
 
 function switchTab(tabId) {
@@ -1091,6 +1157,8 @@ async function startApp() {
 
   $('category-form').addEventListener('submit', addCategory);
   $('expense-form').addEventListener('submit', addExpense);
+  $('submission-form').addEventListener('submit', submitWeek);
+  $('submission-week').value = mondayOf(today);
   $('expense-customer').addEventListener('change', async (e) => {
     await fillProjectSelect($('expense-project'), e.target.value, null);
     const c = state.customers.find((x) => x.id === e.target.value);
@@ -1110,6 +1178,7 @@ async function startApp() {
   await refreshCategories();
   await fillCategorySelect();
   await refreshExpenses();
+  await refreshSubmissions();
   $('version').textContent = 'TucanoTime';
 }
 

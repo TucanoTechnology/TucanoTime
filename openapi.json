@@ -17,6 +17,7 @@
     { "name": "users" },
     { "name": "invoices" },
     { "name": "expenses" },
+    { "name": "submissions" },
     { "name": "meta" }
   ],
   "components": {
@@ -356,6 +357,39 @@
           "note": { "type": "string", "maxLength": 500, "default": "" },
           "receipt_name": { "type": ["string", "null"] },
           "receipt_b64": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "SubmissionState": { "type": "string", "enum": ["draft", "submitted", "approved", "rejected"] },
+      "Submission": {
+        "type": "object",
+        "required": ["id", "user_id", "week_start", "week_end", "state", "entry_ids", "comment", "created_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "user_id": { "type": "string", "format": "uuid" },
+          "week_start": { "type": "string", "format": "date" },
+          "week_end": { "type": "string", "format": "date" },
+          "state": { "$ref": "#/components/schemas/SubmissionState" },
+          "entry_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+          "comment": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "submitted_at": { "type": ["string", "null"], "format": "date-time" },
+          "decided_at": { "type": ["string", "null"], "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "SubmitInput": {
+        "type": "object",
+        "required": ["week_start"],
+        "properties": { "week_start": { "type": "string", "format": "date" } },
+        "additionalProperties": false
+      },
+      "DecisionInput": {
+        "type": "object",
+        "required": ["decision"],
+        "properties": {
+          "decision": { "type": "string", "enum": ["approve", "reject"] },
+          "comment": { "type": "string", "default": "" }
         },
         "additionalProperties": false
       }
@@ -991,6 +1025,38 @@
         "tags": ["expenses"],
         "summary": "Delete an expense",
         "responses": { "204": { "description": "Deleted." }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/submissions": {
+      "get": {
+        "operationId": "listSubmissions",
+        "tags": ["submissions"],
+        "summary": "List timesheet submissions",
+        "responses": { "200": { "description": "All submissions.", "content": { "application/json": { "schema": { "type": "object", "required": ["submissions"], "properties": { "submissions": { "type": "array", "items": { "$ref": "#/components/schemas/Submission" } } }, "additionalProperties": false } } } } }
+      },
+      "post": {
+        "operationId": "createSubmission",
+        "tags": ["submissions"],
+        "summary": "Submit the current user's timesheet for a week (locks its entries)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SubmitInput" } } } },
+        "responses": {
+          "201": { "description": "Submitted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Submission" } } } },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/submissions/{id}/decision": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "post": {
+        "operationId": "decideSubmission",
+        "tags": ["submissions"],
+        "summary": "Approve or reject a submitted timesheet (rejecting releases its locks)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DecisionInput" } } } },
+        "responses": {
+          "200": { "description": "Updated submission.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Submission" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
       }
     }
   }

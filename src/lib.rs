@@ -109,6 +109,14 @@ pub fn build_router(state: AppState) -> Router {
             "/expenses/{id}",
             get(api::get_expense_handler).delete(api::delete_expense),
         )
+        .route(
+            "/submissions",
+            get(api::list_submissions).post(api::create_submission),
+        )
+        .route(
+            "/submissions/{id}/decision",
+            axum::routing::post(api::decide_submission),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_auth,

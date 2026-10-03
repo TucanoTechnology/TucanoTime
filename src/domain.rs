@@ -418,6 +418,36 @@ pub struct CategoryDraft {
     pub active: bool,
 }
 
+// -------------------------------------------------------------- submissions --
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SubmissionState {
+    Draft,
+    Submitted,
+    Approved,
+    Rejected,
+}
+
+/// A weekly timesheet submission for one user. While `submitted` or `approved`
+/// its entries are locked (via the shared lock seam, #18); `rejected`/`draft`
+/// release them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Submission {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub week_start: NaiveDate,
+    pub week_end: NaiveDate,
+    pub state: SubmissionState,
+    pub entry_ids: Vec<Uuid>,
+    pub comment: String,
+    pub created_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submitted_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug)]
 pub struct ExpenseDraft {
     pub date: NaiveDate,
