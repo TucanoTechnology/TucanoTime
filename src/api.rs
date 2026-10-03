@@ -23,6 +23,7 @@ use crate::domain::{
     Task, TaskInput, generate_invoice, validate_category_input, validate_customer_input,
     validate_entry_input, validate_expense_input, validate_project_input, validate_task_input,
 };
+use crate::domain::{Submission, SubmissionState};
 use crate::error::ApiError;
 use crate::report;
 use crate::store::Store;
@@ -105,9 +106,10 @@ impl AppState {
 
     pub fn with_session(store: Store, session: Arc<Session>) -> Self {
         let store = Arc::new(store);
-        let locks = Arc::new(crate::lock::CombinedLocks::new(vec![Box::new(
-            crate::lock::InvoiceLock::new(store.clone()),
-        )]));
+        let locks = Arc::new(crate::lock::CombinedLocks::new(vec![
+            Box::new(crate::lock::InvoiceLock::new(store.clone())),
+            Box::new(crate::lock::SubmissionLock::new(store.clone())),
+        ]));
         Self {
             store,
             clock: Arc::new(crate::clock::SystemClock),
@@ -557,6 +559,98 @@ pub async fn get_expense_handler(State(app): State<AppState>, Path(id): Path<Uui
 pub async fn delete_expense(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     app.store.delete_expense(id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+// ----------------------------------------------------------- submissions --
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubmitInput {
+    pub week_start: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecisionInput {
+    pub decision: String,
+    #[serde(default)]
+    pub comment: String,
+}
+
+pub async fn list_submissions(State(app): State<AppState>) -> ApiResult {
+    let submissions = app.store.list_submissions()?;
+    Ok(Json(serde_json::json!({ "submissions": submissions })).into_response())
+}
+
+/// Submit the acting user's timesheet for a week; locks its entries.
+pub async fn create_submission(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    ValidJson(input): ValidJson<SubmitInput>,
+) -> ApiResult {
+    let week_start = parse_date(&input.week_start)?;
+    let week_end = week_start
+        .checked_add_days(chrono::Days::new(6))
+        .ok_or_else(|| ApiError::bad_request("invalid week"))?;
+    let all = app.store.list_range(week_start, week_end)?;
+    // Entries already locked (submitted/approved) can't be resubmitted.
+    let entry_ids: Vec<Uuid> = all
+        .iter()
+        .filter(|e| e.user_id == Some(actor.0.id))
+        .map(|e| e.id)
+        .filter(|id| app.locks.entry_lock(*id).is_none())
+        .collect();
+    if entry_ids.is_empty() {
+        return Err(ApiError::conflict(
+            "no unlocked entries to submit this week",
+        ));
+    }
+    let now = app.clock.now();
+    let submission = Submission {
+        id: Uuid::new_v4(),
+        user_id: actor.0.id,
+        week_start,
+        week_end,
+        state: SubmissionState::Submitted,
+        entry_ids,
+        comment: String::new(),
+        created_at: now,
+        submitted_at: Some(now),
+        decided_at: None,
+    };
+    app.store.put_submission(&submission)?;
+    Ok((StatusCode::CREATED, Json(submission)).into_response())
+}
+
+/// Approve or reject a submitted timesheet. Rejecting releases its locks.
+pub async fn decide_submission(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<DecisionInput>,
+) -> ApiResult {
+    let mut submission = app
+        .store
+        .get_submission(id)?
+        .ok_or_else(|| ApiError::not_found("submission"))?;
+    if submission.state != SubmissionState::Submitted {
+        return Err(ApiError::conflict(
+            "only a submitted timesheet can be decided",
+        ));
+    }
+    submission.state = match input.decision.as_str() {
+        "approve" => SubmissionState::Approved,
+        "reject" => SubmissionState::Rejected,
+        other => {
+            return Err(ApiError::validation(vec![FieldError::new(
+                "decision",
+                format!("'{other}' is not approve or reject"),
+            )]));
+        }
+    };
+    submission.comment = input.comment;
+    submission.decided_at = Some(app.clock.now());
+    app.store.put_submission(&submission)?;
+    Ok(Json(submission).into_response())
 }
 
 pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {

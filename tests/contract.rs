@@ -1265,3 +1265,103 @@ async fn expense_receipt_roundtrips() {
     assert_eq!(got["receipt_name"], "hotel.png");
     assert_eq!(got["receipt_b64"], "aGVsbG8=");
 }
+
+// ------------------------------------------------------------ submissions --
+
+async fn seed_week(app: &Client, cid: &str) -> String {
+    let (_, e) = json_req(
+        app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    e["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn submit_locks_and_reject_unlocks() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    let eid = seed_week(&app, cid).await;
+
+    let (s, sub) = json_req(
+        &app,
+        "POST",
+        "/submissions",
+        Some(json!({"week_start":"2026-09-28"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{sub}");
+    let sid = sub["id"].as_str().unwrap().to_string();
+    let edit_body = json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":4});
+
+    // Submitted -> entry locked.
+    let (s1, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/entries/{eid}"),
+        Some(edit_body.clone()),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::CONFLICT);
+
+    // Reject -> unlocked.
+    let (sd, _) = json_req(
+        &app,
+        "POST",
+        &format!("/submissions/{sid}/decision"),
+        Some(json!({"decision":"reject","comment":"redo"})),
+    )
+    .await;
+    assert_eq!(sd, StatusCode::OK);
+    let (s2, _) = json_req(&app, "PUT", &format!("/entries/{eid}"), Some(edit_body)).await;
+    assert_eq!(s2, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn approve_keeps_locked_and_double_submit_refused() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    let eid = seed_week(&app, cid).await;
+
+    let (_, sub) = json_req(
+        &app,
+        "POST",
+        "/submissions",
+        Some(json!({"week_start":"2026-09-28"})),
+    )
+    .await;
+    let sid = sub["id"].as_str().unwrap();
+    json_req(
+        &app,
+        "POST",
+        &format!("/submissions/{sid}/decision"),
+        Some(json!({"decision":"approve"})),
+    )
+    .await;
+
+    // Approved -> still locked.
+    let (s_edit, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/entries/{eid}"),
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":4})),
+    )
+    .await;
+    assert_eq!(s_edit, StatusCode::CONFLICT);
+
+    // Resubmitting the same week: the only entry is locked, so nothing to submit.
+    let (s2, _) = json_req(
+        &app,
+        "POST",
+        "/submissions",
+        Some(json!({"week_start":"2026-09-28"})),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::CONFLICT);
+}

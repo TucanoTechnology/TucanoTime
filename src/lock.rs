@@ -88,3 +88,32 @@ impl EntryLock for InvoiceLock {
             })
     }
 }
+
+/// Lock provider backed by submitted/approved timesheets (#16): an entry in a
+/// submitted or approved submission is frozen until it is rejected/withdrawn.
+pub struct SubmissionLock {
+    store: std::sync::Arc<crate::store::Store>,
+}
+
+impl SubmissionLock {
+    pub fn new(store: std::sync::Arc<crate::store::Store>) -> Self {
+        Self { store }
+    }
+}
+
+impl EntryLock for SubmissionLock {
+    fn entry_lock(&self, entry_id: Uuid) -> Option<LockReason> {
+        self.store
+            .list_submissions()
+            .ok()?
+            .iter()
+            .find(|s| {
+                (s.state == crate::domain::SubmissionState::Submitted
+                    || s.state == crate::domain::SubmissionState::Approved)
+                    && s.entry_ids.contains(&entry_id)
+            })
+            .map(|s| LockReason::Submitted {
+                id: s.week_start.format("%Y-%m-%d").to_string(),
+            })
+    }
+}

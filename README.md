@@ -14,6 +14,7 @@ suite — file-based (no database), one container, browser GUI.
 - **Reports** — totals grouped by customer, project or ISO week; **CSV export** (formula-injection safe).
 - **Invoices** — generate a draft from a period's billable work, snapshotting each entry's rate; issuing an invoice **locks** its entries from edits/deletes.
 - **Expenses** — record costs per project with categories, billable flags, and optional attached receipts; billable expenses roll into invoices (#25).
+- **Timesheet submissions** — submit a week for approval; submitted/approved weeks **lock** their entries (shared lock seam); rejecting releases them.
 
 ## Quick start (Docker)
 

@@ -49,6 +49,7 @@
         <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
         <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
         <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
+        <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Timesheets</button>
       </div>
     </nav>
   </header>
@@ -246,6 +247,23 @@
         <tbody></tbody>
       </table>
       <p id="expense-empty" hidden>No expenses recorded yet.</p>
+    </section>
+
+    <!-- SUBMISSIONS -->
+    <section id="panel-submissions" role="tabpanel" aria-labelledby="tab-submissions" tabindex="0" hidden>
+      <h2>Timesheet submissions</h2>
+      <form id="submission-form" class="bar">
+        <label for="submission-week">Week starting</label>
+        <input type="date" id="submission-week" required>
+        <button type="submit">Submit week</button>
+      </form>
+      <p class="form-error" id="submission-error" role="alert" hidden></p>
+      <table id="submission-table">
+        <caption class="sr-only">Submissions</caption>
+        <thead><tr><th scope="col">Week</th><th scope="col">Entries</th><th scope="col">State</th><th scope="col">Comment</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="submission-empty" hidden>No timesheets submitted yet.</p>
     </section>
   </main>
 

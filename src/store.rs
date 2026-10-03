@@ -16,7 +16,7 @@ use chrono::NaiveDate;
 use uuid::Uuid;
 
 use crate::auth::User;
-use crate::domain::{Category, Customer, Entry, Expense, Invoice, Project, Task};
+use crate::domain::{Category, Customer, Entry, Expense, Invoice, Project, Submission, Task};
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
 /// over the whole tree. 400 days covers a year plus buffer.
@@ -280,6 +280,43 @@ impl Store {
         }
         std::fs::remove_file(&path)?;
         Ok(())
+    }
+
+    // ---------------------------------------------------------- submissions --
+
+    fn submission_path(&self, id: Uuid) -> PathBuf {
+        self.root.join("submissions").join(format!("{id}.json"))
+    }
+
+    pub fn list_submissions(&self) -> Result<Vec<Submission>, StoreError> {
+        let dir = self.root.join("submissions");
+        let mut out = Vec::new();
+        if !dir.exists() {
+            return Ok(out);
+        }
+        for path in dir_entries(&dir)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(s) = read_json::<Submission>(&path)? {
+                out.push(s);
+            }
+        }
+        out.sort_by_key(|s| std::cmp::Reverse(s.week_start));
+        Ok(out)
+    }
+
+    pub fn get_submission(&self, id: Uuid) -> Result<Option<Submission>, StoreError> {
+        read_json(&self.submission_path(id))
+    }
+
+    pub fn put_submission(&self, submission: &Submission) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        std::fs::create_dir_all(self.root.join("submissions"))?;
+        write_json(&self.submission_path(submission.id), submission)
     }
 
     // ------------------------------------------------------------ customers --
