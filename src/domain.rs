@@ -243,6 +243,9 @@ pub struct Entry {
     pub id: Uuid,
     pub date: NaiveDate,
     pub customer_id: Uuid,
+    /// The user who logged the entry (#21 attribution; None for legacy docs).
+    #[serde(default)]
+    pub user_id: Option<Uuid>,
     pub project_code: ProjectCode,
     /// Optional task within the project (#38). Must belong to `project_code`.
     #[serde(default)]
@@ -260,14 +263,17 @@ pub struct Entry {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Effective (currency, rate) of an entry. Precedence: task override → project
-/// (which always carries its own values since #11) → customer default (used only
-/// when the project document is missing, defensive).
-pub fn effective_rates<'a>(
+/// Effective (currency, rate) of an entry. Rate precedence (#21):
+/// **task → person → project → customer default**. Currency precedence:
+/// task → project → customer. `user_rate` is the logging person's default
+/// (Some only when > 0), kept as a plain number so `domain` stays independent
+/// of the `auth` module.
+pub fn effective_rates(
     _entry: &Entry,
-    customer: &'a Customer,
-    project: Option<&'a Project>,
-    task: Option<&'a Task>,
+    customer: &Customer,
+    project: Option<&Project>,
+    task: Option<&Task>,
+    user_rate: Option<u64>,
 ) -> (Currency, u64) {
     let currency = task
         .and_then(|t| t.currency.clone())
@@ -275,6 +281,7 @@ pub fn effective_rates<'a>(
         .unwrap_or_else(|| customer.currency.clone());
     let rate = task
         .and_then(|t| t.rate_minor)
+        .or(user_rate.filter(|r| *r > 0))
         .or_else(|| project.map(|p| p.rate_minor))
         .unwrap_or(customer.default_rate_minor);
     (currency, rate)
@@ -608,11 +615,12 @@ mod tests {
     }
 
     #[test]
-    fn effective_rate_uses_project_values() {
+    fn effective_rate_precedence_task_person_project_customer() {
         let entry = Entry {
             id: Uuid::new_v4(),
             date: chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
             customer_id: Uuid::new_v4(),
+            user_id: None,
             project_code: ProjectCode::parse("P1").unwrap(),
             task_code: None,
             hours: Hours(100),
@@ -637,15 +645,22 @@ mod tests {
             rate_minor: 3000,
             active: true,
         };
+        // Project value wins over customer default.
         assert_eq!(
-            effective_rates(&entry, &customer, Some(&project), None),
+            effective_rates(&entry, &customer, Some(&project), None, None),
             (Currency("USD".into()), 3000)
         );
+        // Missing project falls to customer default.
         assert_eq!(
-            effective_rates(&entry, &customer, None, None),
+            effective_rates(&entry, &customer, None, None, None),
             (Currency("EUR".into()), 6000)
         );
-        // A task override beats the project.
+        // Person rate beats the project rate, keeps the project currency.
+        assert_eq!(
+            effective_rates(&entry, &customer, Some(&project), None, Some(4500)),
+            (Currency("USD".into()), 4500)
+        );
+        // A task override beats the person rate.
         let task = Task {
             customer_id: customer.id,
             project_code: entry.project_code.clone(),
@@ -656,7 +671,7 @@ mod tests {
             active: true,
         };
         assert_eq!(
-            effective_rates(&entry, &customer, Some(&project), Some(&task)),
+            effective_rates(&entry, &customer, Some(&project), Some(&task), Some(4500)),
             (Currency("GBP".into()), 5000)
         );
     }

@@ -203,7 +203,7 @@ pub async fn bootstrap(
             "required, at most 120 characters",
         )]));
     }
-    let user = new_user(name, &email, &input.password, Role::Admin, true, &app)?;
+    let user = new_user(name, &email, &input.password, Role::Admin, true, 0, &app)?;
     let (headers, pubuser) = set_cookie(&app, &user);
     Ok((StatusCode::CREATED, headers, Json(pubuser)).into_response())
 }
@@ -263,6 +263,7 @@ fn new_user(
     password: &str,
     role: Role,
     active: bool,
+    default_rate_minor: u64,
     app: &AppState,
 ) -> Result<User, ApiError> {
     let password_hash = auth::hash_password(password)
@@ -273,6 +274,7 @@ fn new_user(
         email: email.to_owned(),
         role,
         active,
+        default_rate_minor,
         password_hash,
         created_at: app.clock.now(),
     };
@@ -292,6 +294,8 @@ pub struct UserInput {
     role: Option<Role>,
     #[serde(default = "default_active_true")]
     active: bool,
+    #[serde(default)]
+    default_rate_minor: u64,
 }
 
 fn default_active_true() -> bool {
@@ -329,6 +333,7 @@ pub async fn create_user(
         &input.password,
         input.role.unwrap_or(Role::Member),
         input.active,
+        input.default_rate_minor,
         &app,
     )?;
     Ok((StatusCode::CREATED, Json(PublicUser::from(&user))).into_response())
@@ -661,6 +666,7 @@ fn entry_json(e: &Entry) -> serde_json::Value {
 
 pub async fn create_entry(
     State(app): State<AppState>,
+    actor: AuthUser,
     ValidJson(input): ValidJson<EntryInput>,
 ) -> ApiResult {
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
@@ -670,6 +676,7 @@ pub async fn create_entry(
         id: Uuid::new_v4(),
         date: draft.date,
         customer_id: draft.customer_id,
+        user_id: Some(actor.0.id),
         project_code: ProjectCode(draft.project_code),
         task_code: draft.task_code.map(ProjectCode),
         hours: draft.hours,
@@ -709,6 +716,7 @@ pub async fn update_entry(
         id,
         date: draft.date,
         customer_id: draft.customer_id,
+        user_id: existing.user_id,
         project_code: ProjectCode(draft.project_code),
         task_code: draft.task_code.map(ProjectCode),
         hours: draft.hours,
@@ -759,15 +767,15 @@ pub async fn summary(
     };
     let entries = app.store.list_range(from, to)?;
     let customers: Vec<Customer> = app.store.list_customers()?.into_iter().collect();
-    let (projects, tasks) = gather_hierarchy(&app, &customers)?;
-    let rows = report::summarise(&entries, &customers, &projects, &tasks, kind);
+    let (projects, tasks, users) = gather_hierarchy(&app, &customers)?;
+    let rows = report::summarise(&entries, &customers, &projects, &tasks, &users, kind);
     Ok(Json(rows).into_response())
 }
 
-/// Every project and task for a set of customers, loaded once for reports.
-type Hierarchy = (Vec<(Uuid, Project)>, Vec<Task>);
+/// Every project, task and user for a set of customers, loaded once for reports.
+type Hierarchy = (Vec<(Uuid, Project)>, Vec<Task>, Vec<User>);
 
-/// Load every project and task once, for report rate resolution.
+/// Load projects, tasks and users once, for report rate resolution.
 fn gather_hierarchy(app: &AppState, customers: &[Customer]) -> Result<Hierarchy, ApiError> {
     let mut projects: Vec<(Uuid, Project)> = Vec::new();
     let mut tasks: Vec<Task> = Vec::new();
@@ -777,7 +785,8 @@ fn gather_hierarchy(app: &AppState, customers: &[Customer]) -> Result<Hierarchy,
             projects.push((c.id, p));
         }
     }
-    Ok((projects, tasks))
+    let users = app.store.list_users()?;
+    Ok((projects, tasks, users))
 }
 
 pub async fn export_csv(
@@ -794,8 +803,8 @@ pub async fn export_csv(
     };
     let entries = app.store.list_range(from, to)?;
     let customers = app.store.list_customers()?;
-    let (projects, tasks) = gather_hierarchy(&app, &customers)?;
-    let csv = report::export_csv(&entries, &customers, &projects, &tasks, filter);
+    let (projects, tasks, users) = gather_hierarchy(&app, &customers)?;
+    let csv = report::export_csv(&entries, &customers, &projects, &tasks, &users, filter);
     Ok((
         [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
         csv,

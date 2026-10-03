@@ -974,3 +974,47 @@ async fn member_cannot_manage_users() {
     let (s_cust, _, _) = raw(&app.router, "GET", "/customers", None, Some(&cookie)).await;
     assert_eq!(s_cust, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn report_applies_person_rate_tier_and_attributes_entry() {
+    let (app, _d) = app().await;
+    // Customer default 60/h; project rate 30/h.
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 3000})).await;
+
+    // Admin creates a member with a personal default of 45/h.
+    let (_s, bob) = json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(json!({"name":"Bob","email":"bob@test.local","password":"bobpass123","role":"member","default_rate_minor":4500})),
+    )
+    .await;
+    let bob_id = bob["id"].as_str().unwrap().to_string();
+
+    // Bob logs 2h on P1.
+    let bob_cookie = login_cookie(&app.router, "bob@test.local", "bobpass123").await;
+    let (_s2, entry, _) = raw(
+        &app.router,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
+        Some(&bob_cookie),
+    )
+    .await;
+    assert_eq!(
+        entry["user_id"], bob_id,
+        "entry attributed to the logging user"
+    );
+
+    // Report: person rate (45) overrides project rate (30) -> 2h * 45 = 90.00 = 9000.
+    let (_s3, summary) = json_req(
+        &app,
+        "GET",
+        "/reports/summary?from=2026-10-01&to=2026-10-07&group=customer",
+        None,
+    )
+    .await;
+    assert_eq!(summary["rows"][0]["amount_minor"], 9000);
+}
