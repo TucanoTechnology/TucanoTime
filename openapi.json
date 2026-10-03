@@ -205,11 +205,13 @@
       },
       "Summary": {
         "type": "object",
-        "required": ["group", "rows", "total_hours"],
+        "required": ["group", "rows", "total_hours", "billable_hours", "nonbillable_hours"],
         "properties": {
-          "group": { "type": "string", "enum": ["customer", "project", "week"] },
+          "group": { "type": "string", "enum": ["customer", "project", "person", "week"] },
           "rows": { "type": "array", "items": { "$ref": "#/components/schemas/SummaryRow" } },
-          "total_hours": { "type": "number" }
+          "total_hours": { "type": "number" },
+          "billable_hours": { "type": "number" },
+          "nonbillable_hours": { "type": "number" }
         },
         "additionalProperties": false
       },
@@ -871,7 +873,14 @@
           "name": "group",
           "in": "query",
           "required": false,
-          "schema": { "type": "string", "enum": ["customer", "project", "week"], "default": "customer" }
+          "schema": { "type": "string", "enum": ["customer", "project", "person", "week"], "default": "customer" }
+        },
+        {
+          "name": "billable",
+          "in": "query",
+          "required": false,
+          "schema": { "type": "boolean" },
+          "description": "Scope rows to billable (true) or non-billable (false); omit for all."
         }
       ],
       "get": {

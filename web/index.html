@@ -188,7 +188,9 @@
         <label for="report-from">From</label><input type="date" id="report-from" required>
         <label for="report-to">To</label><input type="date" id="report-to" required>
         <label for="report-group">Group by</label>
-        <select id="report-group"><option value="customer">Customer</option><option value="project">Project</option><option value="week">ISO week</option></select>
+        <select id="report-group"><option value="customer">Customer</option><option value="project">Project</option><option value="person">Person</option><option value="week">ISO week</option></select>
+        <label for="report-billable">Work</label>
+        <select id="report-billable"><option value="">All</option><option value="true">Billable</option><option value="false">Non-billable</option></select>
         <button type="submit" class="secondary">Run</button>
         <a id="csv-link" class="button-link" href="#" download="timesheet.csv" hidden>Download CSV</a>
       </form>
