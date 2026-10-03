@@ -441,10 +441,47 @@ pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) ->
     if invoice.status != InvoiceStatus::Draft {
         return Err(ApiError::conflict("only a draft invoice can be issued"));
     }
+    let now = app.clock.now();
     invoice.status = InvoiceStatus::Issued;
-    invoice.issued_at = Some(app.clock.now());
+    invoice.issued_at = Some(now);
+    invoice.due_date = invoice.period_to.checked_add_days(chrono::Days::new(14)); // net-14 terms
     app.store.put_invoice(&invoice)?;
     Ok(Json(invoice).into_response())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PayInput {
+    #[serde(default)]
+    pub reference: String,
+}
+
+/// Mark an issued invoice as paid (#27).
+pub async fn pay_invoice(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<PayInput>,
+) -> ApiResult {
+    let mut invoice = app
+        .store
+        .get_invoice(id)?
+        .ok_or_else(|| ApiError::not_found("invoice"))?;
+    if invoice.status != InvoiceStatus::Issued {
+        return Err(ApiError::conflict(
+            "only an issued invoice can be marked paid",
+        ));
+    }
+    invoice.status = InvoiceStatus::Paid;
+    invoice.paid_at = Some(app.clock.now());
+    invoice.payment_reference = input.reference;
+    app.store.put_invoice(&invoice)?;
+    Ok(Json(invoice).into_response())
+}
+
+pub async fn invoice_summary(State(app): State<AppState>) -> ApiResult {
+    let invoices = app.store.list_invoices()?;
+    let summary = crate::domain::summarise_invoices(&invoices, app.clock.today());
+    Ok(Json(summary).into_response())
 }
 
 pub async fn delete_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {

@@ -8,6 +8,7 @@ use crate::auth::User;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Number;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 /// Hours as hundredths (1 = 0.01 h, 2400 = 24.00 h).
@@ -277,6 +278,50 @@ pub struct Invoice {
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issued_at: Option<DateTime<Utc>>,
+    /// Payment terms (net-14 from issue, #27). None until issued.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_date: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paid_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub payment_reference: String,
+}
+
+/// Aggregate of invoice states for the dashboard (#27).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct InvoiceSummary {
+    pub draft: usize,
+    pub issued: usize,
+    pub overdue: usize,
+    pub paid: usize,
+    /// Outstanding (issued, unpaid) totals keyed by currency.
+    pub outstanding: BTreeMap<String, u64>,
+}
+
+/// Roll up invoice states as of `today`; an issued invoice past its due date
+/// counts as overdue and its total is outstanding.
+pub fn summarise_invoices(invoices: &[Invoice], today: NaiveDate) -> InvoiceSummary {
+    let mut s = InvoiceSummary {
+        draft: 0,
+        issued: 0,
+        overdue: 0,
+        paid: 0,
+        outstanding: BTreeMap::new(),
+    };
+    for inv in invoices {
+        match inv.status {
+            InvoiceStatus::Draft => s.draft += 1,
+            InvoiceStatus::Paid => s.paid += 1,
+            InvoiceStatus::Issued => {
+                if inv.due_date.is_some_and(|d| d < today) {
+                    s.overdue += 1;
+                }
+                s.issued += 1;
+                *s.outstanding.entry(inv.currency.0.clone()).or_insert(0) += inv.total_minor;
+            }
+        }
+    }
+    s
 }
 
 /// Why invoice generation was refused.
@@ -548,6 +593,9 @@ pub fn generate_invoice(
         status: InvoiceStatus::Draft,
         created_at: now,
         issued_at: None,
+        due_date: None,
+        paid_at: None,
+        payment_reference: String::new(),
     })
 }
 
@@ -987,5 +1035,46 @@ mod tests {
             effective_rates(&entry, &customer, Some(&project), Some(&task), Some(4500)),
             (Currency("GBP".into()), 5000)
         );
+    }
+
+    fn inv(status: InvoiceStatus, total: u64, due: Option<NaiveDate>) -> Invoice {
+        Invoice {
+            id: Uuid::new_v4(),
+            number: "INV-1".into(),
+            customer_id: Uuid::new_v4(),
+            currency: Currency("EUR".into()),
+            period_from: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            period_to: NaiveDate::from_ymd_opt(2026, 1, 7).unwrap(),
+            lines: vec![],
+            total_minor: total,
+            status,
+            created_at: Utc::now(),
+            issued_at: None,
+            due_date: due,
+            paid_at: None,
+            payment_reference: String::new(),
+        }
+    }
+
+    #[test]
+    fn invoice_summary_counts_and_outstanding() {
+        let today = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+        let invoices = vec![
+            inv(InvoiceStatus::Draft, 100, None),
+            inv(
+                InvoiceStatus::Issued,
+                500,
+                Some(NaiveDate::from_ymd_opt(2026, 1, 20).unwrap()),
+            ), // overdue
+            inv(
+                InvoiceStatus::Issued,
+                300,
+                Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
+            ), // not yet due
+            inv(InvoiceStatus::Paid, 999, None),
+        ];
+        let s = summarise_invoices(&invoices, today);
+        assert_eq!((s.draft, s.issued, s.overdue, s.paid), (1, 2, 1, 1));
+        assert_eq!(s.outstanding.get("EUR"), Some(&(800))); // both issued, unpaid
     }
 }

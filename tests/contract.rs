@@ -1414,3 +1414,49 @@ async fn report_splits_billable_and_groups_by_person() {
     assert_eq!(sp["group"], "person");
     assert_eq!(sp["rows"][0]["label"], "Admin");
 }
+
+#[tokio::test]
+async fn invoice_pay_flow_and_summary() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+
+    // Issue sets due_date (net-14).
+    let (_, issued) = json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    assert_eq!(issued["status"], "issued");
+    assert!(issued["due_date"].is_string(), "issue sets a due date");
+
+    // Pay it.
+    let (_, paid) = json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{iid}/pay"),
+        Some(json!({"reference":"bank-123"})),
+    )
+    .await;
+    assert_eq!(paid["status"], "paid");
+    assert_eq!(paid["payment_reference"], "bank-123");
+
+    // Summary reflects one paid invoice, nothing outstanding.
+    let (s, sum) = json_req(&app, "GET", "/invoices/summary", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(sum["paid"], 1);
+    assert_eq!(sum["issued"], 0);
+    assert!(sum["outstanding"].as_object().unwrap().is_empty());
+}

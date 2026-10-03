@@ -881,11 +881,40 @@ async function refreshInvoices() {
       del.textContent = 'Delete';
       del.addEventListener('click', () => removeInvoice(inv.id));
       act.append(issue, del);
+    } else if (inv.status === 'issued') {
+      const pay = document.createElement('button');
+      pay.className = 'link';
+      pay.type = 'button';
+      pay.textContent = 'Mark paid';
+      pay.addEventListener('click', () => markInvoicePaid(inv.id));
+      act.append(pay);
     }
     tr.append(num, cust, period, total, status, act);
     tbody.appendChild(tr);
   }
   $('invoice-empty').hidden = invoices.length !== 0;
+  await refreshInvoiceSummary();
+}
+
+async function refreshInvoiceSummary() {
+  const s = await api.get('/invoices/summary');
+  const outstanding = Object.entries(s.outstanding || {})
+    .map(([cur, minor]) => `${cur} ${formatMoney(minor)}`)
+    .join(', ');
+  $('invoice-summary').textContent =
+    `Draft ${s.draft} · Issued ${s.issued}${s.overdue ? ` (${s.overdue} overdue)` : ''} · Paid ${s.paid}` +
+    (outstanding ? ` · Outstanding: ${outstanding}` : '');
+}
+
+async function markInvoicePaid(id) {
+  const reference = window.prompt('Payment reference (optional):') || '';
+  try {
+    await api.post(`/invoices/${id}/pay`, { reference });
+    announce('Invoice marked paid.');
+    await refreshInvoices();
+  } catch (err) {
+    announce(err.message);
+  }
 }
 
 async function generateInvoice(evt) {
