@@ -1060,17 +1060,36 @@ pub async fn summary(
     let kind = match group {
         "customer" => report::Group::Customer,
         "project" => report::Group::Project,
+        "person" => report::Group::Person,
         "week" => report::Group::Week,
         other => {
             return Err(ApiError::bad_request(format!(
-                "unknown group '{other}' (use customer, project or week)"
+                "unknown group '{other}' (use customer, project, person or week)"
+            )));
+        }
+    };
+    let billable_filter = match q.get("billable").map(String::as_str) {
+        None => None,
+        Some("true") => Some(true),
+        Some("false") => Some(false),
+        Some(other) => {
+            return Err(ApiError::bad_request(format!(
+                "'billable' must be true or false, got '{other}'"
             )));
         }
     };
     let entries = app.store.list_range(from, to)?;
     let customers: Vec<Customer> = app.store.list_customers()?.into_iter().collect();
     let (projects, tasks, users) = gather_hierarchy(&app, &customers)?;
-    let rows = report::summarise(&entries, &customers, &projects, &tasks, &users, kind);
+    let rows = report::summarise(
+        &entries,
+        &customers,
+        &projects,
+        &tasks,
+        &users,
+        kind,
+        billable_filter,
+    );
     Ok(Json(rows).into_response())
 }
 

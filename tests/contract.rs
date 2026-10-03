@@ -1365,3 +1365,52 @@ async fn approve_keeps_locked_and_double_submit_refused() {
     .await;
     assert_eq!(s2, StatusCode::CONFLICT);
 }
+
+#[tokio::test]
+async fn report_splits_billable_and_groups_by_person() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    // 3h billable + 2h non-billable, both by the admin.
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    json_req(&app, "POST", "/entries", Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2,"billable":false}))).await;
+
+    let (_, s) = json_req(
+        &app,
+        "GET",
+        "/reports/summary?from=2026-10-01&to=2026-10-07&group=customer",
+        None,
+    )
+    .await;
+    assert_eq!(s["billable_hours"], 3.0);
+    assert_eq!(s["nonbillable_hours"], 2.0);
+    assert_eq!(s["total_hours"], 5.0);
+
+    // billable=true scopes rows to billable only (3h).
+    let (_, sb) = json_req(
+        &app,
+        "GET",
+        "/reports/summary?from=2026-10-01&to=2026-10-07&group=customer&billable=true",
+        None,
+    )
+    .await;
+    assert_eq!(sb["rows"][0]["hours"], 3.0);
+
+    // group=person yields one row for the admin.
+    let (_, sp) = json_req(
+        &app,
+        "GET",
+        "/reports/summary?from=2026-10-01&to=2026-10-07&group=person",
+        None,
+    )
+    .await;
+    assert_eq!(sp["group"], "person");
+    assert_eq!(sp["rows"][0]["label"], "Admin");
+}

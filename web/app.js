@@ -811,7 +811,10 @@ async function runReport(evt) {
   const from = $('report-from').value;
   const to = $('report-to').value;
   const group = $('report-group').value;
-  const summary = await api.get(`/reports/summary?from=${from}&to=${to}&group=${group}`);
+  const billable = $('report-billable').value;
+  let url = `/reports/summary?from=${from}&to=${to}&group=${group}`;
+  if (billable) url += `&billable=${billable}`;
+  const summary = await api.get(url);
   const tbody = $('report-table').querySelector('tbody');
   tbody.textContent = '';
   for (const row of summary.rows) {
@@ -833,7 +836,7 @@ async function runReport(evt) {
     tr.append(label, cur, hrs, amt, ent);
     tbody.appendChild(tr);
   }
-  $('report-total').textContent = summary.total_hours.toFixed(2);
+  $('report-total').textContent = `${summary.total_hours.toFixed(2)}  (billable ${summary.billable_hours.toFixed(2)} / non-billable ${summary.nonbillable_hours.toFixed(2)})`;
   const link = $('csv-link');
   link.href = `/reports/export.csv?from=${from}&to=${to}`;
   link.hidden = false;

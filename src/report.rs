@@ -18,6 +18,7 @@ pub enum Group {
     Customer,
     Project,
     Week,
+    Person,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -35,14 +36,26 @@ pub struct Summary {
     pub group: String,
     pub rows: Vec<SummaryRow>,
     pub total_hours: f64,
+    pub billable_hours: f64,
+    pub nonbillable_hours: f64,
 }
 
-fn group_key(entry: &Entry, kind: Group, customer_name: &str, code: &str) -> (String, String) {
+fn group_key(
+    entry: &Entry,
+    kind: Group,
+    customer_name: &str,
+    code: &str,
+    user_name: &str,
+) -> (String, String) {
     match kind {
         Group::Customer => (entry.customer_id.to_string(), customer_name.to_owned()),
         Group::Project => (
             format!("{}:{code}", entry.customer_id),
             format!("{customer_name} / {code}"),
+        ),
+        Group::Person => (
+            entry.user_id.map(|u| u.to_string()).unwrap_or_default(),
+            user_name.to_owned(),
         ),
         Group::Week => {
             let iso = entry.date.iso_week();
@@ -54,6 +67,9 @@ fn group_key(entry: &Entry, kind: Group, customer_name: &str, code: &str) -> (St
     }
 }
 
+/// `billable_filter` scopes the rows to billable (`Some(true)`), non-billable
+/// (`Some(false)`) or all (`None`); the billable/non-billable split in the
+/// totals always reflects the full entry set.
 pub fn summarise(
     entries: &[Entry],
     customers: &[Customer],
@@ -61,8 +77,25 @@ pub fn summarise(
     tasks: &[Task],
     users: &[User],
     kind: Group,
+    billable_filter: Option<bool>,
 ) -> Summary {
     let customer_by_id: BTreeMap<Uuid, &Customer> = customers.iter().map(|c| (c.id, c)).collect();
+    let user_name = |e: &Entry| -> String {
+        e.user_id
+            .and_then(|uid| users.iter().find(|u| u.id == uid))
+            .map(|u| u.name.clone())
+            .unwrap_or_else(|| "(unattributed)".to_string())
+    };
+    let billable_hours: f64 = entries
+        .iter()
+        .filter(|e| e.billable)
+        .map(|e| e.hours.0 as f64 / 100.0)
+        .sum();
+    let nonbillable_hours: f64 = entries
+        .iter()
+        .filter(|e| !e.billable)
+        .map(|e| e.hours.0 as f64 / 100.0)
+        .sum();
     let project_for = |e: &Entry| -> Option<&crate::domain::Project> {
         projects
             .iter()
@@ -87,13 +120,18 @@ pub fn summarise(
     // customer or project never mixes currencies; weeks can).
     let mut acc: BTreeMap<(String, String), AccRow> = BTreeMap::new();
     for e in entries {
+        if let Some(want) = billable_filter
+            && e.billable != want
+        {
+            continue;
+        }
         let Some(customer) = customer_by_id.get(&e.customer_id) else {
             continue; // dangling reference: excluded from totals, never fabricated.
         };
         let project = project_for(e);
         let (currency, rate) = effective_rates(e, customer, project, task_for(e), user_rate(e));
         let label_customer = &customer.name;
-        let (mut key, label) = group_key(e, kind, label_customer, &e.project_code.0);
+        let (mut key, label) = group_key(e, kind, label_customer, &e.project_code.0, &user_name(e));
         if kind == Group::Week {
             key = format!("{key}|{}", currency.0);
         }
@@ -125,6 +163,8 @@ pub fn summarise(
         group: group_name(kind).to_owned(),
         rows,
         total_hours: round2(entries.iter().map(|e| e.hours.0 as f64 / 100.0).sum()),
+        billable_hours: round2(billable_hours),
+        nonbillable_hours: round2(nonbillable_hours),
     }
 }
 
@@ -140,6 +180,7 @@ fn group_name(kind: Group) -> &'static str {
     match kind {
         Group::Customer => "customer",
         Group::Project => "project",
+        Group::Person => "person",
         Group::Week => "week",
     }
 }
