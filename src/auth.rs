@@ -32,6 +32,10 @@ pub struct User {
     pub email: String,
     pub role: Role,
     pub active: bool,
+    /// The person's default hourly rate in minor units (#21). 0 = unset, in
+    /// which case billing falls through to the customer default.
+    #[serde(default)]
+    pub default_rate_minor: u64,
     pub password_hash: String,
     pub created_at: DateTime<Utc>,
 }
@@ -44,6 +48,7 @@ pub struct PublicUser {
     pub email: String,
     pub role: Role,
     pub active: bool,
+    pub default_rate_minor: u64,
 }
 
 impl From<&User> for PublicUser {
@@ -54,6 +59,7 @@ impl From<&User> for PublicUser {
             email: u.email.clone(),
             role: u.role,
             active: u.active,
+            default_rate_minor: u.default_rate_minor,
         }
     }
 }
@@ -188,6 +194,7 @@ mod tests {
             email: "a@b.co".into(),
             role: Role::Admin,
             active: true,
+            default_rate_minor: 0,
             password_hash: String::new(),
             created_at: Utc::now(),
         };

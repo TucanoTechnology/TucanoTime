@@ -159,6 +159,7 @@
           "id": { "type": "string", "format": "uuid" },
           "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
           "customer_id": { "type": "string", "format": "uuid" },
+          "user_id": { "oneOf": [ { "type": "string", "format": "uuid" }, { "type": "null" } ], "description": "The user who logged the entry (attribution, #21)." },
           "project_code": { "$ref": "#/components/schemas/ProjectCode" },
           "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ], "description": "Optional task within the project (#38)." },
           "hours": { "$ref": "#/components/schemas/Hours" },
@@ -209,13 +210,14 @@
       },
       "PublicUser": {
         "type": "object",
-        "required": ["id", "name", "email", "role", "active"],
+        "required": ["id", "name", "email", "role", "active", "default_rate_minor"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "name": { "type": "string" },
           "email": { "type": "string", "format": "email" },
           "role": { "type": "string", "enum": ["admin", "member"] },
-          "active": { "type": "boolean" }
+          "active": { "type": "boolean" },
+          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" }
         },
         "additionalProperties": false
       },
@@ -246,7 +248,8 @@
           "email": { "type": "string", "format": "email" },
           "password": { "type": "string", "minLength": 8 },
           "role": { "type": "string", "enum": ["admin", "member"] },
-          "active": { "type": "boolean", "default": true }
+          "active": { "type": "boolean", "default": true },
+          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" }
         },
         "additionalProperties": false
       }
