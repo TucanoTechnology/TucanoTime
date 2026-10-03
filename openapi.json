@@ -290,7 +290,22 @@
           "total_minor": { "type": "integer", "minimum": 0 },
           "status": { "$ref": "#/components/schemas/InvoiceStatus" },
           "created_at": { "type": "string", "format": "date-time" },
-          "issued_at": { "type": [ "string", "null" ], "format": "date-time" }
+          "issued_at": { "type": [ "string", "null" ], "format": "date-time" },
+          "due_date": { "type": [ "string", "null" ], "format": "date" },
+          "paid_at": { "type": [ "string", "null" ], "format": "date-time" },
+          "payment_reference": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "InvoiceSummary": {
+        "type": "object",
+        "required": ["draft", "issued", "overdue", "paid", "outstanding"],
+        "properties": {
+          "draft": { "type": "integer", "minimum": 0 },
+          "issued": { "type": "integer", "minimum": 0 },
+          "overdue": { "type": "integer", "minimum": 0 },
+          "paid": { "type": "integer", "minimum": 0 },
+          "outstanding": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "Unpaid issued totals keyed by currency (minor units)." }
         },
         "additionalProperties": false
       },
@@ -969,6 +984,28 @@
           "404": { "$ref": "#/components/responses/NotFound" },
           "409": { "$ref": "#/components/responses/Conflict" }
         }
+      }
+    },
+    "/invoices/{id}/pay": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "post": {
+        "operationId": "payInvoice",
+        "tags": ["invoices"],
+        "summary": "Mark an issued invoice as paid",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": [], "properties": { "reference": { "type": "string", "maxLength": 200 } }, "additionalProperties": false } } } },
+        "responses": {
+          "200": { "description": "Paid invoice.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/invoices/summary": {
+      "get": {
+        "operationId": "invoiceSummary",
+        "tags": ["invoices"],
+        "summary": "Invoice status counts and outstanding totals for the dashboard",
+        "responses": { "200": { "description": "Summary.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvoiceSummary" } } } } }
       }
     },
     "/categories": {

@@ -93,6 +93,8 @@ pub fn build_router(state: AppState) -> Router {
             "/invoices/{id}/issue",
             axum::routing::post(api::issue_invoice),
         )
+        .route("/invoices/{id}/pay", axum::routing::post(api::pay_invoice))
+        .route("/invoices/summary", get(api::invoice_summary))
         .route(
             "/categories",
             get(api::list_categories).post(api::create_category),
