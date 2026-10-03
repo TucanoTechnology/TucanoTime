@@ -15,7 +15,8 @@ use std::sync::Mutex;
 use chrono::NaiveDate;
 use uuid::Uuid;
 
-use crate::domain::{Customer, Entry, Project};
+use crate::auth::User;
+use crate::domain::{Customer, Entry, Project, Task};
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
 /// over the whole tree. 400 days covers a year plus buffer.
@@ -53,6 +54,7 @@ impl Store {
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(root.join("customers"))?;
         std::fs::create_dir_all(root.join("entries"))?;
+        std::fs::create_dir_all(root.join("users"))?;
         Ok(Self {
             root,
             write_guard: Mutex::new(()),
@@ -61,6 +63,62 @@ impl Store {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    // ---------------------------------------------------------------- users --
+
+    fn user_path(&self, id: Uuid) -> PathBuf {
+        self.root.join("users").join(format!("{id}.json"))
+    }
+
+    pub fn list_users(&self) -> Result<Vec<User>, StoreError> {
+        let mut out = Vec::new();
+        for path in dir_entries(&self.root.join("users"))? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(u) = read_json::<User>(&path)? {
+                out.push(u);
+            }
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    pub fn has_users(&self) -> Result<bool, StoreError> {
+        Ok(!self.list_users()?.is_empty())
+    }
+
+    pub fn get_user(&self, id: Uuid) -> Result<Option<User>, StoreError> {
+        read_json(&self.user_path(id))
+    }
+
+    pub fn get_user_by_email(&self, email: &str) -> Result<Option<User>, StoreError> {
+        Ok(self
+            .list_users()?
+            .into_iter()
+            .find(|u| u.email.eq_ignore_ascii_case(email)))
+    }
+
+    pub fn put_user(&self, user: &User) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        write_json(&self.user_path(user.id), user)
+    }
+
+    pub fn delete_user(&self, id: Uuid) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let path = self.user_path(id);
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        std::fs::remove_file(&path)?;
+        Ok(())
     }
 
     // ------------------------------------------------------------ customers --
@@ -136,6 +194,9 @@ impl Store {
     }
 
     pub fn list_projects(&self, customer_id: Uuid) -> Result<Vec<Project>, StoreError> {
+        let customer = self
+            .get_customer(customer_id)?
+            .ok_or(StoreError::NotFound)?;
         let mut out = Vec::new();
         let dir = self.projects_dir(customer_id);
         if !dir.exists() {
@@ -145,7 +206,7 @@ impl Store {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            if let Some(p) = read_json::<Project>(&path)? {
+            if let Some(p) = self.read_project(&path, &customer)? {
                 out.push(p);
             }
         }
@@ -153,12 +214,33 @@ impl Store {
         Ok(out)
     }
 
+    /// Read one project document, resolving any pre-#11 missing currency/rate
+    /// from the owning customer.
+    fn read_project(
+        &self,
+        path: &Path,
+        customer: &Customer,
+    ) -> Result<Option<Project>, StoreError> {
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                let project = crate::domain::project_from_bytes(&bytes, customer)
+                    .map_err(|e| StoreError::Io(format!("corrupt project document: {e}")))?;
+                Ok(Some(project))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     pub fn get_project(
         &self,
         customer_id: Uuid,
         code: &str,
     ) -> Result<Option<Project>, StoreError> {
-        read_json(&self.project_path(customer_id, code))
+        let customer = self
+            .get_customer(customer_id)?
+            .ok_or(StoreError::NotFound)?;
+        self.read_project(&self.project_path(customer_id, code), &customer)
     }
 
     pub fn put_project(&self, project: &Project) -> Result<(), StoreError> {
@@ -182,9 +264,95 @@ impl Store {
         if !path.exists() {
             return Err(StoreError::NotFound);
         }
+        if !self.list_tasks(customer_id, code)?.is_empty() {
+            return Err(StoreError::AlreadyExists(
+                "project still has tasks; delete them first".into(),
+            ));
+        }
         if self.has_entries_for_project(customer_id, code)? {
             return Err(StoreError::AlreadyExists(
                 "project still has time entries; delete or re-point them first".into(),
+            ));
+        }
+        std::fs::remove_file(&path)?;
+        // Remove the project's task folder (tasks live inside it).
+        let _ = std::fs::remove_dir_all(self.tasks_dir(customer_id, code));
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- tasks --
+
+    fn tasks_dir(&self, customer_id: Uuid, project_code: &str) -> PathBuf {
+        self.projects_dir(customer_id)
+            .join(project_code)
+            .join("tasks")
+    }
+
+    fn task_path(&self, customer_id: Uuid, project_code: &str, code: &str) -> PathBuf {
+        self.tasks_dir(customer_id, project_code)
+            .join(format!("{code}.json"))
+    }
+
+    pub fn list_tasks(
+        &self,
+        customer_id: Uuid,
+        project_code: &str,
+    ) -> Result<Vec<Task>, StoreError> {
+        let dir = self.tasks_dir(customer_id, project_code);
+        let mut out = Vec::new();
+        if !dir.exists() {
+            return Ok(out);
+        }
+        for path in dir_entries(&dir)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(t) = read_json::<Task>(&path)? {
+                out.push(t);
+            }
+        }
+        out.sort_by(|a, b| a.code.cmp(&b.code));
+        Ok(out)
+    }
+
+    pub fn get_task(
+        &self,
+        customer_id: Uuid,
+        project_code: &str,
+        code: &str,
+    ) -> Result<Option<Task>, StoreError> {
+        read_json(&self.task_path(customer_id, project_code, code))
+    }
+
+    pub fn put_task(&self, task: &Task) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        std::fs::create_dir_all(self.tasks_dir(task.customer_id, &task.project_code.0))?;
+        write_json(
+            &self.task_path(task.customer_id, &task.project_code.0, &task.code.0),
+            task,
+        )
+    }
+
+    pub fn delete_task(
+        &self,
+        customer_id: Uuid,
+        project_code: &str,
+        code: &str,
+    ) -> Result<(), StoreError> {
+        let _guard = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let path = self.task_path(customer_id, project_code, code);
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        if self.has_entries_for_task(customer_id, project_code, code)? {
+            return Err(StoreError::AlreadyExists(
+                "task still has time entries; delete or re-point them first".into(),
             ));
         }
         std::fs::remove_file(&path)?;
@@ -288,6 +456,19 @@ impl Store {
             .scan_all_entries()?
             .iter()
             .any(|e| e.customer_id == customer_id && e.project_code.0 == code))
+    }
+
+    fn has_entries_for_task(
+        &self,
+        customer_id: Uuid,
+        project_code: &str,
+        task_code: &str,
+    ) -> Result<bool, StoreError> {
+        Ok(self.scan_all_entries()?.iter().any(|e| {
+            e.customer_id == customer_id
+                && e.project_code.0 == project_code
+                && e.task_code.as_ref().is_some_and(|t| t.0 == task_code)
+        }))
     }
 
     fn scan_all_entries(&self) -> Result<Vec<Entry>, StoreError> {

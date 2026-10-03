@@ -109,3 +109,17 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .skip-link:focus { left: 1rem; top: .5rem; z-index: 10; background: var(--brand); color: var(--brand-ink); padding: .4rem .8rem; border-radius: .35rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 [hidden] { display: none !important; }
+
+.masthead-top { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
+.account { display: flex; align-items: center; gap: .6rem; color: var(--muted); }
+.account .who { font-size: .9rem; }
+
+.auth-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg) 70%, var(--fg) 30%);
+  padding: 1rem;
+}
+.auth-card { width: min(360px, 100%); }
+.auth-title { margin: 0 0 .25rem; font-size: 1.3rem; color: var(--brand); }
+button.primary { width: 100%; }

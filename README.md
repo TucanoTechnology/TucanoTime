@@ -9,7 +9,7 @@ suite — file-based (no database), one container, browser GUI.
 
 - **Day view** — add, edit and delete line items for a single date.
 - **Week grid** — Mon–Sun overview per customer/project; click a cell to add or adjust.
-- **Customers & project codes** — first-class entities; a project may override its customer's currency or rate.
+- **Customers & project codes** — first-class entities; a customer sets the default currency/rate and each project carries its own currency and rate.
 - **Exact money** — rates in minor units and hours in hundredths; no floats on persisted values.
 - **Reports** — totals grouped by customer, project or ISO week; **CSV export** (formula-injection safe).
 - **Invoices (planned, M2)** — snapshot entries into an invoice and lock the entries used.
@@ -23,6 +23,25 @@ docker run -d -p 8080:8080 -v tucanotime-data:/data --name tucanotime tucanotime
 
 Open <http://localhost:8080/> — the API docs are at <http://localhost:8080/docs>.
 All data lives in the mounted volume; back it up like any document folder.
+
+## Authentication
+
+TucanoTime is single- or multi-user with **session-cookie auth** (argon2-hashed
+passwords, HMAC-signed HttpOnly cookies). No users exist initially:
+
+- On first visit the app shows a **create-administrator** form (the first account
+  becomes an `admin`). After that, login is required for all data.
+- Set `TUCANO_SESSION_SECRET` (e.g. `openssl rand -hex 32`) so sessions survive
+  restarts; unset, a random per-process key is used (restart logs everyone out).
+- `TUCANO_ENV=production` marks session cookies `Secure` (serve over TLS).
+
+```sh
+docker run -d -p 8080:8080 \
+  -e TUCANO_SESSION_SECRET="$(openssl rand -hex 32)" \
+  -v tucanotime-data:/data --name tucanotime tucano-time
+```
+
+Roles: `admin` (user management) and `member` (timesheet work).
 
 ## Development
 

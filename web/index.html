@@ -8,9 +8,39 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
+
+  <div id="auth-overlay" class="auth-overlay" hidden>
+    <form id="auth-form" class="card auth-card">
+      <h1 id="auth-title" class="auth-title">Sign in</h1>
+      <p id="auth-sub" class="hint"></p>
+      <div class="field" id="auth-name-field" hidden>
+        <label for="auth-name">Your name</label>
+        <input id="auth-name" maxlength="120" autocomplete="name">
+      </div>
+      <div class="field">
+        <label for="auth-email">Email</label>
+        <input id="auth-email" type="email" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="auth-password">Password</label>
+        <input id="auth-password" type="password" autocomplete="current-password" minlength="8" required>
+      </div>
+      <p class="form-error" id="auth-error" role="alert" hidden></p>
+      <button type="submit" id="auth-submit" class="primary">Sign in</button>
+    </form>
+  </div>
+
   <header class="masthead">
-    <h1>TucanoTime</h1>
-    <p class="tagline">Time entries by day and week, per customer and project code.</p>
+    <div class="masthead-top">
+      <div>
+        <h1>TucanoTime</h1>
+        <p class="tagline">Time entries by day and week, per customer and project code.</p>
+      </div>
+      <div id="account" class="account" hidden>
+        <span id="who" class="who"></span>
+        <button type="button" id="logout" class="link">Sign out</button>
+      </div>
+    </div>
     <nav aria-label="Sections">
       <div class="tabs" role="tablist" id="tabs">
         <button role="tab" id="tab-day" aria-controls="panel-day" aria-selected="true">Day</button>
@@ -54,6 +84,10 @@
           <select id="entry-project" name="project_code" required></select>
         </div>
         <div class="field">
+          <label for="entry-task">Task (optional)</label>
+          <select id="entry-task" name="task_code"></select>
+        </div>
+        <div class="field">
           <label for="entry-date">Date</label>
           <input type="date" id="entry-date" name="date" required>
         </div>
@@ -64,6 +98,9 @@
         <div class="field">
           <label for="entry-note">Note</label>
           <textarea id="entry-note" name="note" maxlength="500" rows="2"></textarea>
+        </div>
+        <div class="field checkbox">
+          <label for="entry-billable"><input type="checkbox" id="entry-billable" name="billable" checked> Billable</label>
         </div>
         <p class="form-error" id="entry-error" role="alert" hidden></p>
         <div class="buttons">
@@ -94,7 +131,7 @@
       <form id="customer-form" class="card">
         <input type="hidden" id="customer-id">
         <div class="field"><label for="customer-name">Name</label><input id="customer-name" maxlength="120" required></div>
-        <div class="field"><label for="customer-currency">Currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="field"><label for="customer-currency">Default currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
         <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
         <p class="form-error" id="customer-error" role="alert" hidden></p>
@@ -111,14 +148,31 @@
         <input type="hidden" id="project-original-code">
         <div class="field"><label for="project-code">Project code</label><input id="project-code" maxlength="24" required></div>
         <div class="field"><label for="project-name">Name</label><input id="project-name" maxlength="120"></div>
-        <div class="field"><label for="project-currency">Currency override (optional)</label><input id="project-currency" maxlength="3" placeholder="(customer)"></div>
-        <div class="field"><label for="project-rate">Rate override (optional, e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="(customer default)" inputmode="decimal"></div>
+        <div class="field"><label for="project-currency">Currency (ISO-4217)</label><input id="project-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="field"><label for="project-rate">Hourly rate (e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
         <div class="field checkbox"><label for="project-active"><input type="checkbox" id="project-active" checked> Active</label></div>
         <p class="form-error" id="project-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="project-save">Add project</button><button type="button" class="secondary" id="project-cancel" hidden>Cancel</button></div>
       </form>
       <table id="project-table" hidden>
         <caption class="sr-only">Projects for the selected customer</caption>
+        <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <h2>Tasks for <span id="task-project-label">— select a project —</span></h2>
+      <form id="task-form" class="card" hidden>
+        <input type="hidden" id="task-original-code">
+        <div class="field"><label for="task-code">Task code</label><input id="task-code" maxlength="24" required></div>
+        <div class="field"><label for="task-name">Name</label><input id="task-name" maxlength="120"></div>
+        <div class="field"><label for="task-currency">Currency override (optional)</label><input id="task-currency" maxlength="3" placeholder="(project)"></div>
+        <div class="field"><label for="task-rate">Rate override (optional, minor/h)</label><input id="task-rate" type="number" min="0" step="0.01" placeholder="(project default)" inputmode="decimal"></div>
+        <div class="field checkbox"><label for="task-active"><input type="checkbox" id="task-active" checked> Active</label></div>
+        <p class="form-error" id="task-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="task-save">Add task</button><button type="button" class="secondary" id="task-cancel" hidden>Cancel</button></div>
+      </form>
+      <table id="task-table" hidden>
+        <caption class="sr-only">Tasks for the selected project</caption>
         <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table>

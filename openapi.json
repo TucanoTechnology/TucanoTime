@@ -7,6 +7,7 @@
     "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR."
   },
   "servers": [{ "url": "/" }],
+  "security": [{ "cookieAuth": [] }],
   "tags": [
     { "name": "customers" },
     { "name": "projects" },
@@ -15,6 +16,14 @@
     { "name": "meta" }
   ],
   "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "tt_session",
+        "description": "HttpOnly session cookie issued by /auth/login or /auth/bootstrap."
+      }
+    },
     "schemas": {
       "Error": {
         "type": "object",
@@ -94,7 +103,7 @@
       },
       "Project": {
         "type": "object",
-        "required": ["customer_id", "code", "name", "active"],
+        "required": ["customer_id", "code", "name", "currency", "rate_minor", "active"],
         "properties": {
           "customer_id": { "type": "string", "format": "uuid" },
           "code": { "$ref": "#/components/schemas/ProjectCode" },
@@ -106,6 +115,32 @@
         "additionalProperties": false
       },
       "ProjectInput": {
+        "type": "object",
+        "required": ["code", "currency", "rate_minor"],
+        "properties": {
+          "code": { "$ref": "#/components/schemas/ProjectCode" },
+          "name": { "type": "string", "maxLength": 120, "default": "" },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "active": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": false
+      },
+      "Task": {
+        "type": "object",
+        "required": ["customer_id", "project_code", "code", "name", "active"],
+        "properties": {
+          "customer_id": { "type": "string", "format": "uuid" },
+          "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "code": { "$ref": "#/components/schemas/ProjectCode" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "active": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "TaskInput": {
         "type": "object",
         "required": ["code"],
         "properties": {
@@ -119,14 +154,17 @@
       },
       "Entry": {
         "type": "object",
-        "required": ["id", "date", "customer_id", "project_code", "hours", "note", "created_at", "updated_at"],
+        "required": ["id", "date", "customer_id", "project_code", "hours", "note", "billable", "source", "created_at", "updated_at"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
           "customer_id": { "type": "string", "format": "uuid" },
           "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ], "description": "Optional task within the project (#38)." },
           "hours": { "$ref": "#/components/schemas/Hours" },
           "note": { "type": "string", "maxLength": 500 },
+          "billable": { "type": "boolean", "description": "Billable vs non-billable time. Non-billable time is never invoiced." },
+          "source": { "type": "string", "enum": ["manual", "timer", "calendar-import"], "description": "Provenance. Server-set; API clients create manual entries." },
           "created_at": { "type": "string", "format": "date-time" },
           "updated_at": { "type": "string", "format": "date-time" }
         },
@@ -139,8 +177,10 @@
           "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
           "customer_id": { "type": "string", "format": "uuid" },
           "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
           "hours": { "$ref": "#/components/schemas/Hours" },
-          "note": { "type": "string", "maxLength": 500, "default": "" }
+          "note": { "type": "string", "maxLength": 500, "default": "" },
+          "billable": { "type": "boolean", "default": true }
         },
         "additionalProperties": false
       },
@@ -166,11 +206,53 @@
           "total_hours": { "type": "number" }
         },
         "additionalProperties": false
+      },
+      "PublicUser": {
+        "type": "object",
+        "required": ["id", "name", "email", "role", "active"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "role": { "type": "string", "enum": ["admin", "member"] },
+          "active": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "LoginInput": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "BootstrapInput": {
+        "type": "object",
+        "required": ["name", "email", "password"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 120 },
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 }
+        },
+        "additionalProperties": false
+      },
+      "UserInput": {
+        "type": "object",
+        "required": ["name", "email", "password"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 120 },
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 },
+          "role": { "type": "string", "enum": ["admin", "member"] },
+          "active": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
-      "ValidationError": {
-        "description": "Payload failed validation before any write or side effect.",
+      "ValidationError": {        "description": "Payload failed validation before any write or side effect.",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
       "NotFound": {
@@ -211,11 +293,110 @@
     }
   },
   "paths": {
+    "/auth/status": {
+      "get": {
+        "operationId": "authStatus",
+        "tags": ["auth"],
+        "summary": "Whether an administrator exists yet (drives first-run setup)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Initialisation state.",
+            "content": { "application/json": { "schema": { "type": "object", "required": ["initialised"], "properties": { "initialised": { "type": "boolean" } }, "additionalProperties": false } } }
+          }
+        }
+      }
+    },
+    "/auth/bootstrap": {
+      "post": {
+        "operationId": "bootstrap",
+        "tags": ["auth"],
+        "summary": "Create the first administrator (only while no users exist)",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BootstrapInput" } } } },
+        "responses": {
+          "201": { "description": "Admin created; session cookie set.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
+          "403": { "description": "Already initialised." },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "tags": ["auth"],
+        "summary": "Authenticate and receive a session cookie",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginInput" } } } },
+        "responses": {
+          "200": { "description": "Authenticated; session cookie set.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
+          "401": { "description": "Invalid credentials." }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "tags": ["auth"],
+        "summary": "Clear the session cookie",
+        "security": [],
+        "responses": { "204": { "description": "Logged out." } }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "me",
+        "tags": ["auth"],
+        "summary": "The current authenticated user",
+        "responses": {
+          "200": { "description": "Current user.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
+          "401": { "description": "Not authenticated." }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "operationId": "listUsers",
+        "tags": ["users"],
+        "summary": "List users (admin only)",
+        "responses": {
+          "200": { "description": "All users.", "content": { "application/json": { "schema": { "type": "object", "required": ["users"], "properties": { "users": { "type": "array", "items": { "$ref": "#/components/schemas/PublicUser" } } }, "additionalProperties": false } } } },
+          "403": { "description": "Admin role required." }
+        }
+      },
+      "post": {
+        "operationId": "createUser",
+        "tags": ["users"],
+        "summary": "Create a user (admin only)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserInput" } } } },
+        "responses": {
+          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
+          "403": { "description": "Admin role required." },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/users/{id}": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "delete": {
+        "operationId": "deleteUser",
+        "tags": ["users"],
+        "summary": "Delete a user (admin only)",
+        "responses": {
+          "204": { "description": "Deleted." },
+          "403": { "description": "Admin role required." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "healthz",
         "tags": ["meta"],
         "summary": "Liveness",
+        "security": [],
         "responses": {
           "200": {
             "description": "Server is up.",
@@ -229,6 +410,7 @@
         "operationId": "openapi",
         "tags": ["meta"],
         "summary": "This machine-readable contract",
+        "security": [],
         "responses": { "200": { "description": "The OpenAPI document.", "content": { "application/json": { "schema": { "type": "object" } } } } }
       }
     },
@@ -237,6 +419,7 @@
         "operationId": "docs",
         "tags": ["meta"],
         "summary": "Interactive documentation UI (Swagger), rendered from /openapi.json",
+        "security": [],
         "responses": { "200": { "description": "HTML page.", "content": { "text/html": { "schema": { "type": "string" } } } } }
       }
     },
@@ -385,6 +568,73 @@
         "operationId": "deleteProject",
         "tags": ["projects"],
         "summary": "Delete a project (must have no entries)",
+        "responses": {
+          "204": { "description": "Deleted." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/customers/{cid}/projects/{pcode}/tasks": {
+      "parameters": [
+        { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+        { "name": "pcode", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } }
+      ],
+      "get": {
+        "operationId": "listTasks",
+        "tags": ["projects"],
+        "summary": "List a project's tasks",
+        "responses": {
+          "200": {
+            "description": "Tasks of this project.",
+            "content": { "application/json": { "schema": { "type": "object", "required": ["tasks"], "properties": { "tasks": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } } }, "additionalProperties": false } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "post": {
+        "operationId": "createTask",
+        "tags": ["projects"],
+        "summary": "Add a task to a project",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskInput" } } } },
+        "responses": {
+          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/customers/{cid}/projects/{pcode}/tasks/{code}": {
+      "parameters": [
+        { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+        { "name": "pcode", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } },
+        { "name": "code", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } }
+      ],
+      "get": {
+        "operationId": "getTask",
+        "tags": ["projects"],
+        "summary": "Fetch one task",
+        "responses": {
+          "200": { "description": "The task.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "operationId": "updateTask",
+        "tags": ["projects"],
+        "summary": "Full replacement; body code must match the path code",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskInput" } } } },
+        "responses": {
+          "200": { "description": "Updated.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTask",
+        "tags": ["projects"],
+        "summary": "Delete a task (must have no entries)",
         "responses": {
           "204": { "description": "Deleted." },
           "404": { "$ref": "#/components/responses/NotFound" },

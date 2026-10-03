@@ -6,15 +6,21 @@ use std::collections::HashMap;
 
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{FromRequest, Path, Query, Request, State};
-use axum::http::StatusCode;
+use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
+use axum::http::{self, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::de::DeserializeOwned;
+use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::auth::{
+    self, PublicUser, Role, Session, User, normalise_email, token_from_cookie_header,
+    valid_password, verify_password,
+};
 use crate::domain::{
     Currency, Customer, CustomerInput, Entry, EntryInput, FieldError, Project, ProjectCode,
-    ProjectInput, validate_customer_input, validate_entry_input, validate_project_input,
+    ProjectInput, Task, TaskInput, validate_customer_input, validate_entry_input,
+    validate_project_input, validate_task_input,
 };
 use crate::error::ApiError;
 use crate::report;
@@ -34,6 +40,21 @@ impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for ValidJson<T> {
             .map_err(|_| ApiError::bad_request("failed to read the request body"))?;
         let value = serde_json::from_slice::<T>(&body).map_err(deser_error)?;
         Ok(ValidJson(value))
+    }
+}
+
+/// The authenticated user, resolved from the session cookie.
+#[derive(Debug, Clone)]
+pub struct AuthUser(pub User);
+
+impl FromRequestParts<AppState> for AuthUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        authenticate(state, &parts.headers).map(AuthUser)
     }
 }
 
@@ -68,7 +89,261 @@ fn deser_error(e: serde_json::Error) -> ApiError {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub store: std::sync::Arc<Store>,
+    pub store: Arc<Store>,
+    pub clock: Arc<dyn crate::clock::Clock>,
+    pub locks: Arc<dyn crate::lock::EntryLock>,
+    pub session: Arc<Session>,
+}
+
+impl AppState {
+    /// Convenience wiring with an ephemeral session key (dev/tests). Production
+    /// uses `with_session` and a configured secret.
+    pub fn new(store: Store) -> Self {
+        Self::with_session(store, Arc::new(ephemeral_session()))
+    }
+
+    pub fn with_session(store: Store, session: Arc<Session>) -> Self {
+        Self {
+            store: Arc::new(store),
+            clock: Arc::new(crate::clock::SystemClock),
+            locks: Arc::new(crate::lock::NoLocks),
+            session,
+        }
+    }
+}
+
+/// A random per-process session key; sessions do not survive a restart. A
+/// hardening ticket covers requiring a configured secret in production.
+fn ephemeral_session() -> Session {
+    use rand::RngCore;
+    let mut key = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut key);
+    Session::new(key.to_vec(), 60 * 60 * 24, false)
+}
+
+/// Resolve the current user from the request's session cookie.
+fn authenticate(state: &AppState, headers: &http::HeaderMap) -> Result<User, ApiError> {
+    let unauth = || {
+        ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthenticated",
+            "authentication required",
+        )
+    };
+    let header = headers
+        .get(http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(unauth)?;
+    let token = token_from_cookie_header(header).ok_or_else(unauth)?;
+    let uid = state
+        .session
+        .verify(token, state.clock.now())
+        .ok_or_else(unauth)?;
+    let user = state.store.get_user(uid)?.ok_or_else(unauth)?;
+    if !user.active {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "disabled",
+            "account is disabled",
+        ));
+    }
+    Ok(user)
+}
+
+// ------------------------------------------------------------------- auth --
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoginInput {
+    email: String,
+    password: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BootstrapInput {
+    name: String,
+    email: String,
+    password: String,
+}
+
+fn set_cookie(state: &AppState, user: &User) -> (http::HeaderMap, PublicUser) {
+    let token = state.session.issue(user, state.clock.now());
+    let mut headers = http::HeaderMap::new();
+    if let Ok(v) = state.session.cookie(&token, 60 * 60 * 24).parse() {
+        headers.insert(http::header::SET_COOKIE, v);
+    }
+    (headers, PublicUser::from(user))
+}
+
+/// Create the first administrator. Open only while no users exist.
+pub async fn bootstrap(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<BootstrapInput>,
+) -> ApiResult {
+    if app.store.has_users()? {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "initialised",
+            "an administrator already exists",
+        ));
+    }
+    let email = normalise_email(&input.email)
+        .ok_or_else(|| ApiError::validation(vec![FieldError::new("email", "invalid email")]))?;
+    if !valid_password(&input.password) {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "password",
+            "must be at least 8 characters",
+        )]));
+    }
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 120 {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "name",
+            "required, at most 120 characters",
+        )]));
+    }
+    let user = new_user(name, &email, &input.password, Role::Admin, true, &app)?;
+    let (headers, pubuser) = set_cookie(&app, &user);
+    Ok((StatusCode::CREATED, headers, Json(pubuser)).into_response())
+}
+
+pub async fn login(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<LoginInput>,
+) -> ApiResult {
+    let email = normalise_email(&input.email).unwrap_or_default();
+    let user = app.store.get_user_by_email(&email)?;
+    let ok = user
+        .as_ref()
+        .is_some_and(|u| u.active && verify_password(&input.password, &u.password_hash));
+    if !ok {
+        // Same response for unknown email and bad password (no user enumeration).
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_credentials",
+            "invalid email or password",
+        ));
+    }
+    let (headers, pubuser) = set_cookie(&app, &user.unwrap());
+    Ok((headers, Json(pubuser)).into_response())
+}
+
+pub async fn logout(State(app): State<AppState>) -> ApiResult {
+    let mut headers = http::HeaderMap::new();
+    let cookie = format!(
+        "{}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0",
+        auth::SESSION_COOKIE
+    );
+    if app.session.secure() {
+        // Rebuild with Secure when configured.
+        let cookie = format!("{cookie}; Secure");
+        if let Ok(v) = cookie.parse() {
+            headers.insert(http::header::SET_COOKIE, v);
+        }
+    } else if let Ok(v) = cookie.parse() {
+        headers.insert(http::header::SET_COOKIE, v);
+    }
+    Ok((headers, StatusCode::NO_CONTENT).into_response())
+}
+
+pub async fn me(State(app): State<AppState>, req: axum::extract::Request) -> ApiResult {
+    let user = authenticate(&app, req.headers())?;
+    Ok(Json(PublicUser::from(&user)).into_response())
+}
+
+/// Public: whether an administrator exists yet (drives first-run setup UI).
+pub async fn auth_status(State(app): State<AppState>) -> ApiResult {
+    Ok(Json(serde_json::json!({ "initialised": app.store.has_users()? })).into_response())
+}
+
+fn new_user(
+    name: &str,
+    email: &str,
+    password: &str,
+    role: Role,
+    active: bool,
+    app: &AppState,
+) -> Result<User, ApiError> {
+    let password_hash = auth::hash_password(password)
+        .map_err(|_| ApiError::internal("password hashing failed".into()))?;
+    let user = User {
+        id: Uuid::new_v4(),
+        name: name.to_owned(),
+        email: email.to_owned(),
+        role,
+        active,
+        password_hash,
+        created_at: app.clock.now(),
+    };
+    app.store.put_user(&user)?;
+    Ok(user)
+}
+
+// ------------------------------------------------------------------ users --
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserInput {
+    name: String,
+    email: String,
+    password: String,
+    #[serde(default)]
+    role: Option<Role>,
+    #[serde(default = "default_active_true")]
+    active: bool,
+}
+
+fn default_active_true() -> bool {
+    true
+}
+
+pub async fn list_users(State(app): State<AppState>) -> ApiResult {
+    let users: Vec<PublicUser> = app
+        .store
+        .list_users()?
+        .iter()
+        .map(PublicUser::from)
+        .collect();
+    Ok(Json(serde_json::json!({ "users": users })).into_response())
+}
+
+pub async fn create_user(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<UserInput>,
+) -> ApiResult {
+    let email = normalise_email(&input.email)
+        .ok_or_else(|| ApiError::validation(vec![FieldError::new("email", "invalid email")]))?;
+    if app.store.get_user_by_email(&email)?.is_some() {
+        return Err(ApiError::conflict("a user with that email exists"));
+    }
+    if !valid_password(&input.password) {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "password",
+            "must be at least 8 characters",
+        )]));
+    }
+    let user = new_user(
+        input.name.trim(),
+        &email,
+        &input.password,
+        input.role.unwrap_or(Role::Member),
+        input.active,
+        &app,
+    )?;
+    Ok((StatusCode::CREATED, Json(PublicUser::from(&user))).into_response())
+}
+
+pub async fn delete_user(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult {
+    if actor.0.id == id {
+        return Err(ApiError::conflict("you cannot delete your own account"));
+    }
+    app.store.delete_user(id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {
@@ -179,7 +454,7 @@ fn build_project(cid: Uuid, draft: &crate::domain::ProjectDraft) -> Project {
         customer_id: cid,
         code: ProjectCode(draft.code.clone()),
         name: draft.name.clone(),
-        currency: draft.currency.as_ref().map(|c| Currency(c.clone())),
+        currency: Currency(draft.currency.clone()),
         rate_minor: draft.rate_minor,
         active: draft.active,
     }
@@ -227,6 +502,95 @@ pub async fn delete_project(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+// ----------------------------------------------------------------- tasks --
+
+pub async fn list_tasks(
+    State(app): State<AppState>,
+    Path((cid, pcode)): Path<(Uuid, ProjectCode)>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    if app.store.get_project(cid, &pcode.0)?.is_none() {
+        return Err(ApiError::not_found("project"));
+    }
+    let tasks = app.store.list_tasks(cid, &pcode.0)?;
+    Ok(Json(serde_json::json!({ "tasks": tasks })).into_response())
+}
+
+pub async fn create_task(
+    State(app): State<AppState>,
+    Path((cid, pcode)): Path<(Uuid, ProjectCode)>,
+    ValidJson(input): ValidJson<TaskInput>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    if app.store.get_project(cid, &pcode.0)?.is_none() {
+        return Err(ApiError::not_found("project"));
+    }
+    let draft = validate_task_input(&input).map_err(ApiError::validation)?;
+    if app.store.get_task(cid, &pcode.0, &draft.code)?.is_some() {
+        return Err(ApiError::conflict(format!(
+            "task {} already exists",
+            draft.code
+        )));
+    }
+    let task = build_task(cid, &pcode, &draft);
+    app.store.put_task(&task)?;
+    Ok((StatusCode::CREATED, Json(&task)).into_response())
+}
+
+fn build_task(cid: Uuid, pcode: &ProjectCode, draft: &crate::domain::TaskDraft) -> Task {
+    Task {
+        customer_id: cid,
+        project_code: pcode.clone(),
+        code: ProjectCode(draft.code.clone()),
+        name: draft.name.clone(),
+        currency: draft.currency.as_ref().map(|c| Currency(c.clone())),
+        rate_minor: draft.rate_minor,
+        active: draft.active,
+    }
+}
+
+pub async fn get_task_handler(
+    State(app): State<AppState>,
+    Path((cid, pcode, code)): Path<(Uuid, ProjectCode, ProjectCode)>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    let task = app
+        .store
+        .get_task(cid, &pcode.0, &code.0)?
+        .ok_or_else(|| ApiError::not_found("task"))?;
+    Ok(Json(task).into_response())
+}
+
+pub async fn update_task(
+    State(app): State<AppState>,
+    Path((cid, pcode, code)): Path<(Uuid, ProjectCode, ProjectCode)>,
+    ValidJson(input): ValidJson<TaskInput>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    if app.store.get_task(cid, &pcode.0, &code.0)?.is_none() {
+        return Err(ApiError::not_found("task"));
+    }
+    if input.code != code {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "code",
+            "path is authoritative; body code must match it",
+        )]));
+    }
+    let draft = validate_task_input(&input).map_err(ApiError::validation)?;
+    let task = build_task(cid, &pcode, &draft);
+    app.store.put_task(&task)?;
+    Ok(Json(&task).into_response())
+}
+
+pub async fn delete_task(
+    State(app): State<AppState>,
+    Path((cid, pcode, code)): Path<(Uuid, ProjectCode, ProjectCode)>,
+) -> ApiResult {
+    get_customer(&app.store, cid)?;
+    app.store.delete_task(cid, &pcode.0, &code.0)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 // --------------------------------------------------------------- entries --
 
 /// Entry cross-references: the customer must exist and the project must
@@ -250,6 +614,19 @@ fn validate_entry_refs(
             "project_code",
             "project does not exist for this customer",
         ));
+    }
+    // A task, when present, must belong to the entry's project.
+    if let Some(task_code) = &draft.task_code {
+        let task = store
+            .get_task(draft.customer_id, &draft.project_code, task_code)
+            .ok()
+            .flatten();
+        if task.is_none() {
+            errors.push(FieldError::new(
+                "task_code",
+                "task does not exist for this project",
+            ));
+        }
     }
     if errors.is_empty() {
         Ok(())
@@ -288,14 +665,17 @@ pub async fn create_entry(
 ) -> ApiResult {
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
     validate_entry_refs(&app.store, &draft).map_err(ApiError::validation)?;
-    let now = chrono::Utc::now();
+    let now = app.clock.now();
     let entry = Entry {
         id: Uuid::new_v4(),
         date: draft.date,
         customer_id: draft.customer_id,
         project_code: ProjectCode(draft.project_code),
+        task_code: draft.task_code.map(ProjectCode),
         hours: draft.hours,
         note: draft.note,
+        billable: draft.billable,
+        source: crate::domain::Source::Manual,
         created_at: now,
         updated_at: now,
     };
@@ -320,6 +700,9 @@ pub async fn update_entry(
         .store
         .get_entry(id)?
         .ok_or_else(|| ApiError::not_found("entry"))?;
+    if let Some(reason) = app.locks.entry_lock(id) {
+        return Err(ApiError::conflict(reason.message()));
+    }
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
     validate_entry_refs(&app.store, &draft).map_err(ApiError::validation)?;
     let updated = Entry {
@@ -327,10 +710,13 @@ pub async fn update_entry(
         date: draft.date,
         customer_id: draft.customer_id,
         project_code: ProjectCode(draft.project_code),
+        task_code: draft.task_code.map(ProjectCode),
         hours: draft.hours,
         note: draft.note,
+        billable: draft.billable,
+        source: existing.source,
         created_at: existing.created_at,
-        updated_at: chrono::Utc::now(),
+        updated_at: app.clock.now(),
     };
     // Moving an entry between days relocates its document: write the new
     // home, then remove the old one.
@@ -346,6 +732,9 @@ pub async fn delete_entry(State(app): State<AppState>, Path(id): Path<Uuid>) -> 
         .store
         .get_entry(id)?
         .ok_or_else(|| ApiError::not_found("entry"))?;
+    if let Some(reason) = app.locks.entry_lock(id) {
+        return Err(ApiError::conflict(reason.message()));
+    }
     app.store.delete_entry(&entry)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -370,14 +759,25 @@ pub async fn summary(
     };
     let entries = app.store.list_range(from, to)?;
     let customers: Vec<Customer> = app.store.list_customers()?.into_iter().collect();
+    let (projects, tasks) = gather_hierarchy(&app, &customers)?;
+    let rows = report::summarise(&entries, &customers, &projects, &tasks, kind);
+    Ok(Json(rows).into_response())
+}
+
+/// Every project and task for a set of customers, loaded once for reports.
+type Hierarchy = (Vec<(Uuid, Project)>, Vec<Task>);
+
+/// Load every project and task once, for report rate resolution.
+fn gather_hierarchy(app: &AppState, customers: &[Customer]) -> Result<Hierarchy, ApiError> {
     let mut projects: Vec<(Uuid, Project)> = Vec::new();
-    for c in &customers {
+    let mut tasks: Vec<Task> = Vec::new();
+    for c in customers {
         for p in app.store.list_projects(c.id)? {
+            tasks.extend(app.store.list_tasks(c.id, &p.code.0)?);
             projects.push((c.id, p));
         }
     }
-    let rows = report::summarise(&entries, &customers, &projects, kind);
-    Ok(Json(rows).into_response())
+    Ok((projects, tasks))
 }
 
 pub async fn export_csv(
@@ -394,18 +794,42 @@ pub async fn export_csv(
     };
     let entries = app.store.list_range(from, to)?;
     let customers = app.store.list_customers()?;
-    let mut projects: Vec<(Uuid, Project)> = Vec::new();
-    for c in &customers {
-        for p in app.store.list_projects(c.id)? {
-            projects.push((c.id, p));
-        }
-    }
-    let csv = report::export_csv(&entries, &customers, &projects, filter);
+    let (projects, tasks) = gather_hierarchy(&app, &customers)?;
+    let csv = report::export_csv(&entries, &customers, &projects, &tasks, filter);
     Ok((
         [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
         csv,
     )
         .into_response())
+}
+
+/// Route guard: reject with 401 unless a valid session cookie is present.
+pub async fn require_auth(
+    State(app): State<AppState>,
+    mut req: Request,
+    next: axum::middleware::Next,
+) -> Result<Response, ApiError> {
+    let user = authenticate(&app, req.headers())?;
+    req.extensions_mut().insert(user);
+    Ok(next.run(req).await)
+}
+
+/// Route guard: like `require_auth`, plus an admin-role check (403 otherwise).
+pub async fn require_admin(
+    State(app): State<AppState>,
+    mut req: Request,
+    next: axum::middleware::Next,
+) -> Result<Response, ApiError> {
+    let user = authenticate(&app, req.headers())?;
+    if user.role != Role::Admin {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "administrator role required",
+        ));
+    }
+    req.extensions_mut().insert(user);
+    Ok(next.run(req).await)
 }
 
 pub async fn healthz() -> impl IntoResponse {

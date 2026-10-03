@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use chrono::Datelike;
 use uuid::Uuid;
 
-use crate::domain::{Customer, Entry, effective_rates};
+use crate::domain::{Customer, Entry, Task, effective_rates};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
@@ -57,6 +57,7 @@ pub fn summarise(
     entries: &[Entry],
     customers: &[Customer],
     projects: &[(Uuid, crate::domain::Project)],
+    tasks: &[Task],
     kind: Group,
 ) -> Summary {
     let customer_by_id: BTreeMap<Uuid, &Customer> = customers.iter().map(|c| (c.id, c)).collect();
@@ -65,6 +66,12 @@ pub fn summarise(
             .iter()
             .find(|(cid, p)| *cid == e.customer_id && p.code == e.project_code)
             .map(|(_, p)| p)
+    };
+    let task_for = |e: &Entry| -> Option<&Task> {
+        let tc = e.task_code.as_ref()?;
+        tasks.iter().find(|t| {
+            t.customer_id == e.customer_id && t.project_code == e.project_code && t.code == *tc
+        })
     };
 
     // Rows keyed by the group key; a currency is fixed per row by grouping
@@ -77,7 +84,7 @@ pub fn summarise(
             continue; // dangling reference: excluded from totals, never fabricated.
         };
         let project = project_for(e);
-        let (currency, rate) = effective_rates(e, customer, project);
+        let (currency, rate) = effective_rates(e, customer, project, task_for(e));
         let label_customer = &customer.name;
         let (mut key, label) = group_key(e, kind, label_customer, &e.project_code.0);
         if kind == Group::Week {
@@ -139,6 +146,7 @@ pub fn export_csv(
     entries: &[Entry],
     customers: &[Customer],
     projects: &[(Uuid, crate::domain::Project)],
+    tasks: &[Task],
     customer_filter: Option<Uuid>,
 ) -> String {
     let customer_by_id: BTreeMap<Uuid, &Customer> = customers.iter().map(|c| (c.id, c)).collect();
@@ -148,9 +156,17 @@ pub fn export_csv(
             .find(|(cid, p)| *cid == e.customer_id && p.code == e.project_code)
             .map(|(_, p)| p)
     };
+    let task_for = |e: &Entry| -> Option<&Task> {
+        let tc = e.task_code.as_ref()?;
+        tasks.iter().find(|t| {
+            t.customer_id == e.customer_id && t.project_code == e.project_code && t.code == *tc
+        })
+    };
 
     let mut out = String::new();
-    out.push_str("date,customer,project_code,hours,currency,hourly_rate,amount,note\n");
+    out.push_str(
+        "date,customer,project_code,task_code,hours,billable,currency,hourly_rate,amount,note\n",
+    );
     for e in entries {
         if let Some(fid) = customer_filter
             && e.customer_id != fid
@@ -161,14 +177,23 @@ pub fn export_csv(
             continue;
         };
         let project = project_for(e);
-        let (currency, rate) = effective_rates(e, customer, project);
+        let (currency, rate) = effective_rates(e, customer, project, task_for(e));
         let hours = e.hours.0 as f64 / 100.0;
         let amount = e.hours.amount_minor(rate);
         let fields = [
             e.date.format("%Y-%m-%d").to_string(),
             customer.name.clone(),
             e.project_code.0.clone(),
+            e.task_code
+                .as_ref()
+                .map(|c| c.0.clone())
+                .unwrap_or_default(),
             format!("{:.2}", hours),
+            if e.billable {
+                "yes".to_string()
+            } else {
+                "no".to_string()
+            },
             currency.0.clone(),
             format!("{:.2}", rate as f64 / 100.0),
             format!("{:.2}", amount as f64 / 100.0),
