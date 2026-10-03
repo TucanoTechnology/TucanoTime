@@ -4,6 +4,7 @@
 // hundredths of an hour. Floats never touch persisted values, so totals are
 // exact and a future invoice snapshot cannot drift.
 
+use crate::auth::User;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Number;
@@ -236,6 +237,145 @@ pub enum Source {
     Manual,
     Timer,
     CalendarImport,
+}
+
+// ---------------------------------------------------------------- invoices --
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InvoiceStatus {
+    Draft,
+    Issued,
+    Paid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InvoiceLine {
+    pub entry_id: Uuid,
+    pub date: NaiveDate,
+    pub project_code: ProjectCode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_code: Option<ProjectCode>,
+    pub hours: Hours,
+    pub rate_minor: u64,
+    pub amount_minor: u64,
+    #[serde(default)]
+    pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Invoice {
+    pub id: Uuid,
+    pub number: String,
+    pub customer_id: Uuid,
+    pub currency: Currency,
+    pub period_from: NaiveDate,
+    pub period_to: NaiveDate,
+    pub lines: Vec<InvoiceLine>,
+    pub total_minor: u64,
+    pub status: InvoiceStatus,
+    pub created_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issued_at: Option<DateTime<Utc>>,
+}
+
+/// Why invoice generation was refused.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InvoiceError {
+    /// The period's billable work spans more than one currency; an invoice is
+    /// single-currency, so the operator must resolve it (per ADR-001).
+    MixedCurrency { a: String, b: String },
+    /// No billable, not-yet-invoiced work in the period.
+    NothingToInvoice,
+}
+
+/// Read-only context for invoice generation, bundled to keep the signature small.
+pub struct InvoiceSources<'a> {
+    pub projects: &'a [Project],
+    pub tasks: &'a [Task],
+    pub users: &'a [User],
+    pub entries: &'a [Entry],
+    pub excluded: &'a [Uuid],
+}
+
+/// Build a draft invoice from the billable entries in `[from, to]` for one
+/// customer. Rates are resolved per entry (task > person > project > customer)
+/// and snapshotted onto the lines, so a later rate change never rewrites an
+/// issued invoice. Entries already on an issued invoice (`excluded`) are skipped.
+pub fn generate_invoice(
+    number: String,
+    customer: &Customer,
+    src: &InvoiceSources<'_>,
+    from: NaiveDate,
+    to: NaiveDate,
+    now: DateTime<Utc>,
+) -> Result<Invoice, InvoiceError> {
+    let InvoiceSources {
+        projects,
+        tasks,
+        users,
+        entries,
+        excluded,
+    } = src;
+    let user_rate = |e: &Entry| -> Option<u64> {
+        e.user_id
+            .and_then(|uid| users.iter().find(|u| u.id == uid))
+            .map(|u| u.default_rate_minor)
+    };
+    let mut lines: Vec<InvoiceLine> = Vec::new();
+    let mut currency: Option<Currency> = None;
+    for e in entries.iter() {
+        if e.customer_id != customer.id || !e.billable || e.date < from || e.date > to {
+            continue;
+        }
+        if excluded.contains(&e.id) {
+            continue; // already billed on an issued invoice
+        }
+        let project = projects.iter().find(|p| p.code == e.project_code);
+        let task = e.task_code.as_ref().and_then(|tc| {
+            tasks
+                .iter()
+                .find(|t| t.project_code == e.project_code && t.code == *tc)
+        });
+        let (cur, rate) = effective_rates(e, customer, project, task, user_rate(e));
+        match &currency {
+            None => currency = Some(cur),
+            Some(existing) if *existing == cur => {}
+            Some(existing) => {
+                return Err(InvoiceError::MixedCurrency {
+                    a: existing.0.clone(),
+                    b: cur.0,
+                });
+            }
+        }
+        lines.push(InvoiceLine {
+            entry_id: e.id,
+            date: e.date,
+            project_code: e.project_code.clone(),
+            task_code: e.task_code.clone(),
+            hours: e.hours,
+            rate_minor: rate,
+            amount_minor: e.hours.amount_minor(rate),
+            note: e.note.clone(),
+        });
+    }
+    if lines.is_empty() {
+        return Err(InvoiceError::NothingToInvoice);
+    }
+    let total_minor = lines.iter().map(|l| l.amount_minor).sum();
+    Ok(Invoice {
+        id: Uuid::new_v4(),
+        number,
+        customer_id: customer.id,
+        currency: currency.expect("non-empty lines set a currency"),
+        period_from: from,
+        period_to: to,
+        lines,
+        total_minor,
+        status: InvoiceStatus::Draft,
+        created_at: now,
+        issued_at: None,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

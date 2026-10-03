@@ -209,6 +209,9 @@ async fn contract_paths_have_documented_responses() {
         "/entries",
         "/reports/summary",
         "/reports/export.csv",
+        "/invoices",
+        "/auth/login",
+        "/users",
     ] {
         assert!(paths.contains_key(path), "contract missing {path}");
     }
@@ -1017,4 +1020,165 @@ async fn report_applies_person_rate_tier_and_attributes_entry() {
     )
     .await;
     assert_eq!(summary["rows"][0]["amount_minor"], 9000);
+}
+
+// --------------------------------------------------------------- invoices --
+
+#[tokio::test]
+async fn invoice_sums_billable_and_ignores_nonbillable() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    // 3h billable @60 = 180.00
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    // 5h NON-billable -> excluded
+    json_req(&app, "POST", "/entries", Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":5,"billable":false}))).await;
+
+    let (s, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{inv}");
+    assert_eq!(inv["status"], "draft");
+    assert_eq!(inv["currency"], "EUR");
+    assert_eq!(inv["lines"].as_array().unwrap().len(), 1);
+    assert_eq!(inv["total_minor"], 18000);
+}
+
+#[tokio::test]
+async fn issuing_invoice_locks_its_entries() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    let (_, e) = json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let eid = e["id"].as_str().unwrap();
+
+    let (_, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+
+    // Draft does NOT lock.
+    let (s_before, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/entries/{eid}"),
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":4})),
+    )
+    .await;
+    assert_eq!(
+        s_before,
+        StatusCode::OK,
+        "draft invoice must not lock entries"
+    );
+
+    // Issue -> now locked.
+    let (si, _) = json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    assert_eq!(si, StatusCode::OK);
+    let (s_edit, body) = json_req(
+        &app,
+        "PUT",
+        &format!("/entries/{eid}"),
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":4})),
+    )
+    .await;
+    assert_eq!(s_edit, StatusCode::CONFLICT, "{body}");
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/entries/{eid}"), None).await;
+    assert_eq!(s_del, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn regeneration_excludes_invoiced_entries() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    // Second invoice over the same period has nothing left to bill.
+    let (s2, body) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::CONFLICT, "{body}");
+}
+
+#[tokio::test]
+async fn invoice_rejects_mixed_currencies() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"currency":"EUR","rate_minor":6000})).await;
+    new_project(&app, cid, "P2", json!({"currency":"USD","rate_minor":3000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":1})),
+    )
+    .await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P2","hours":1})),
+    )
+    .await;
+    let (s, body) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("currencies")
+    );
 }
