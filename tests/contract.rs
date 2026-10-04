@@ -1460,3 +1460,111 @@ async fn invoice_pay_flow_and_summary() {
     assert_eq!(sum["issued"], 0);
     assert!(sum["outstanding"].as_object().unwrap().is_empty());
 }
+
+// --------------------------------------------------- RBAC / private-per-user --
+
+#[tokio::test]
+async fn member_sees_only_own_entries() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    // Admin logs one entry.
+    let (_, admin_entry) = json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
+    )
+    .await;
+    let admin_eid = admin_entry["id"].as_str().unwrap().to_string();
+
+    // Create member Dana and log one entry as Dana.
+    json_req(&app, "POST", "/users", Some(json!({"name":"Dana","email":"dana@test.local","password":"danapass123","role":"member"}))).await;
+    let dana = login_cookie(&app.router, "dana@test.local", "danapass123").await;
+    let (_, dana_entry, _) = raw(
+        &app.router,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+        Some(&dana),
+    )
+    .await;
+    let dana_eid = dana_entry["id"].as_str().unwrap().to_string();
+
+    // Dana lists entries -> only her own.
+    let (s, list, _) = raw(
+        &app.router,
+        "GET",
+        "/entries?date=2026-10-02",
+        None,
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let ids: Vec<&str> = list["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec![dana_eid.as_str()], "member sees only own entries");
+
+    // Dana cannot read the admin's entry (404, not 403 — no existence leak).
+    let (s404, _, _) = raw(
+        &app.router,
+        "GET",
+        &format!("/entries/{admin_eid}"),
+        None,
+        Some(&dana),
+    )
+    .await;
+    assert_eq!(s404, StatusCode::NOT_FOUND);
+
+    // Admin sees both.
+    let (_, admin_list) = json_req(&app, "GET", "/entries?date=2026-10-02", None).await;
+    assert_eq!(admin_list["entries"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn member_cannot_invoice_or_approve() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(
+            json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
+        ),
+    )
+    .await;
+    let eve = login_cookie(&app.router, "eve@test.local", "evepass123").await;
+
+    let (s_inv, _, _) = raw(
+        &app.router,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+        Some(&eve),
+    )
+    .await;
+    assert_eq!(
+        s_inv,
+        StatusCode::FORBIDDEN,
+        "member cannot create invoices"
+    );
+    let (s_users, _, _) = raw(&app.router, "GET", "/users", None, Some(&eve)).await;
+    assert_eq!(s_users, StatusCode::FORBIDDEN, "member cannot list users");
+    let (s_dec, _, _) = raw(
+        &app.router,
+        "POST",
+        "/submissions/00000000-0000-0000-0000-000000000000/decision",
+        Some(json!({"decision":"approve"})),
+        Some(&eve),
+    )
+    .await;
+    assert_eq!(s_dec, StatusCode::FORBIDDEN, "member cannot approve");
+}

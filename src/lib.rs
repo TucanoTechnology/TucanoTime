@@ -82,20 +82,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/reports/summary", get(api::summary))
         .route("/reports/export.csv", get(api::export_csv))
         .route(
-            "/invoices",
-            get(api::list_invoices).post(api::create_invoice),
-        )
-        .route(
-            "/invoices/{id}",
-            get(api::get_invoice_handler).delete(api::delete_invoice),
-        )
-        .route(
-            "/invoices/{id}/issue",
-            axum::routing::post(api::issue_invoice),
-        )
-        .route("/invoices/{id}/pay", axum::routing::post(api::pay_invoice))
-        .route("/invoices/summary", get(api::invoice_summary))
-        .route(
             "/categories",
             get(api::list_categories).post(api::create_category),
         )
@@ -124,10 +110,24 @@ pub fn build_router(state: AppState) -> Router {
             api::require_auth,
         ));
 
-    // Admin-only: user management.
+    // Admin-only: user management and invoicing (#51).
     let admin = Router::new()
         .route("/users", get(api::list_users).post(api::create_user))
         .route("/users/{id}", axum::routing::delete(api::delete_user))
+        .route(
+            "/invoices",
+            get(api::list_invoices).post(api::create_invoice),
+        )
+        .route(
+            "/invoices/{id}",
+            get(api::get_invoice_handler).delete(api::delete_invoice),
+        )
+        .route(
+            "/invoices/{id}/issue",
+            axum::routing::post(api::issue_invoice),
+        )
+        .route("/invoices/{id}/pay", axum::routing::post(api::pay_invoice))
+        .route("/invoices/summary", get(api::invoice_summary))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_admin,
