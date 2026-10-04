@@ -10,6 +10,7 @@ use rust_embed::RustEmbed;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub mod api;
+pub mod audit;
 pub mod auth;
 pub mod clock;
 pub mod domain;
@@ -115,6 +116,7 @@ pub fn build_router(state: AppState) -> Router {
     let admin = Router::new()
         .route("/users", get(api::list_users).post(api::create_user))
         .route("/users/{id}", axum::routing::delete(api::delete_user))
+        .route("/audit", get(api::audit_log))
         .route(
             "/invoices",
             get(api::list_invoices).post(api::create_invoice),

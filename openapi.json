@@ -1079,6 +1079,17 @@
         "responses": { "204": { "description": "Deleted." }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
+    "/audit": {
+      "get": {
+        "operationId": "auditLog",
+        "tags": ["users"],
+        "summary": "Recent security audit events (admin only, #52)",
+        "responses": {
+          "200": { "description": "Newest-first events.", "content": { "application/json": { "schema": { "type": "object", "required": ["events"], "properties": { "events": { "type": "array", "items": { "type": "object" } } }, "additionalProperties": false } } } },
+          "403": { "description": "Admin role required." }
+        }
+      }
+    },
     "/submissions": {
       "get": {
         "operationId": "listSubmissions",

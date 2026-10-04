@@ -96,6 +96,7 @@ pub struct AppState {
     pub locks: Arc<dyn crate::lock::EntryLock>,
     pub session: Arc<Session>,
     pub rate: Arc<crate::ratelimit::RateLimiter>,
+    pub audit: Arc<crate::audit::AuditLog>,
 }
 
 impl AppState {
@@ -111,8 +112,8 @@ impl AppState {
             Box::new(crate::lock::InvoiceLock::new(store.clone())),
             Box::new(crate::lock::SubmissionLock::new(store.clone())),
         ]));
+        let audit = Arc::new(crate::audit::AuditLog::new(store.root()));
         Self {
-            store,
             clock: Arc::new(crate::clock::SystemClock),
             locks,
             session,
@@ -121,6 +122,8 @@ impl AppState {
                 8,
                 std::time::Duration::from_secs(300),
             )),
+            audit,
+            store,
         }
     }
 }
@@ -244,6 +247,7 @@ pub async fn bootstrap(
     }
     let user = new_user(name, &email, &input.password, Role::Admin, true, 0, &app)?;
     app.rate.reset("bootstrap");
+    app.audit.record("bootstrap", &email, app.clock.now());
     let (headers, pubuser) = set_cookie(&app, &user);
     Ok((StatusCode::CREATED, headers, Json(pubuser)).into_response())
 }
@@ -268,6 +272,7 @@ pub async fn login(
     if !ok {
         // Same response for unknown email and bad password (no user enumeration).
         app.rate.record_failure(&key);
+        app.audit.record("login_failed", &email, app.clock.now());
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",
@@ -275,6 +280,7 @@ pub async fn login(
         ));
     }
     app.rate.reset(&key);
+    app.audit.record("login_ok", &email, app.clock.now());
     let (headers, pubuser) = set_cookie(&app, &user.unwrap());
     Ok((headers, Json(pubuser)).into_response())
 }
@@ -305,6 +311,12 @@ pub async fn me(State(app): State<AppState>, req: axum::extract::Request) -> Api
 /// Public: whether an administrator exists yet (drives first-run setup UI).
 pub async fn auth_status(State(app): State<AppState>) -> ApiResult {
     Ok(Json(serde_json::json!({ "initialised": app.store.has_users()? })).into_response())
+}
+
+/// Recent security audit events (admin only, #52).
+pub async fn audit_log(State(app): State<AppState>) -> ApiResult {
+    let events = app.audit.recent(200);
+    Ok(Json(serde_json::json!({ "events": events })).into_response())
 }
 
 fn new_user(
@@ -386,6 +398,7 @@ pub async fn create_user(
         input.default_rate_minor,
         &app,
     )?;
+    app.audit.record("user_created", &email, app.clock.now());
     Ok((StatusCode::CREATED, Json(PublicUser::from(&user))).into_response())
 }
 
