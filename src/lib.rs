@@ -22,6 +22,7 @@ pub mod report;
 pub mod revoke;
 pub mod scheduler;
 pub mod store;
+pub mod vault;
 
 use api::AppState;
 
@@ -144,6 +145,11 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/claims/{id}/decision",
             axum::routing::post(api::decide_claim),
+        )
+        .route("/admin/secrets", get(api::list_secrets))
+        .route(
+            "/admin/secrets/{key}",
+            axum::routing::put(api::set_secret).delete(api::delete_secret),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

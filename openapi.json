@@ -1157,6 +1157,34 @@
         }
       }
     },
+    "/admin/secrets": {
+      "get": {
+        "operationId": "listSecrets",
+        "tags": ["users"],
+        "summary": "List configured integration secrets with masked hints (admin only, #77)",
+        "responses": {
+          "200": { "description": "Secrets (names + masked hints, never values).", "content": { "application/json": { "schema": { "type": "object", "required": ["secrets"], "properties": { "secrets": { "type": "array", "items": { "type": "object", "required": ["key", "hint"], "properties": { "key": { "type": "string" }, "hint": { "type": "string" } }, "additionalProperties": false } } }, "additionalProperties": false } } } },
+          "403": { "description": "Admin role required." },
+          "503": { "description": "Vault not configured (no TUCANO_SECRET_KEY)." }
+        }
+      }
+    },
+    "/admin/secrets/{key}": {
+      "parameters": [ { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } } ],
+      "put": {
+        "operationId": "setSecret",
+        "tags": ["users"],
+        "summary": "Store/overwrite a secret (encrypted at rest; never echoed back)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["value"], "properties": { "value": { "type": "string" } }, "additionalProperties": false } } } },
+        "responses": { "204": { "description": "Stored." }, "403": { "description": "Admin role required." }, "422": { "$ref": "#/components/responses/ValidationError" }, "503": { "description": "Vault not configured." } }
+      },
+      "delete": {
+        "operationId": "deleteSecret",
+        "tags": ["users"],
+        "summary": "Delete a secret",
+        "responses": { "204": { "description": "Deleted." }, "403": { "description": "Admin role required." }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "description": "Vault not configured." } }
+      }
+    },
     "/submissions": {
       "get": {
         "operationId": "listSubmissions",

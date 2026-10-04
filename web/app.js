@@ -1148,6 +1148,72 @@ async function decideSubmission(id, decision) {
   }
 }
 
+// --------------------------------------------------------------- settings --
+
+async function refreshSettings() {
+  try {
+    const data = await api.get('/admin/secrets');
+    $('vault-status').textContent = 'Credential vault: enabled (encrypted at rest).';
+    $('secret-form').hidden = false;
+    const tbody = $('secret-table').querySelector('tbody');
+    tbody.textContent = '';
+    const secrets = data.secrets || [];
+    for (const s of secrets) {
+      const tr = document.createElement('tr');
+      const key = document.createElement('th');
+      key.scope = 'row';
+      key.textContent = s.key;
+      const hint = document.createElement('td');
+      hint.textContent = s.hint;
+      const act = document.createElement('td');
+      act.className = 'actions-col';
+      const del = document.createElement('button');
+      del.className = 'danger';
+      del.type = 'button';
+      del.textContent = 'Delete';
+      del.addEventListener('click', () => deleteSecret(s.key));
+      act.append(del);
+      tr.append(key, hint, act);
+      tbody.appendChild(tr);
+    }
+    $('secret-empty').hidden = secrets.length !== 0;
+  } catch (err) {
+    if (err.status === 503) {
+      $('vault-status').textContent = 'Credential vault disabled — set TUCANO_SECRET_KEY to enable.';
+      $('secret-form').hidden = true;
+      $('secret-table').hidden = true;
+    } else {
+      announce(err.message);
+    }
+  }
+}
+
+async function addSecret(evt) {
+  evt.preventDefault();
+  clearFormError($('secret-error'));
+  const key = $('secret-key').value.trim();
+  try {
+    await api.put(`/admin/secrets/${encodeURIComponent(key)}`, { value: $('secret-value').value });
+    $('secret-key').value = '';
+    $('secret-value').value = '';
+    announce('Secret saved.');
+    await refreshSettings();
+  } catch (err) {
+    showFormError($('secret-error'), err);
+  }
+}
+
+async function deleteSecret(key) {
+  if (!window.confirm(`Delete secret "${key}"?`)) return;
+  try {
+    await api.del(`/admin/secrets/${encodeURIComponent(key)}`);
+    await refreshSettings();
+    announce('Secret deleted.');
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
 // ---------------------------------------------------------------- boot ---
 
 function switchTab(tabId) {
@@ -1194,6 +1260,7 @@ async function startApp() {
   $('category-form').addEventListener('submit', addCategory);
   $('expense-form').addEventListener('submit', addExpense);
   $('submission-form').addEventListener('submit', submitWeek);
+  $('secret-form').addEventListener('submit', addSecret);
   $('submission-week').value = mondayOf(today);
   $('expense-customer').addEventListener('change', async (e) => {
     await fillProjectSelect($('expense-project'), e.target.value, null);
@@ -1215,6 +1282,7 @@ async function startApp() {
   await fillCategorySelect();
   await refreshExpenses();
   await refreshSubmissions();
+  await refreshSettings();
   $('version').textContent = 'TucanoTime';
 }
 
@@ -1245,6 +1313,9 @@ function showAccount(me) {
   $('auth-overlay').hidden = true;
   $('account').hidden = false;
   $('who').textContent = me.name || me.email;
+  // Settings (credential vault) is admin-only; hide the tab for members.
+  const settingsTab = $('tab-settings');
+  if (settingsTab) settingsTab.hidden = me.role !== 'admin';
 }
 
 async function initAuth() {
