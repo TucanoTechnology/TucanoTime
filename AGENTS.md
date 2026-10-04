@@ -38,8 +38,11 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   `customers/<id>/projects/<CODE>/tasks/<TASK>.json` (optional task tier, #38),
   `entries/<YYYY-MM-DD>/<id>.json`, `invoices/<id>.json`, `users/<id>.json`,
   `categories/<id>.json`, `expenses/<id>.json`, `submissions/<id>.json`,
-  plus `audit.log` (#52), `revoked.json` (#45) and `scheduler.json` (#61).
-  Atomic writes (tmp + rename).
+  plus `audit.log` (#52), `revoked.json` (#45), `scheduler.json` (#61) and
+  `secrets.bin` (#77, AES-256-GCM encrypted). Atomic writes (tmp + rename).
+- **Secret vault (#77):** admin-entered integration credentials are encrypted at
+  rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
+  hints only) or logged. Fail-closed: unset key ⇒ vault disabled.
 - **Locking (#18 seam):** entry edits/deletes consult `CombinedLocks`, which
   composes `InvoiceLock` (entries on an issued invoice, #8) and `SubmissionLock`
   (entries in a submitted/approved week, #16). Reads are never blocked.

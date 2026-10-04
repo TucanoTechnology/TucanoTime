@@ -98,6 +98,7 @@ impl Client {
                     )),
                     audit,
                     revocations,
+                    vault: None,
                 }
             }
             None => AppState::with_session(store, session),
@@ -2030,4 +2031,97 @@ async fn reimbursement_claim_lifecycle_locks_expenses() {
     assert_eq!(sd, StatusCode::OK, "{decided}");
     assert_eq!(decided["state"], "approved");
     let _ = claim_id;
+}
+
+#[tokio::test]
+async fn secret_vault_endpoints_mask_and_authorize() {
+    use tucano_time::vault::SecretVault;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let vault = std::sync::Arc::new(
+        SecretVault::open(&root, Some("0123456789abcdef0123456789abcdef"))
+            .unwrap()
+            .unwrap(),
+    );
+    let session = std::sync::Arc::new(Session::new(
+        b"test-session-secret-0000000000000032".to_vec(),
+        3600,
+        false,
+    ));
+    let state = AppState {
+        store: std::sync::Arc::new(store),
+        clock: std::sync::Arc::new(SystemClock),
+        locks: std::sync::Arc::new(tucano_time::lock::NoLocks),
+        session,
+        rate: std::sync::Arc::new(tucano_time::ratelimit::RateLimiter::new(
+            8,
+            std::time::Duration::from_secs(300),
+        )),
+        audit: std::sync::Arc::new(tucano_time::audit::AuditLog::new(&root)),
+        revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
+        vault: Some(vault),
+    };
+    let router = tucano_time::build_router(state);
+    // bootstrap admin
+    raw(
+        &router,
+        "POST",
+        "/auth/bootstrap",
+        Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+        None,
+    )
+    .await;
+    let admin = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
+    // member
+    raw(
+        &router,
+        "POST",
+        "/users",
+        Some(json!({"name":"M","email":"m@t.local","password":"memberpass1","role":"member"})),
+        Some(&admin),
+    )
+    .await;
+    let member = login_cookie(&router, "m@t.local", "memberpass1").await;
+
+    // admin sets a secret
+    let (s, _, _) = raw(
+        &router,
+        "PUT",
+        "/admin/secrets/stripe.secret_key",
+        Some(json!({"value":"dummy-secret-value-1234"})),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    // list shows masked hint, never the value
+    let (s2, list, _) = raw(&router, "GET", "/admin/secrets", None, Some(&admin)).await;
+    assert_eq!(s2, StatusCode::OK);
+    let text = serde_json::to_string(&list).unwrap();
+    assert!(text.contains("stripe.secret_key"), "{text}");
+    assert!(
+        !text.contains("dummy-secret-value-1234"),
+        "value leaked in list: {text}"
+    );
+    assert!(text.contains("1234"), "expected masked hint: {text}");
+    // member forbidden
+    let (s3, _, _) = raw(
+        &router,
+        "PUT",
+        "/admin/secrets/x",
+        Some(json!({"value":"y"})),
+        Some(&member),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::FORBIDDEN);
+    // delete
+    let (s4, _, _) = raw(
+        &router,
+        "DELETE",
+        "/admin/secrets/stripe.secret_key",
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s4, StatusCode::NO_CONTENT);
 }

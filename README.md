@@ -45,6 +45,12 @@ docker run -d -p 8080:8080 \
 
 Roles: `admin` (user management) and `member` (timesheet work).
 
+**Integration credentials (#77):** admins store provider secrets (Stripe, OAuth,
+SMTP, ICS feed URLs) in the **Settings** tab; they are encrypted at rest with
+AES-256-GCM under `TUCANO_SECRET_KEY` (a 32-byte env var) and never returned or
+logged. Without `TUCANO_SECRET_KEY` the vault is disabled (fail-closed).
+`secrets.bin` holds the encrypted blob.
+
 ## Development
 
 ```sh

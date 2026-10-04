@@ -99,6 +99,7 @@ pub struct AppState {
     pub rate: Arc<crate::ratelimit::RateLimiter>,
     pub audit: Arc<crate::audit::AuditLog>,
     pub revocations: Arc<crate::revoke::Revocations>,
+    pub vault: Option<Arc<crate::vault::SecretVault>>,
 }
 
 impl AppState {
@@ -116,6 +117,13 @@ impl AppState {
         ]));
         let audit = Arc::new(crate::audit::AuditLog::new(store.root()));
         let revocations = Arc::new(crate::revoke::Revocations::new(store.root()));
+        let vault = crate::vault::SecretVault::open(
+            store.root(),
+            std::env::var("TUCANO_SECRET_KEY").ok().as_deref(),
+        )
+        .ok()
+        .flatten()
+        .map(Arc::new);
         Self {
             clock: Arc::new(crate::clock::SystemClock),
             locks,
@@ -127,6 +135,7 @@ impl AppState {
             )),
             audit,
             revocations,
+            vault,
             store,
         }
     }
@@ -348,6 +357,76 @@ pub async fn auth_status(State(app): State<AppState>) -> ApiResult {
 pub async fn audit_log(State(app): State<AppState>) -> ApiResult {
     let events = app.audit.recent(200);
     Ok(Json(serde_json::json!({ "events": events })).into_response())
+}
+
+// ------------------------------------------------------------- secret vault --
+
+fn valid_secret_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 100
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+fn require_vault(app: &AppState) -> Result<&crate::vault::SecretVault, ApiError> {
+    app.vault.as_deref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "vault_disabled",
+            "credential vault is not configured (set TUCANO_SECRET_KEY)",
+        )
+    })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecretInput {
+    pub value: String,
+}
+
+/// List configured secret keys with masked hints — never the values (#77).
+pub async fn list_secrets(State(app): State<AppState>) -> ApiResult {
+    let vault = require_vault(&app)?;
+    let secrets: Vec<serde_json::Value> = vault
+        .keys()
+        .into_iter()
+        .map(|k| serde_json::json!({ "key": k, "hint": vault.hint(&k) }))
+        .collect();
+    Ok(Json(serde_json::json!({ "secrets": secrets })).into_response())
+}
+
+/// Store/overwrite a secret (admin only). The value is never echoed back.
+pub async fn set_secret(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+    ValidJson(input): ValidJson<SecretInput>,
+) -> ApiResult {
+    let vault = require_vault(&app)?;
+    if !valid_secret_key(&key) {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "key",
+            "use letters, digits, '.', '_' or '-' (max 100)",
+        )]));
+    }
+    vault
+        .put(&key, &input.value)
+        .map_err(|e| ApiError::internal(format!("vault write failed: {e}")))?;
+    app.audit.record("secret_set", &key, app.clock.now());
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Delete a secret (admin only).
+pub async fn delete_secret(State(app): State<AppState>, Path(key): Path<String>) -> ApiResult {
+    let vault = require_vault(&app)?;
+    let removed = vault
+        .remove(&key)
+        .map_err(|e| ApiError::internal(format!("vault write failed: {e}")))?;
+    if !removed {
+        return Err(ApiError::not_found("secret"));
+    }
+    app.audit.record("secret_deleted", &key, app.clock.now());
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 /// Non-identity attributes for creating a user.

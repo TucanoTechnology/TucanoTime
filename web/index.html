@@ -42,6 +42,7 @@
           <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
           <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
           <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Timesheets</button>
+          <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings</button>
         </div>
       </nav>
       <div id="account" class="account" hidden>
@@ -268,6 +269,24 @@
         <tbody></tbody>
       </table>
       <p id="submission-empty" hidden>No timesheets submitted yet.</p>
+    </section>
+
+    <!-- SETTINGS (admin) -->
+    <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
+      <h2>Integration credentials</h2>
+      <p id="vault-status" class="hint"></p>
+      <form id="secret-form" class="card">
+        <div class="field"><label for="secret-key">Key (e.g. stripe.secret_key)</label><input id="secret-key" maxlength="100" required></div>
+        <div class="field"><label for="secret-value">Value</label><input id="secret-value" type="password" autocomplete="off" required></div>
+        <p class="form-error" id="secret-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="secret-save">Save secret</button></div>
+      </form>
+      <table id="secret-table">
+        <caption class="sr-only">Configured secrets</caption>
+        <thead><tr><th scope="col">Key</th><th scope="col">Value</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="secret-empty" hidden>No credentials stored yet.</p>
     </section>
       </main>
 
