@@ -48,3 +48,17 @@ jobs:
 
       - name: Lint workflows
         run: docker run --rm -v "$PWD:/repo:ro" --workdir /repo rhysd/actionlint:1.7.12 -color
+
+  # Secret scanning (#49): full git history via the pinned gitleaks image. The
+  # digest is pinned (matching the sibling project's supply-chain discipline)
+  # so a tag re-push cannot silently change the scanner.
+  secret-scan:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        run: docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact
