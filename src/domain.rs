@@ -250,15 +250,31 @@ pub enum InvoiceStatus {
     Paid,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LineKind {
+    Time,
+    Expense,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InvoiceLine {
-    pub entry_id: Uuid,
+    pub kind: LineKind,
     pub date: NaiveDate,
-    pub project_code: ProjectCode,
+    /// Time lines reference an entry; expense lines reference an expense.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expense_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_code: Option<ProjectCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_code: Option<ProjectCode>,
-    pub hours: Hours,
-    pub rate_minor: u64,
+    /// Hours + rate apply to time lines only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hours: Option<Hours>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_minor: Option<u64>,
     pub amount_minor: u64,
     #[serde(default)]
     pub note: String,
@@ -516,13 +532,19 @@ pub struct InvoiceSources<'a> {
     pub tasks: &'a [Task],
     pub users: &'a [User],
     pub entries: &'a [Entry],
-    pub excluded: &'a [Uuid],
+    pub expenses: &'a [Expense],
+    /// Entry ids already on an issued invoice (excluded).
+    pub excluded_entries: &'a [Uuid],
+    /// Expense ids already on an issued invoice (excluded).
+    pub excluded_expenses: &'a [Uuid],
+    pub include_expenses: bool,
 }
 
-/// Build a draft invoice from the billable entries in `[from, to]` for one
-/// customer. Rates are resolved per entry (task > person > project > customer)
-/// and snapshotted onto the lines, so a later rate change never rewrites an
-/// issued invoice. Entries already on an issued invoice (`excluded`) are skipped.
+/// Build a draft invoice from the billable entries (and, if enabled, billable
+/// expenses) in `[from, to]` for one customer. Time-line rates are resolved per
+/// entry (task > person > project > customer) and snapshotted, so a later rate
+/// change never rewrites an issued invoice. Items already on an issued invoice
+/// (`excluded_*`) are skipped.
 pub fn generate_invoice(
     number: String,
     customer: &Customer,
@@ -536,7 +558,10 @@ pub fn generate_invoice(
         tasks,
         users,
         entries,
-        excluded,
+        expenses,
+        excluded_entries,
+        excluded_expenses,
+        include_expenses,
     } = src;
     let user_rate = |e: &Entry| -> Option<u64> {
         e.user_id
@@ -545,11 +570,24 @@ pub fn generate_invoice(
     };
     let mut lines: Vec<InvoiceLine> = Vec::new();
     let mut currency: Option<Currency> = None;
+    let mut set_currency = |cur: &Currency| -> Result<(), InvoiceError> {
+        match &currency {
+            None => {
+                currency = Some(cur.clone());
+                Ok(())
+            }
+            Some(existing) if existing == cur => Ok(()),
+            Some(existing) => Err(InvoiceError::MixedCurrency {
+                a: existing.0.clone(),
+                b: cur.0.clone(),
+            }),
+        }
+    };
     for e in entries.iter() {
         if e.customer_id != customer.id || !e.billable || e.date < from || e.date > to {
             continue;
         }
-        if excluded.contains(&e.id) {
+        if excluded_entries.contains(&e.id) {
             continue; // already billed on an issued invoice
         }
         let project = projects.iter().find(|p| p.code == e.project_code);
@@ -559,26 +597,42 @@ pub fn generate_invoice(
                 .find(|t| t.project_code == e.project_code && t.code == *tc)
         });
         let (cur, rate) = effective_rates(e, customer, project, task, user_rate(e));
-        match &currency {
-            None => currency = Some(cur),
-            Some(existing) if *existing == cur => {}
-            Some(existing) => {
-                return Err(InvoiceError::MixedCurrency {
-                    a: existing.0.clone(),
-                    b: cur.0,
-                });
-            }
-        }
+        set_currency(&cur)?;
         lines.push(InvoiceLine {
-            entry_id: e.id,
+            kind: LineKind::Time,
             date: e.date,
-            project_code: e.project_code.clone(),
+            entry_id: Some(e.id),
+            expense_id: None,
+            project_code: Some(e.project_code.clone()),
             task_code: e.task_code.clone(),
-            hours: e.hours,
-            rate_minor: rate,
+            hours: Some(e.hours),
+            rate_minor: Some(rate),
             amount_minor: e.hours.amount_minor(rate),
             note: e.note.clone(),
         });
+    }
+    if *include_expenses {
+        for x in expenses.iter() {
+            if x.customer_id != customer.id || !x.billable || x.date < from || x.date > to {
+                continue;
+            }
+            if excluded_expenses.contains(&x.id) {
+                continue;
+            }
+            set_currency(&x.currency)?;
+            lines.push(InvoiceLine {
+                kind: LineKind::Expense,
+                date: x.date,
+                entry_id: None,
+                expense_id: Some(x.id),
+                project_code: x.project_code.clone(),
+                task_code: None,
+                hours: None,
+                rate_minor: None,
+                amount_minor: x.amount_minor,
+                note: x.note.clone(),
+            });
+        }
     }
     if lines.is_empty() {
         return Err(InvoiceError::NothingToInvoice);

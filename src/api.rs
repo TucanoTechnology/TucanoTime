@@ -19,9 +19,10 @@ use crate::auth::{
 };
 use crate::domain::{
     Category, CategoryInput, Currency, Customer, CustomerInput, Entry, EntryInput, Expense,
-    ExpenseInput, FieldError, InvoiceError, InvoiceStatus, Project, ProjectCode, ProjectInput,
-    Task, TaskInput, generate_invoice, validate_category_input, validate_customer_input,
-    validate_entry_input, validate_expense_input, validate_project_input, validate_task_input,
+    ExpenseInput, FieldError, Invoice, InvoiceError, InvoiceStatus, Project, ProjectCode,
+    ProjectInput, Task, TaskInput, generate_invoice, validate_category_input,
+    validate_customer_input, validate_entry_input, validate_expense_input, validate_project_input,
+    validate_task_input,
 };
 use crate::domain::{Submission, SubmissionState};
 use crate::error::ApiError;
@@ -441,6 +442,9 @@ pub struct InvoiceInput {
     pub customer_id: Uuid,
     pub from: String,
     pub to: String,
+    /// Include billable expenses in the period (default true, #25).
+    #[serde(default = "default_active_true")]
+    pub include_expenses: bool,
 }
 
 pub async fn list_invoices(State(app): State<AppState>) -> ApiResult {
@@ -466,20 +470,32 @@ pub async fn create_invoice(
     }
     let users = app.store.list_users()?;
     let entries = app.store.list_range(from, to)?;
-    // Entries already on an issued invoice are excluded from a new one.
-    let excluded: Vec<Uuid> = app
-        .store
-        .list_invoices()?
+    let expenses = app.store.list_expenses()?;
+    // Items already on an issued invoice are excluded from a new one.
+    let invoices = app.store.list_invoices()?;
+    let issued: Vec<&Invoice> = invoices
         .iter()
         .filter(|i| i.status == InvoiceStatus::Issued)
-        .flat_map(|i| i.lines.iter().map(|l| l.entry_id))
+        .collect();
+    let excluded_entries: Vec<Uuid> = issued
+        .iter()
+        .flat_map(|i| i.lines.iter())
+        .filter_map(|l| l.entry_id)
+        .collect();
+    let excluded_expenses: Vec<Uuid> = issued
+        .iter()
+        .flat_map(|i| i.lines.iter())
+        .filter_map(|l| l.expense_id)
         .collect();
     let sources = crate::domain::InvoiceSources {
         projects: &projects,
         tasks: &tasks,
         users: &users,
         entries: &entries,
-        excluded: &excluded,
+        expenses: &expenses,
+        excluded_entries: &excluded_entries,
+        excluded_expenses: &excluded_expenses,
+        include_expenses: input.include_expenses,
     };
     let invoice = generate_invoice(
         String::new(),
@@ -695,6 +711,18 @@ pub async fn delete_expense(
         .is_some_and(|e| visible_to(&actor.0, e.user_id));
     if !owned {
         return Err(ApiError::not_found("expense"));
+    }
+    // An expense on an issued invoice is locked (#25).
+    let invoiced = app
+        .store
+        .list_invoices()?
+        .iter()
+        .filter(|i| i.status == InvoiceStatus::Issued)
+        .any(|i| i.lines.iter().any(|l| l.expense_id == Some(id)));
+    if invoiced {
+        return Err(ApiError::conflict(
+            "expense is on an issued invoice; delete the invoice draft or void it first",
+        ));
     }
     app.store.delete_expense(id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
