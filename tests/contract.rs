@@ -1840,3 +1840,64 @@ async fn invoice_can_exclude_expenses() {
             .all(|l| l["kind"] == "time")
     );
 }
+
+#[tokio::test]
+async fn profitability_revenue_vs_cost() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    // Bob: cost rate 20/h.
+    json_req(&app, "POST", "/users", Some(json!({"name":"Bob","email":"bob@t.local","password":"bobpass123","role":"member","cost_rate_minor":2000}))).await;
+    let bob = login_cookie(&app.router, "bob@t.local", "bobpass123").await;
+    // Bob logs 2h billable (revenue 2x60=12000, labour cost 2x20=4000).
+    raw(
+        &app.router,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
+        Some(&bob),
+    )
+    .await;
+    // billable expense 5000.
+    json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(json!({"date":"2026-10-03","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
+    )
+    .await;
+    // invoice (12000 + 5000 = 17000) and issue.
+    let (_, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+
+    let (s, prof) = json_req(
+        &app,
+        "GET",
+        "/reports/profitability?from=2026-10-01&to=2026-10-31",
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let row = prof["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["label"] == "ACME")
+        .expect("ACME row");
+    assert_eq!(row["revenue_minor"], 17000);
+    assert_eq!(row["cost_minor"], 9000); // 5000 expense + 4000 labour
+    assert_eq!(row["margin_minor"], 8000);
+}

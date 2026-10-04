@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::Datelike;
+use chrono::{Datelike, NaiveDate};
 use uuid::Uuid;
 
 use crate::auth::User;
@@ -174,6 +174,78 @@ struct AccRow {
     hours: f64,
     amount: u64,
     entries: usize,
+}
+
+// ----------------------------------------------------------- profitability --
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ProfitRow {
+    pub customer_id: String,
+    pub label: String,
+    pub currency: String,
+    pub revenue_minor: u64,
+    pub cost_minor: u64,
+    pub margin_minor: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Profitability {
+    pub rows: Vec<ProfitRow>,
+}
+
+/// Revenue (from non-draft invoices in the period) vs cost (billable-expense
+/// amounts + labour: billable hours × each person's cost rate), per customer.
+/// Money is per-currency; no FX is applied (#29).
+pub fn summarise_profit(
+    invoices: &[crate::domain::Invoice],
+    expenses: &[crate::domain::Expense],
+    entries: &[Entry],
+    customers: &[Customer],
+    users: &[User],
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Profitability {
+    use crate::domain::InvoiceStatus;
+    let mut rows: Vec<ProfitRow> = Vec::new();
+    for c in customers {
+        let revenue: u64 = invoices
+            .iter()
+            .filter(|i| i.customer_id == c.id && i.status != InvoiceStatus::Draft)
+            .filter(|i| i.period_to >= from && i.period_from <= to)
+            .map(|i| i.total_minor)
+            .sum();
+        let expense_cost: u64 = expenses
+            .iter()
+            .filter(|x| x.customer_id == c.id && x.date >= from && x.date <= to)
+            .map(|x| x.amount_minor)
+            .sum();
+        let labour_cost: u64 = entries
+            .iter()
+            .filter(|e| e.customer_id == c.id && e.billable && e.date >= from && e.date <= to)
+            .map(|e| {
+                let rate = e
+                    .user_id
+                    .and_then(|uid| users.iter().find(|u| u.id == uid))
+                    .map(|u| u.cost_rate_minor)
+                    .unwrap_or(0);
+                e.hours.amount_minor(rate)
+            })
+            .sum();
+        let cost = expense_cost + labour_cost;
+        if revenue == 0 && cost == 0 {
+            continue;
+        }
+        rows.push(ProfitRow {
+            customer_id: c.id.to_string(),
+            label: c.name.clone(),
+            currency: c.currency.0.clone(),
+            revenue_minor: revenue,
+            cost_minor: cost,
+            margin_minor: revenue as i64 - cost as i64,
+        });
+    }
+    rows.sort_by_key(|r| std::cmp::Reverse(r.margin_minor));
+    Profitability { rows }
 }
 
 fn group_name(kind: Group) -> &'static str {
