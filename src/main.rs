@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use tucano_time::api::AppState;
-use tucano_time::auth::Session;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,25 +20,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = tucano_time::store::Store::open(&data_dir)?;
 
     // Session key: a configured secret, or an ephemeral per-process key (dev).
-    let secure = std::env::var("TUCANO_ENV").as_deref() == Ok("production");
-    let session = match std::env::var("TUCANO_SESSION_SECRET")
-        .ok()
-        .filter(|s| !s.is_empty())
-    {
-        Some(secret) => {
-            tracing::info!("using configured session secret");
-            Session::new(secret.into_bytes(), 60 * 60 * 24, secure)
-        }
-        None => {
-            tracing::warn!(
-                "TUCANO_SESSION_SECRET unset: sessions are ephemeral (restart logs everyone out)"
-            );
-            let mut key = [0u8; 32];
-            use rand::RngCore;
-            rand::rngs::OsRng.fill_bytes(&mut key);
-            Session::new(key.to_vec(), 60 * 60 * 24, secure)
-        }
-    };
+    // In production a strong secret is required — refuse to start otherwise (#44).
+    let production = std::env::var("TUCANO_ENV").as_deref() == Ok("production");
+    let session = tucano_time::auth::make_session(
+        std::env::var("TUCANO_SESSION_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty()),
+        production,
+    )?;
     let state = AppState::with_session(store, Arc::new(session));
 
     let app = tucano_time::build_router(state);

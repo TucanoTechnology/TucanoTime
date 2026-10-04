@@ -161,6 +161,36 @@ pub fn token_from_cookie_header(header: &str) -> Option<&str> {
     })
 }
 
+/// Build the session signer from config. In production a strong secret is
+/// required (#44): missing or shorter than 32 bytes fails fast rather than
+/// silently using an ephemeral key that logs everyone out on restart.
+pub fn make_session(secret: Option<String>, production: bool) -> Result<Session, String> {
+    match secret.filter(|s| !s.is_empty()) {
+        Some(s) if s.len() >= 32 => Ok(Session::new(s.into_bytes(), 60 * 60 * 24, production)),
+        Some(_) if production => Err(
+            "TUCANO_SESSION_SECRET is set but shorter than 32 bytes; refuse to start in production"
+                .to_string(),
+        ),
+        Some(s) => {
+            tracing::warn!("TUCANO_SESSION_SECRET is <32 bytes; use a longer key in production");
+            Ok(Session::new(s.into_bytes(), 60 * 60 * 24, production))
+        }
+        None if production => Err(
+            "TUCANO_SESSION_SECRET is required in production (generate: openssl rand -hex 32)"
+                .to_string(),
+        ),
+        None => {
+            tracing::warn!(
+                "TUCANO_SESSION_SECRET unset: sessions are ephemeral (restart logs everyone out)"
+            );
+            let mut key = [0u8; 32];
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut key);
+            Ok(Session::new(key.to_vec(), 60 * 60 * 24, production))
+        }
+    }
+}
+
 // ------------------------------------------------------------- validation --
 
 pub fn normalise_email(raw: &str) -> Option<String> {
@@ -227,5 +257,19 @@ mod tests {
         assert!(normalise_email("a b@c.com").is_none());
         assert!(!valid_password("short"));
         assert!(valid_password("longenough"));
+    }
+
+    #[test]
+    fn make_session_requires_strong_secret_in_production() {
+        // Production with no secret -> refuse.
+        assert!(make_session(None, true).is_err());
+        // Production with a short secret -> refuse.
+        assert!(make_session(Some("tooshort".into()), true).is_err());
+        // Production with a strong secret -> ok, Secure cookie.
+        let s = make_session(Some("0123456789abcdef0123456789abcdef".into()), true).unwrap();
+        assert!(s.secure());
+        // Dev with no secret -> ephemeral, non-secure.
+        let d = make_session(None, false).unwrap();
+        assert!(!d.secure());
     }
 }
