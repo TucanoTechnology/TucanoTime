@@ -85,7 +85,16 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 #[derive(Serialize, Deserialize)]
 struct Claims {
     uid: String,
+    jti: String,
     exp: i64,
+}
+
+/// Verified session token contents.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionClaims {
+    pub uid: Uuid,
+    pub jti: String,
+    pub exp: i64,
 }
 
 /// Issues and verifies signed session tokens: `base64(json claims).base64(hmac)`.
@@ -118,6 +127,7 @@ impl Session {
     pub fn issue(&self, user: &User, now: DateTime<Utc>) -> String {
         let claims = Claims {
             uid: user.id.to_string(),
+            jti: Uuid::new_v4().to_string(),
             exp: now.timestamp() + self.ttl_secs,
         };
         let payload =
@@ -126,8 +136,8 @@ impl Session {
         format!("{payload}.{sig}")
     }
 
-    /// Returns the user id if the token is authentic and unexpired.
-    pub fn verify(&self, token: &str, now: DateTime<Utc>) -> Option<Uuid> {
+    /// Returns the verified claims if the token is authentic and unexpired.
+    pub fn verify(&self, token: &str, now: DateTime<Utc>) -> Option<SessionClaims> {
         let (payload, sig) = token.split_once('.')?;
         let provided = URL_SAFE_NO_PAD.decode(sig).ok()?;
         // verify_slice is constant-time.
@@ -139,7 +149,11 @@ impl Session {
         if claims.exp < now.timestamp() {
             return None;
         }
-        Uuid::parse_str(&claims.uid).ok()
+        Some(SessionClaims {
+            uid: Uuid::parse_str(&claims.uid).ok()?,
+            jti: claims.jti,
+            exp: claims.exp,
+        })
     }
 
     /// Build a `Set-Cookie` header value for a freshly issued token.
@@ -230,12 +244,12 @@ mod tests {
         };
         let now = Utc::now();
         let token = s.issue(&user, now);
-        assert_eq!(s.verify(&token, now), Some(user.id));
+        assert_eq!(s.verify(&token, now).map(|c| c.uid), Some(user.id));
         // Tampered signature fails.
-        assert_eq!(s.verify(&format!("{token}x"), now), None);
+        assert_eq!(s.verify(&format!("{token}x"), now).map(|c| c.uid), None);
         // Expired fails.
         let later = now + chrono::Duration::hours(2);
-        assert_eq!(s.verify(&token, later), None);
+        assert_eq!(s.verify(&token, later).map(|c| c.uid), None);
     }
 
     #[test]

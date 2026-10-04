@@ -97,6 +97,7 @@ pub struct AppState {
     pub session: Arc<Session>,
     pub rate: Arc<crate::ratelimit::RateLimiter>,
     pub audit: Arc<crate::audit::AuditLog>,
+    pub revocations: Arc<crate::revoke::Revocations>,
 }
 
 impl AppState {
@@ -113,6 +114,7 @@ impl AppState {
             Box::new(crate::lock::SubmissionLock::new(store.clone())),
         ]));
         let audit = Arc::new(crate::audit::AuditLog::new(store.root()));
+        let revocations = Arc::new(crate::revoke::Revocations::new(store.root()));
         Self {
             clock: Arc::new(crate::clock::SystemClock),
             locks,
@@ -123,6 +125,7 @@ impl AppState {
                 std::time::Duration::from_secs(300),
             )),
             audit,
+            revocations,
             store,
         }
     }
@@ -151,11 +154,14 @@ fn authenticate(state: &AppState, headers: &http::HeaderMap) -> Result<User, Api
         .and_then(|v| v.to_str().ok())
         .ok_or_else(unauth)?;
     let token = token_from_cookie_header(header).ok_or_else(unauth)?;
-    let uid = state
+    let claims = state
         .session
         .verify(token, state.clock.now())
         .ok_or_else(unauth)?;
-    let user = state.store.get_user(uid)?.ok_or_else(unauth)?;
+    if state.revocations.is_revoked(&claims.jti, state.clock.now()) {
+        return Err(unauth()); // logged out (#45)
+    }
+    let user = state.store.get_user(claims.uid)?.ok_or_else(unauth)?;
     if !user.active {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -285,7 +291,20 @@ pub async fn login(
     Ok((headers, Json(pubuser)).into_response())
 }
 
-pub async fn logout(State(app): State<AppState>) -> ApiResult {
+pub async fn logout(State(app): State<AppState>, req: axum::extract::Request) -> ApiResult {
+    // Revoke the current session so the cookie stops working before expiry (#45).
+    if let Some(header) = req
+        .headers()
+        .get(http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        && let Some(token) = token_from_cookie_header(header)
+        && let Some(claims) = app.session.verify(token, app.clock.now())
+    {
+        app.revocations
+            .revoke(&claims.jti, claims.exp, app.clock.now());
+        app.audit
+            .record("logout", &claims.uid.to_string(), app.clock.now());
+    }
     let mut headers = http::HeaderMap::new();
     let cookie = format!(
         "{}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0",

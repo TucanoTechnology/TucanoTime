@@ -86,6 +86,7 @@ impl Client {
             Some(l) => {
                 let store = Arc::new(store);
                 let audit = Arc::new(tucano_time::audit::AuditLog::new(store.root()));
+                let revocations = Arc::new(tucano_time::revoke::Revocations::new(store.root()));
                 AppState {
                     store,
                     clock: Arc::new(SystemClock),
@@ -96,6 +97,7 @@ impl Client {
                         std::time::Duration::from_secs(300),
                     )),
                     audit,
+                    revocations,
                 }
             }
             None => AppState::with_session(store, session),
@@ -1727,4 +1729,29 @@ async fn audit_log_records_login_failure() {
     // No password material is ever recorded.
     let raw = serde_json::to_string(&events).unwrap();
     assert!(!raw.contains("wrong"), "audit leaked a password");
+}
+
+#[tokio::test]
+async fn logout_revokes_the_session() {
+    let (client, _d) = app().await;
+    // Session works.
+    let (s1, _) = json_req(&client, "GET", "/auth/me", None).await;
+    assert_eq!(s1, StatusCode::OK);
+    // Log out (CSRF header is sent by raw()).
+    let (s2, _, _) = raw(
+        &client.router,
+        "POST",
+        "/auth/logout",
+        None,
+        Some(&client.cookie),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::NO_CONTENT);
+    // The same cookie is now revoked.
+    let (s3, _) = json_req(&client, "GET", "/auth/me", None).await;
+    assert_eq!(
+        s3,
+        StatusCode::UNAUTHORIZED,
+        "revoked session must not work"
+    );
 }
