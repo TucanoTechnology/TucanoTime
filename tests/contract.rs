@@ -88,6 +88,10 @@ impl Client {
                 clock: Arc::new(SystemClock),
                 locks: l,
                 session,
+                rate: Arc::new(tucano_time::ratelimit::RateLimiter::new(
+                    8,
+                    std::time::Duration::from_secs(300),
+                )),
             },
             None => AppState::with_session(store, session),
         };
@@ -1630,4 +1634,23 @@ async fn mutation_without_csrf_header_is_forbidden() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn login_rate_limited_after_repeated_failures() {
+    let (client, _d) = app().await;
+    let body = json!({"email": "attacker@test.local", "password": "wrong"});
+    let mut last = StatusCode::UNAUTHORIZED;
+    // 8 failures allowed (each 401); the 9th is locked out (429).
+    for _ in 0..8 {
+        let (s, _) = anon_req(&client, "POST", "/auth/login", Some(body.clone())).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+        last = s;
+    }
+    let (s9, _) = anon_req(&client, "POST", "/auth/login", Some(body)).await;
+    assert_eq!(
+        s9,
+        StatusCode::TOO_MANY_REQUESTS,
+        "locked after threshold (last was {last:?})"
+    );
 }

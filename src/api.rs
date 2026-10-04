@@ -95,6 +95,7 @@ pub struct AppState {
     pub clock: Arc<dyn crate::clock::Clock>,
     pub locks: Arc<dyn crate::lock::EntryLock>,
     pub session: Arc<Session>,
+    pub rate: Arc<crate::ratelimit::RateLimiter>,
 }
 
 impl AppState {
@@ -115,6 +116,11 @@ impl AppState {
             clock: Arc::new(crate::clock::SystemClock),
             locks,
             session,
+            // Lock a login identity after 8 failures within 5 minutes (#47).
+            rate: Arc::new(crate::ratelimit::RateLimiter::new(
+                8,
+                std::time::Duration::from_secs(300),
+            )),
         }
     }
 }
@@ -207,6 +213,13 @@ pub async fn bootstrap(
     State(app): State<AppState>,
     ValidJson(input): ValidJson<BootstrapInput>,
 ) -> ApiResult {
+    if app.rate.is_locked("bootstrap") {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "too many attempts; try again later",
+        ));
+    }
     if app.store.has_users()? {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -230,6 +243,7 @@ pub async fn bootstrap(
         )]));
     }
     let user = new_user(name, &email, &input.password, Role::Admin, true, 0, &app)?;
+    app.rate.reset("bootstrap");
     let (headers, pubuser) = set_cookie(&app, &user);
     Ok((StatusCode::CREATED, headers, Json(pubuser)).into_response())
 }
@@ -239,18 +253,28 @@ pub async fn login(
     ValidJson(input): ValidJson<LoginInput>,
 ) -> ApiResult {
     let email = normalise_email(&input.email).unwrap_or_default();
+    let key = format!("login:{email}");
+    if app.rate.is_locked(&key) {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "too many failed attempts; try again later",
+        ));
+    }
     let user = app.store.get_user_by_email(&email)?;
     let ok = user
         .as_ref()
         .is_some_and(|u| u.active && verify_password(&input.password, &u.password_hash));
     if !ok {
         // Same response for unknown email and bad password (no user enumeration).
+        app.rate.record_failure(&key);
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",
             "invalid email or password",
         ));
     }
+    app.rate.reset(&key);
     let (headers, pubuser) = set_cookie(&app, &user.unwrap());
     Ok((headers, Json(pubuser)).into_response())
 }
