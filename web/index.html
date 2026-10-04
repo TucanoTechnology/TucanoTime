@@ -30,32 +30,33 @@
     </form>
   </div>
 
-  <header class="masthead">
-    <div class="masthead-top">
-      <div>
-        <h1>TucanoTime</h1>
-        <p class="tagline">Time entries by day and week, per customer and project code.</p>
-      </div>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">TucanoTime</div>
+      <nav aria-label="Sections">
+        <div class="tabs" role="tablist" id="tabs" aria-orientation="vertical">
+          <button role="tab" id="tab-day" aria-controls="panel-day" aria-selected="true">Day</button>
+          <button role="tab" id="tab-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
+          <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
+          <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
+          <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
+          <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
+          <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Timesheets</button>
+        </div>
+      </nav>
       <div id="account" class="account" hidden>
         <span id="who" class="who"></span>
         <button type="button" id="logout" class="link">Sign out</button>
       </div>
-    </div>
-    <nav aria-label="Sections">
-      <div class="tabs" role="tablist" id="tabs">
-        <button role="tab" id="tab-day" aria-controls="panel-day" aria-selected="true">Day</button>
-        <button role="tab" id="tab-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
-        <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
-        <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
-        <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
-        <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
-        <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Timesheets</button>
-      </div>
-    </nav>
-  </header>
+    </aside>
 
-  <main id="main">
-    <p class="sr-only" role="status" aria-live="polite" id="live-region"></p>
+    <div class="content">
+      <header class="masthead">
+        <h1 id="page-title">Timesheet</h1>
+      </header>
+
+      <main id="main">
+        <p class="sr-only" role="status" aria-live="polite" id="live-region"></p>
 
     <!-- DAY -->
     <section id="panel-day" role="tabpanel" aria-labelledby="tab-day" tabindex="0">
@@ -268,11 +269,13 @@
       </table>
       <p id="submission-empty" hidden>No timesheets submitted yet.</p>
     </section>
-  </main>
+      </main>
 
-  <footer class="foot">
-    <p><a href="/docs">API documentation</a> · <span id="version"></span></p>
-  </footer>
+      <footer class="foot">
+        <p><a href="/docs">API documentation</a> · <span id="version"></span></p>
+      </footer>
+    </div><!-- /content -->
+  </div><!-- /app -->
 
   <script src="/app.js"></script>
 </body>
