@@ -442,7 +442,6 @@ pub async fn create_invoice(
         .filter(|i| i.status == InvoiceStatus::Issued)
         .flat_map(|i| i.lines.iter().map(|l| l.entry_id))
         .collect();
-    let number = app.store.next_invoice_number()?;
     let sources = crate::domain::InvoiceSources {
         projects: &projects,
         tasks: &tasks,
@@ -450,9 +449,16 @@ pub async fn create_invoice(
         entries: &entries,
         excluded: &excluded,
     };
-    let invoice = generate_invoice(number, &customer, &sources, from, to, app.clock.now())
-        .map_err(invoice_error)?;
-    app.store.put_invoice(&invoice)?;
+    let invoice = generate_invoice(
+        String::new(),
+        &customer,
+        &sources,
+        from,
+        to,
+        app.clock.now(),
+    )
+    .map_err(invoice_error)?;
+    let invoice = app.store.create_invoice(invoice)?;
     Ok((StatusCode::CREATED, Json(invoice)).into_response())
 }
 

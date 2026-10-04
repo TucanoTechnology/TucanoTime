@@ -73,6 +73,11 @@ impl From<StoreError> for ApiError {
             StoreError::NotFound => ApiError::not_found("resource"),
             StoreError::AlreadyExists(m) => ApiError::conflict(m),
             StoreError::RangeTooLarge => ApiError::bad_request(e.to_string()),
+            StoreError::LockTimeout => ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "write_lock_busy",
+                "another write is in progress; retry shortly",
+            ),
             StoreError::Io(detail) => ApiError::internal(detail),
         }
     }
@@ -86,7 +91,15 @@ impl IntoResponse for ApiError {
         if !self.fields.is_empty() {
             body["error"]["fields"] = serde_json::to_value(&self.fields).unwrap_or_default();
         }
-        (self.status, axum::Json(body)).into_response()
+        let mut resp = (self.status, axum::Json(body)).into_response();
+        // A busy write lock is transient; tell the client when to retry (#62).
+        if self.code == "write_lock_busy"
+            && let Ok(v) = "1".parse()
+        {
+            resp.headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, v);
+        }
+        resp
     }
 }
 
