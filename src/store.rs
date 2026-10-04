@@ -24,6 +24,11 @@ use crate::domain::{Category, Customer, Entry, Expense, Invoice, Project, Submis
 /// over the whole tree. 400 days covers a year plus buffer.
 pub const MAX_RANGE_DAYS: i64 = 400;
 
+/// Hard cap on documents in any single collection directory (#50). A personal
+/// timesheet is far below this; it bounds a pathological/corrupted tree so no
+/// request does an unbounded directory walk.
+pub const MAX_DOCS: usize = 100_000;
+
 /// Default cross-process writer-lock acquisition deadline (#62).
 const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_millis(5000);
 /// Poll interval between `try_lock_exclusive` attempts.
@@ -39,6 +44,8 @@ pub enum StoreError {
     RangeTooLarge,
     #[error("write lock busy")]
     LockTimeout,
+    #[error("collection too large (max {MAX_DOCS})")]
+    TooManyItems,
     #[error("io failure: {0}")]
     Io(String),
 }
@@ -57,6 +64,8 @@ pub struct Store {
     write_guard: Mutex<()>,
     /// Cross-process writer-lock deadline (#62).
     lock_timeout: Duration,
+    /// Per-collection document cap (#50); env-overridable for tests.
+    max_docs: usize,
 }
 
 /// Held for the duration of a mutating operation: the process-local mutex plus
@@ -81,10 +90,15 @@ impl Store {
         std::fs::create_dir_all(root.join("users"))?;
         std::fs::create_dir_all(root.join("categories"))?;
         std::fs::create_dir_all(root.join("expenses"))?;
+        let max_docs = std::env::var("TUCANO_MAX_DOCS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(MAX_DOCS);
         Ok(Self {
             root,
             write_guard: Mutex::new(()),
             lock_timeout,
+            max_docs,
         })
     }
 
@@ -123,6 +137,13 @@ impl Store {
         &self.root
     }
 
+    /// Override the per-collection document cap (used by tests; production uses
+    /// the default or `TUCANO_MAX_DOCS`).
+    pub fn with_max_docs(mut self, max: usize) -> Self {
+        self.max_docs = max;
+        self
+    }
+
     // ---------------------------------------------------------------- users --
 
     fn user_path(&self, id: Uuid) -> PathBuf {
@@ -131,7 +152,7 @@ impl Store {
 
     pub fn list_users(&self) -> Result<Vec<User>, StoreError> {
         let mut out = Vec::new();
-        for path in dir_entries(&self.root.join("users"))? {
+        for path in dir_entries(&self.root.join("users"), self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -185,7 +206,7 @@ impl Store {
         if !dir.exists() {
             return Ok(out);
         }
-        for path in dir_entries(&dir)? {
+        for path in dir_entries(&dir, self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -247,7 +268,7 @@ impl Store {
 
     pub fn list_categories(&self) -> Result<Vec<Category>, StoreError> {
         let mut out = Vec::new();
-        for path in dir_entries(&self.root.join("categories"))? {
+        for path in dir_entries(&self.root.join("categories"), self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -295,7 +316,7 @@ impl Store {
 
     pub fn list_expenses(&self) -> Result<Vec<Expense>, StoreError> {
         let mut out = Vec::new();
-        for path in dir_entries(&self.root.join("expenses"))? {
+        for path in dir_entries(&self.root.join("expenses"), self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -338,7 +359,7 @@ impl Store {
         if !dir.exists() {
             return Ok(out);
         }
-        for path in dir_entries(&dir)? {
+        for path in dir_entries(&dir, self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -368,7 +389,7 @@ impl Store {
 
     pub fn list_customers(&self) -> Result<Vec<Customer>, StoreError> {
         let mut out = Vec::new();
-        for path in dir_entries(&self.root.join("customers"))? {
+        for path in dir_entries(&self.root.join("customers"), self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -435,7 +456,7 @@ impl Store {
         if !dir.exists() {
             return Ok(out);
         }
-        for path in dir_entries(&dir)? {
+        for path in dir_entries(&dir, self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -530,7 +551,7 @@ impl Store {
         if !dir.exists() {
             return Ok(out);
         }
-        for path in dir_entries(&dir)? {
+        for path in dir_entries(&dir, self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -598,7 +619,7 @@ impl Store {
         if !dir.exists() {
             return Ok(out);
         }
-        for path in dir_entries(&dir)? {
+        for path in dir_entries(&dir, self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
@@ -634,7 +655,7 @@ impl Store {
         if !dir.exists() {
             return Ok(None);
         }
-        for day in dir_entries(&dir)? {
+        for day in dir_entries(&dir, self.max_docs)? {
             let path = day.join(format!("{id}.json"));
             if let Some(e) = read_json::<Entry>(&path)? {
                 return Ok(Some(e));
@@ -692,11 +713,14 @@ impl Store {
         if !dir.exists() {
             return Ok(out);
         }
-        for day in dir_entries(&dir)? {
+        for day in dir_entries(&dir, self.max_docs)? {
             if day.is_dir() {
-                for path in dir_entries(&day)? {
+                for path in dir_entries(&day, self.max_docs)? {
                     if path.extension().and_then(|e| e.to_str()) != Some("json") {
                         continue;
+                    }
+                    if out.len() >= self.max_docs {
+                        return Err(StoreError::TooManyItems);
                     }
                     if let Some(e) = read_json::<Entry>(&path)? {
                         out.push(e);
@@ -708,13 +732,16 @@ impl Store {
     }
 }
 
-/// Read a directory and return its entry paths. Sorting by name keeps listings
-/// stable across platforms (read_dir order is unspecified).
-fn dir_entries(dir: &Path) -> Result<Vec<PathBuf>, StoreError> {
+/// Read a directory and return its entry paths, bounded by `max` (#50).
+/// Sorting by name keeps listings stable across platforms.
+fn dir_entries(dir: &Path, max: usize) -> Result<Vec<PathBuf>, StoreError> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .collect();
+    if paths.len() > max {
+        return Err(StoreError::TooManyItems);
+    }
     paths.sort();
     Ok(paths)
 }
@@ -744,4 +771,32 @@ where
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cust() -> Customer {
+        Customer {
+            id: Uuid::new_v4(),
+            name: "X".into(),
+            currency: crate::domain::Currency("EUR".into()),
+            default_rate_minor: 1,
+            active: true,
+        }
+    }
+
+    #[test]
+    fn collection_cap_enforced() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data"))
+            .unwrap()
+            .with_max_docs(2);
+        store.put_customer(&cust()).unwrap();
+        store.put_customer(&cust()).unwrap();
+        store.put_customer(&cust()).unwrap(); // 3rd file
+        let err = store.list_customers().expect_err("3 > cap of 2");
+        assert!(matches!(err, StoreError::TooManyItems), "{err:?}");
+    }
 }
