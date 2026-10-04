@@ -134,6 +134,8 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/invoices/{id}/pay", axum::routing::post(api::pay_invoice))
         .route("/invoices/summary", get(api::invoice_summary))
+        .route("/invoices/report", get(api::invoice_report_handler))
+        .route("/invoices/export.csv", get(api::invoice_export_csv))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_admin,

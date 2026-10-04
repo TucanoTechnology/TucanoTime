@@ -248,6 +248,120 @@ pub fn summarise_profit(
     Profitability { rows }
 }
 
+// --------------------------------------------------------- invoice reports --
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct InvoiceReportRow {
+    pub customer_id: String,
+    pub label: String,
+    pub currency: String,
+    pub revenue_minor: u64,
+    pub invoices: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct InvoiceReport {
+    pub rows: Vec<InvoiceReportRow>,
+    pub draft: usize,
+    pub issued: usize,
+    pub paid: usize,
+    pub overdue: usize,
+    pub total_revenue_minor: u64,
+}
+
+/// Revenue by customer from non-draft invoices overlapping `[from, to]`, plus
+/// overall status counts (#31).
+pub fn invoice_report(
+    invoices: &[crate::domain::Invoice],
+    customers: &[Customer],
+    from: NaiveDate,
+    to: NaiveDate,
+) -> InvoiceReport {
+    use crate::domain::InvoiceStatus;
+    let mut rows: Vec<InvoiceReportRow> = Vec::new();
+    for c in customers {
+        let mine: Vec<&crate::domain::Invoice> = invoices
+            .iter()
+            .filter(|i| i.customer_id == c.id && i.status != InvoiceStatus::Draft)
+            .filter(|i| i.period_to >= from && i.period_from <= to)
+            .collect();
+        if mine.is_empty() {
+            continue;
+        }
+        rows.push(InvoiceReportRow {
+            customer_id: c.id.to_string(),
+            label: c.name.clone(),
+            currency: c.currency.0.clone(),
+            revenue_minor: mine.iter().map(|i| i.total_minor).sum(),
+            invoices: mine.len(),
+        });
+    }
+    rows.sort_by_key(|r| std::cmp::Reverse(r.revenue_minor));
+    InvoiceReport {
+        rows,
+        draft: invoices
+            .iter()
+            .filter(|i| i.status == InvoiceStatus::Draft)
+            .count(),
+        issued: invoices
+            .iter()
+            .filter(|i| i.status == InvoiceStatus::Issued)
+            .count(),
+        paid: invoices
+            .iter()
+            .filter(|i| i.status == InvoiceStatus::Paid)
+            .count(),
+        overdue: invoices
+            .iter()
+            .filter(|i| i.status == InvoiceStatus::Issued && i.due_date.is_some_and(|d| d < to))
+            .count(),
+        total_revenue_minor: invoices
+            .iter()
+            .filter(|i| i.status != InvoiceStatus::Draft)
+            .map(|i| i.total_minor)
+            .sum(),
+    }
+}
+
+/// CSV export of invoices for accountants / other tools (#31).
+pub fn invoice_csv(invoices: &[crate::domain::Invoice], customers: &[Customer]) -> String {
+    let name = |id: Uuid| {
+        customers
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| c.name.clone())
+            .unwrap_or_default()
+    };
+    let mut out = String::from(
+        "number,customer,period_from,period_to,currency,total_minor,status,issued_at,due_date,paid_at,payment_reference\n",
+    );
+    for i in invoices {
+        let fields = [
+            i.number.clone(),
+            name(i.customer_id),
+            i.period_from.format("%Y-%m-%d").to_string(),
+            i.period_to.format("%Y-%m-%d").to_string(),
+            i.currency.0.clone(),
+            i.total_minor.to_string(),
+            format!("{:?}", i.status).to_lowercase(),
+            i.issued_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+            i.due_date
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_default(),
+            i.paid_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+            i.payment_reference.clone(),
+        ];
+        let joined = fields
+            .iter()
+            .map(|f| csv_escape(f))
+            .collect::<Vec<_>>()
+            .join(",");
+        out.push_str(&joined);
+        out.push('\n');
+    }
+    out
+}
+
 fn group_name(kind: Group) -> &'static str {
     match kind {
         Group::Customer => "customer",

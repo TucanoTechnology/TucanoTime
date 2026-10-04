@@ -1033,6 +1033,26 @@
         "responses": { "200": { "description": "Summary.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvoiceSummary" } } } } }
       }
     },
+    "/invoices/report": {
+      "parameters": [
+        { "$ref": "#/components/parameters/FromParam" },
+        { "$ref": "#/components/parameters/ToParam" }
+      ],
+      "get": {
+        "operationId": "invoiceReport",
+        "tags": ["invoices"],
+        "summary": "Revenue by customer + status counts (#31)",
+        "responses": { "200": { "description": "Report.", "content": { "application/json": { "schema": { "type": "object", "required": ["rows", "draft", "issued", "paid", "overdue", "total_revenue_minor"], "properties": { "rows": { "type": "array", "items": { "type": "object", "required": ["customer_id", "label", "currency", "revenue_minor", "invoices"], "properties": { "customer_id": { "type": "string", "format": "uuid" }, "label": { "type": "string" }, "currency": { "type": "string" }, "revenue_minor": { "type": "integer" }, "invoices": { "type": "integer" } }, "additionalProperties": false } }, "draft": { "type": "integer" }, "issued": { "type": "integer" }, "paid": { "type": "integer" }, "overdue": { "type": "integer" }, "total_revenue_minor": { "type": "integer" } }, "additionalProperties": false } } } } }
+      }
+    },
+    "/invoices/export.csv": {
+      "get": {
+        "operationId": "invoiceExportCsv",
+        "tags": ["invoices"],
+        "summary": "CSV export of all invoices (#31)",
+        "responses": { "200": { "description": "CSV.", "content": { "text/csv": { "schema": { "type": "string" } } } } }
+      }
+    },
     "/categories": {
       "get": {
         "operationId": "listCategories",

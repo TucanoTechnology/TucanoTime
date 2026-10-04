@@ -1901,3 +1901,52 @@ async fn profitability_revenue_vs_cost() {
     assert_eq!(row["cost_minor"], 9000); // 5000 expense + 4000 labour
     assert_eq!(row["margin_minor"], 8000);
 }
+
+#[tokio::test]
+async fn invoice_report_and_export() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+
+    let (s, rep) = json_req(
+        &app,
+        "GET",
+        "/invoices/report?from=2026-10-01&to=2026-10-31",
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(rep["issued"], 1);
+    assert_eq!(rep["total_revenue_minor"], 18000); // 3h * 60
+    let row = &rep["rows"][0];
+    assert_eq!(row["label"], "ACME");
+    assert_eq!(row["revenue_minor"], 18000);
+
+    let (s2, csv) = json_req(&app, "GET", "/invoices/export.csv", None).await;
+    assert_eq!(s2, StatusCode::OK);
+    let text = csv.as_str().unwrap();
+    assert!(text.starts_with("number,customer,"), "csv header: {text}");
+    assert!(text.contains("INV-0001") && text.contains("ACME"));
+}
