@@ -30,6 +30,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let state = AppState::with_session(store, Arc::new(session));
 
+    // Background scheduler (#61). Jobs register here as they land: reminders
+    // (#22), recurring invoices (#26), budget alerts (#30). None yet, so this
+    // is the wired-but-idle framework.
+    let scheduler = Arc::new(tucano_time::scheduler::Scheduler::new(
+        std::path::Path::new(&data_dir),
+        Vec::new(),
+    ));
+    scheduler.spawn(60);
+
     let app = tucano_time::build_router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port.parse()?)).await?;
     tracing::info!("tucano-time listening on :{port}, data dir {data_dir}");

@@ -20,6 +20,7 @@ pub mod notify;
 pub mod ratelimit;
 pub mod report;
 pub mod revoke;
+pub mod scheduler;
 pub mod store;
 
 use api::AppState;
