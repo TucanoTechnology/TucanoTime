@@ -110,6 +110,11 @@ pub fn build_router(state: AppState) -> Router {
             "/submissions/{id}/decision",
             axum::routing::post(api::decide_submission),
         )
+        .route("/claims", get(api::list_claims).post(api::create_claim))
+        .route(
+            "/claims/{id}/submit",
+            axum::routing::post(api::submit_claim),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_auth,
@@ -136,6 +141,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/invoices/summary", get(api::invoice_summary))
         .route("/invoices/report", get(api::invoice_report_handler))
         .route("/invoices/export.csv", get(api::invoice_export_csv))
+        .route(
+            "/claims/{id}/decision",
+            axum::routing::post(api::decide_claim),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_admin,

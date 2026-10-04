@@ -414,6 +414,34 @@
           "comment": { "type": "string", "default": "" }
         },
         "additionalProperties": false
+      },
+      "ClaimState": { "type": "string", "enum": ["draft", "submitted", "approved", "rejected"] },
+      "ExpenseClaim": {
+        "type": "object",
+        "required": ["id", "user_id", "title", "expense_ids", "total_minor", "currency", "state", "comment", "created_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "user_id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string", "maxLength": 120 },
+          "expense_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+          "total_minor": { "type": "integer", "minimum": 0 },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "state": { "$ref": "#/components/schemas/ClaimState" },
+          "comment": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "submitted_at": { "type": ["string", "null"], "format": "date-time" },
+          "decided_at": { "type": ["string", "null"], "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "ClaimInput": {
+        "type": "object",
+        "required": ["title", "expense_ids"],
+        "properties": {
+          "title": { "type": "string", "maxLength": 120 },
+          "expense_ids": { "type": "array", "items": { "type": "string", "format": "uuid" }, "minItems": 1 }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -1156,6 +1184,52 @@
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DecisionInput" } } } },
         "responses": {
           "200": { "description": "Updated submission.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Submission" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/claims": {
+      "get": {
+        "operationId": "listClaims",
+        "tags": ["expenses"],
+        "summary": "List reimbursement claims (own, or all for admin)",
+        "responses": { "200": { "description": "Claims.", "content": { "application/json": { "schema": { "type": "object", "required": ["claims"], "properties": { "claims": { "type": "array", "items": { "$ref": "#/components/schemas/ExpenseClaim" } } }, "additionalProperties": false } } } } }
+      },
+      "post": {
+        "operationId": "createClaim",
+        "tags": ["expenses"],
+        "summary": "Create a draft claim over a set of the caller's expenses (#24)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ClaimInput" } } } },
+        "responses": {
+          "201": { "description": "Draft claim.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExpenseClaim" } } } },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/claims/{id}/submit": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "post": {
+        "operationId": "submitClaim",
+        "tags": ["expenses"],
+        "summary": "Submit a draft claim (locks its expenses)",
+        "responses": {
+          "200": { "description": "Submitted claim.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExpenseClaim" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/claims/{id}/decision": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "post": {
+        "operationId": "decideClaim",
+        "tags": ["expenses"],
+        "summary": "Approve or reject a submitted claim (admin only)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DecisionInput" } } } },
+        "responses": {
+          "200": { "description": "Updated claim.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExpenseClaim" } } } },
+          "403": { "description": "Admin role required." },
           "404": { "$ref": "#/components/responses/NotFound" },
           "409": { "$ref": "#/components/responses/Conflict" }
         }

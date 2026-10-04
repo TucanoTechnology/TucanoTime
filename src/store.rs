@@ -18,7 +18,9 @@ use fs2::FileExt;
 use uuid::Uuid;
 
 use crate::auth::User;
-use crate::domain::{Category, Customer, Entry, Expense, Invoice, Project, Submission, Task};
+use crate::domain::{
+    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, Project, Submission, Task,
+};
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
 /// over the whole tree. 400 days covers a year plus buffer.
@@ -379,6 +381,40 @@ impl Store {
         let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.root.join("submissions"))?;
         write_json(&self.submission_path(submission.id), submission)
+    }
+
+    // --------------------------------------------------------------- claims --
+
+    fn claim_path(&self, id: Uuid) -> PathBuf {
+        self.root.join("claims").join(format!("{id}.json"))
+    }
+
+    pub fn list_claims(&self) -> Result<Vec<ExpenseClaim>, StoreError> {
+        let dir = self.root.join("claims");
+        let mut out = Vec::new();
+        if !dir.exists() {
+            return Ok(out);
+        }
+        for path in dir_entries(&dir, self.max_docs)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(c) = read_json::<ExpenseClaim>(&path)? {
+                out.push(c);
+            }
+        }
+        out.sort_by_key(|c| std::cmp::Reverse(c.created_at));
+        Ok(out)
+    }
+
+    pub fn get_claim(&self, id: Uuid) -> Result<Option<ExpenseClaim>, StoreError> {
+        read_json(&self.claim_path(id))
+    }
+
+    pub fn put_claim(&self, claim: &ExpenseClaim) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        std::fs::create_dir_all(self.root.join("claims"))?;
+        write_json(&self.claim_path(claim.id), claim)
     }
 
     // ------------------------------------------------------------ customers --
