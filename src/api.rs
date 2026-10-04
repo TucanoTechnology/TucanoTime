@@ -157,6 +157,25 @@ fn authenticate(state: &AppState, headers: &http::HeaderMap) -> Result<User, Api
     Ok(user)
 }
 
+/// Private-per-user (#51): an admin sees/edits everything; a member only their
+/// own records. `owner` is the record's `user_id` (None = legacy/unattributed).
+fn visible_to(actor: &User, owner: Option<Uuid>) -> bool {
+    actor.role == Role::Admin || owner == Some(actor.id)
+}
+
+/// Admin-only action (#51): approvals and invoicing.
+fn ensure_admin(actor: &User) -> Result<(), ApiError> {
+    if actor.role == Role::Admin {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "administrator role required",
+        ))
+    }
+}
+
 // ------------------------------------------------------------------- auth --
 
 #[derive(serde::Deserialize)]
@@ -525,6 +544,7 @@ pub async fn delete_category(State(app): State<AppState>, Path(id): Path<Uuid>) 
 
 pub async fn list_expenses(
     State(app): State<AppState>,
+    actor: AuthUser,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let mut expenses = app.store.list_expenses()?;
@@ -537,11 +557,13 @@ pub async fn list_expenses(
         let (from, to) = (parse_date(from)?, parse_date(to)?);
         expenses.retain(|e| e.date >= from && e.date <= to);
     }
+    expenses.retain(|e| visible_to(&actor.0, e.user_id));
     Ok(Json(serde_json::json!({ "expenses": expenses })).into_response())
 }
 
 pub async fn create_expense(
     State(app): State<AppState>,
+    actor: AuthUser,
     ValidJson(input): ValidJson<ExpenseInput>,
 ) -> ApiResult {
     let draft = validate_expense_input(&input).map_err(ApiError::validation)?;
@@ -570,6 +592,7 @@ pub async fn create_expense(
         id: Uuid::new_v4(),
         date: draft.date,
         customer_id: draft.customer_id,
+        user_id: Some(actor.0.id),
         project_code: draft.project_code.map(ProjectCode),
         category_id: draft.category_id,
         amount_minor: draft.amount_minor,
@@ -585,15 +608,32 @@ pub async fn create_expense(
     Ok((StatusCode::CREATED, Json(expense)).into_response())
 }
 
-pub async fn get_expense_handler(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+pub async fn get_expense_handler(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult {
     let expense = app
         .store
         .get_expense(id)?
+        .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("expense"))?;
     Ok(Json(expense).into_response())
 }
 
-pub async fn delete_expense(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+pub async fn delete_expense(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult {
+    // Ownership check before delete (404 if not the member's own record).
+    let owned = app
+        .store
+        .get_expense(id)?
+        .is_some_and(|e| visible_to(&actor.0, e.user_id));
+    if !owned {
+        return Err(ApiError::not_found("expense"));
+    }
     app.store.delete_expense(id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -614,8 +654,13 @@ pub struct DecisionInput {
     pub comment: String,
 }
 
-pub async fn list_submissions(State(app): State<AppState>) -> ApiResult {
-    let submissions = app.store.list_submissions()?;
+pub async fn list_submissions(State(app): State<AppState>, actor: AuthUser) -> ApiResult {
+    let submissions: Vec<Submission> = app
+        .store
+        .list_submissions()?
+        .into_iter()
+        .filter(|s| visible_to(&actor.0, Some(s.user_id)))
+        .collect();
     Ok(Json(serde_json::json!({ "submissions": submissions })).into_response())
 }
 
@@ -659,12 +704,14 @@ pub async fn create_submission(
     Ok((StatusCode::CREATED, Json(submission)).into_response())
 }
 
-/// Approve or reject a submitted timesheet. Rejecting releases its locks.
+/// Approve or reject a submitted timesheet (admin only, #51). Rejecting releases its locks.
 pub async fn decide_submission(
     State(app): State<AppState>,
+    actor: AuthUser,
     Path(id): Path<Uuid>,
     ValidJson(input): ValidJson<DecisionInput>,
 ) -> ApiResult {
+    ensure_admin(&actor.0)?;
     let mut submission = app
         .store
         .get_submission(id)?
@@ -981,6 +1028,7 @@ fn validate_entry_refs(
 
 pub async fn list_entries(
     State(app): State<AppState>,
+    actor: AuthUser,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let entries = match (q.get("date"), q.get("from"), q.get("to")) {
@@ -995,7 +1043,12 @@ pub async fn list_entries(
             ));
         }
     };
-    let items: Vec<serde_json::Value> = entries.iter().map(entry_json).collect();
+    // Private-per-user (#51): a member sees only their own entries.
+    let items: Vec<serde_json::Value> = entries
+        .iter()
+        .filter(|e| visible_to(&actor.0, e.user_id))
+        .map(entry_json)
+        .collect();
     Ok(Json(serde_json::json!({ "entries": items })).into_response())
 }
 
@@ -1029,22 +1082,29 @@ pub async fn create_entry(
     Ok((StatusCode::CREATED, Json(entry_json(&entry))).into_response())
 }
 
-pub async fn get_entry(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+pub async fn get_entry(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult {
     let entry = app
         .store
         .get_entry(id)?
+        .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
     Ok(Json(entry_json(&entry)).into_response())
 }
 
 pub async fn update_entry(
     State(app): State<AppState>,
+    actor: AuthUser,
     Path(id): Path<Uuid>,
     ValidJson(input): ValidJson<EntryInput>,
 ) -> ApiResult {
     let existing = app
         .store
         .get_entry(id)?
+        .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
     if let Some(reason) = app.locks.entry_lock(id) {
         return Err(ApiError::conflict(reason.message()));
@@ -1074,10 +1134,15 @@ pub async fn update_entry(
     Ok(Json(entry_json(&updated)).into_response())
 }
 
-pub async fn delete_entry(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+pub async fn delete_entry(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult {
     let entry = app
         .store
         .get_entry(id)?
+        .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
     if let Some(reason) = app.locks.entry_lock(id) {
         return Err(ApiError::conflict(reason.message()));
@@ -1090,6 +1155,7 @@ pub async fn delete_entry(State(app): State<AppState>, Path(id): Path<Uuid>) -> 
 
 pub async fn summary(
     State(app): State<AppState>,
+    actor: AuthUser,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let (from, to) = parse_range(&q)?;
@@ -1115,7 +1181,9 @@ pub async fn summary(
             )));
         }
     };
-    let entries = app.store.list_range(from, to)?;
+    let mut entries = app.store.list_range(from, to)?;
+    // Private-per-user (#51): members report only on their own time.
+    entries.retain(|e| visible_to(&actor.0, e.user_id));
     let customers: Vec<Customer> = app.store.list_customers()?.into_iter().collect();
     let (projects, tasks, users) = gather_hierarchy(&app, &customers)?;
     let rows = report::summarise(
@@ -1149,6 +1217,7 @@ fn gather_hierarchy(app: &AppState, customers: &[Customer]) -> Result<Hierarchy,
 
 pub async fn export_csv(
     State(app): State<AppState>,
+    actor: AuthUser,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let (from, to) = parse_range(&q)?;
@@ -1159,7 +1228,8 @@ pub async fn export_csv(
         ),
         None => None,
     };
-    let entries = app.store.list_range(from, to)?;
+    let mut entries = app.store.list_range(from, to)?;
+    entries.retain(|e| visible_to(&actor.0, e.user_id));
     let customers = app.store.list_customers()?;
     let (projects, tasks, users) = gather_hierarchy(&app, &customers)?;
     let csv = report::export_csv(&entries, &customers, &projects, &tasks, &users, filter);

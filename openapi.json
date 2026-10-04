@@ -4,7 +4,7 @@
     "title": "TucanoTime API",
     "version": "0.1.0",
     "license": { "name": "AGPL-3.0-or-later", "identifier": "AGPL-3.0-or-later" },
-    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR."
+    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /users and /invoices routes return 403 for members)."
   },
   "servers": [{ "url": "/" }],
   "security": [{ "cookieAuth": [] }],

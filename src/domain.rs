@@ -350,6 +350,9 @@ pub struct Expense {
     pub id: Uuid,
     pub date: NaiveDate,
     pub customer_id: Uuid,
+    /// The user who recorded the expense (#51 ownership; None for legacy docs).
+    #[serde(default)]
+    pub user_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_code: Option<ProjectCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

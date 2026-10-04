@@ -57,6 +57,12 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   the initial admin only while no users exist. Key from `TUCANO_SESSION_SECRET`
   (ephemeral if unset); `TUCANO_ENV=production` sets the `Secure` cookie flag.
   `password_hash` is never serialised to clients.
+- **RBAC / private-per-user (#51):** entries and expenses carry `user_id` (the
+  author). A **member** sees/edits only their own records; an **admin** sees all
+  and owns `/invoices` (admin tier) and submission approval. Enforce via
+  `visible_to()` on reads and by ownership check on mutations (a non-owned record
+  returns 404, not 403, to avoid leaking existence). Customers/projects/tasks/
+  categories are shared org-wide reference data (any authenticated user).
 - **Invoices (#8):** generated from a period's billable, not-yet-invoiced entries; each line snapshots the resolved rate at generation, so a later rate change never rewrites an issued invoice. Issuing sets `status=issued`, which the `InvoiceLock` (a `lock::EntryLock` provider wired in `AppState`) uses to reject edits/deletes of referenced entries with 409. Draft invoices do not lock. Invoice number is sequential (`INV-0001`).
 
 ### Commands
