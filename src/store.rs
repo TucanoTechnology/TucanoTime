@@ -8,11 +8,13 @@
 // directories by a validated `YYYY-MM-DD` date and entry files by `Uuid`.
 // Traversal input therefore cannot reach the filesystem.
 
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
-
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use chrono::NaiveDate;
+use fs2::FileExt;
 use uuid::Uuid;
 
 use crate::auth::User;
@@ -22,6 +24,11 @@ use crate::domain::{Category, Customer, Entry, Expense, Invoice, Project, Submis
 /// over the whole tree. 400 days covers a year plus buffer.
 pub const MAX_RANGE_DAYS: i64 = 400;
 
+/// Default cross-process writer-lock acquisition deadline (#62).
+const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_millis(5000);
+/// Poll interval between `try_lock_exclusive` attempts.
+const LOCK_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("not found")]
@@ -30,6 +37,8 @@ pub enum StoreError {
     AlreadyExists(String),
     #[error("range too large (max {MAX_RANGE_DAYS} days)")]
     RangeTooLarge,
+    #[error("write lock busy")]
+    LockTimeout,
     #[error("io failure: {0}")]
     Io(String),
 }
@@ -44,13 +53,28 @@ impl From<std::io::Error> for StoreError {
 
 pub struct Store {
     root: PathBuf,
-    /// One writer at a time. The tool is single-process; this keeps concurrent
-    /// requests from racing on the same file while writes stay simple.
+    /// Intra-process serialiser: one thread mutates at a time.
     write_guard: Mutex<()>,
+    /// Cross-process writer-lock deadline (#62).
+    lock_timeout: Duration,
+}
+
+/// Held for the duration of a mutating operation: the process-local mutex plus
+/// the advisory file lock. Dropping it releases both (the flock on fd close).
+struct WriteGuard<'a> {
+    _mutex: MutexGuard<'a, ()>,
+    _lock: File,
 }
 
 impl Store {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, StoreError> {
+        Self::with_lock_timeout(root, DEFAULT_LOCK_TIMEOUT)
+    }
+
+    pub fn with_lock_timeout(
+        root: impl AsRef<Path>,
+        lock_timeout: Duration,
+    ) -> Result<Self, StoreError> {
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(root.join("customers"))?;
         std::fs::create_dir_all(root.join("entries"))?;
@@ -60,6 +84,38 @@ impl Store {
         Ok(Self {
             root,
             write_guard: Mutex::new(()),
+            lock_timeout,
+        })
+    }
+
+    /// Acquire the writer lock for a mutating operation: the process-local
+    /// mutex (cheap, serialises threads) then the cross-process advisory flock
+    /// on `.tucanotime.lock`, retried until the deadline. Returns
+    /// `LockTimeout` (→ 503) if another process holds it too long.
+    fn write_lock(&self) -> Result<WriteGuard<'_>, StoreError> {
+        let mutex = self
+            .write_guard
+            .lock()
+            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(self.root.join(".tucanotime.lock"))?;
+        let deadline = Instant::now() + self.lock_timeout;
+        loop {
+            match lock.try_lock_exclusive() {
+                Ok(()) => break,
+                Err(_) if Instant::now() < deadline => {
+                    std::thread::sleep(LOCK_POLL_INTERVAL);
+                }
+                Err(_) => return Err(StoreError::LockTimeout),
+            }
+        }
+        Ok(WriteGuard {
+            _mutex: mutex,
+            _lock: lock,
         })
     }
 
@@ -103,18 +159,12 @@ impl Store {
     }
 
     pub fn put_user(&self, user: &User) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         write_json(&self.user_path(user.id), user)
     }
 
     pub fn delete_user(&self, id: Uuid) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         let path = self.user_path(id);
         if !path.exists() {
             return Err(StoreError::NotFound);
@@ -156,19 +206,13 @@ impl Store {
     }
 
     pub fn put_invoice(&self, invoice: &Invoice) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.root.join("invoices"))?;
         write_json(&self.invoice_path(invoice.id), invoice)
     }
 
     pub fn delete_invoice(&self, id: Uuid) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         let path = self.invoice_path(id);
         if !path.exists() {
             return Err(StoreError::NotFound);
@@ -181,6 +225,18 @@ impl Store {
     pub fn next_invoice_number(&self) -> Result<String, StoreError> {
         let n = self.list_invoices()?.len() + 1;
         Ok(format!("INV-{n:04}"))
+    }
+
+    /// Atomically assign the next invoice number and persist it under the
+    /// writer lock, so two processes never mint the same number (#62). The
+    /// caller passes an invoice with a placeholder number.
+    pub fn create_invoice(&self, mut invoice: Invoice) -> Result<Invoice, StoreError> {
+        let _guard = self.write_lock()?;
+        let n = self.list_invoices()?.len() + 1;
+        invoice.number = format!("INV-{n:04}");
+        std::fs::create_dir_all(self.root.join("invoices"))?;
+        write_json(&self.invoice_path(invoice.id), &invoice)?;
+        Ok(invoice)
     }
 
     // ----------------------------------------------------------- categories --
@@ -208,18 +264,12 @@ impl Store {
     }
 
     pub fn put_category(&self, category: &Category) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         write_json(&self.category_path(category.id), category)
     }
 
     pub fn delete_category(&self, id: Uuid) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         let path = self.category_path(id);
         if !path.exists() {
             return Err(StoreError::NotFound);
@@ -262,18 +312,12 @@ impl Store {
     }
 
     pub fn put_expense(&self, expense: &Expense) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         write_json(&self.expense_path(expense.id), expense)
     }
 
     pub fn delete_expense(&self, id: Uuid) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         let path = self.expense_path(id);
         if !path.exists() {
             return Err(StoreError::NotFound);
@@ -311,10 +355,7 @@ impl Store {
     }
 
     pub fn put_submission(&self, submission: &Submission) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.root.join("submissions"))?;
         write_json(&self.submission_path(submission.id), submission)
     }
@@ -344,18 +385,12 @@ impl Store {
     }
 
     pub fn put_customer(&self, customer: &Customer) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         write_json(&self.customer_path(customer.id), customer)
     }
 
     pub fn delete_customer(&self, id: Uuid) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         let path = self.customer_path(id);
         if !path.exists() {
             return Err(StoreError::NotFound);
@@ -442,10 +477,7 @@ impl Store {
     }
 
     pub fn put_project(&self, project: &Project) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.projects_dir(project.customer_id))?;
         write_json(
             &self.project_path(project.customer_id, &project.code.0),
@@ -454,10 +486,7 @@ impl Store {
     }
 
     pub fn delete_project(&self, customer_id: Uuid, code: &str) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         let path = self.project_path(customer_id, code);
         if !path.exists() {
             return Err(StoreError::NotFound);
@@ -523,10 +552,7 @@ impl Store {
     }
 
     pub fn put_task(&self, task: &Task) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.tasks_dir(task.customer_id, &task.project_code.0))?;
         write_json(
             &self.task_path(task.customer_id, &task.project_code.0, &task.code.0),
@@ -540,10 +566,7 @@ impl Store {
         project_code: &str,
         code: &str,
     ) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         let path = self.task_path(customer_id, project_code, code);
         if !path.exists() {
             return Err(StoreError::NotFound);
@@ -621,19 +644,13 @@ impl Store {
     }
 
     pub fn put_entry(&self, entry: &Entry) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.day_dir(entry.date))?;
         write_json(&self.entry_path(entry.date, entry.id), entry)
     }
 
     pub fn delete_entry(&self, entry: &Entry) -> Result<(), StoreError> {
-        let _guard = self
-            .write_guard
-            .lock()
-            .map_err(|_| StoreError::Io("store lock poisoned".into()))?;
+        let _guard = self.write_lock()?;
         let path = self.entry_path(entry.date, entry.id);
         if !path.exists() {
             return Err(StoreError::NotFound);

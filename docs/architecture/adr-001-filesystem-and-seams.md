@@ -83,5 +83,9 @@ is traceable and lockable:
 - No provider SDK is pulled into Phases 1–5; Phase 6 work is additive adapters.
 - The rate-ownership change (#11) is a breaking API change (project fields become
   required) — acceptable pre-1.0, documented in its PR, with legacy reads preserved.
-- Single-writer lock is sufficient for a single-process tool; multi-process would
-  need file locking (out of scope, noted).
+- **Concurrency (#62):** every mutation takes a process-local mutex **and** an
+  advisory exclusive `flock` on `.tucanotime.lock` (via `fs2`), retried to a 5 s
+  deadline then surfaced as **503 + `Retry-After`**. Writes are atomic (tmp +
+  rename). This serialises concurrent writers across processes sharing the volume,
+  and read-modify-writes (e.g. invoice numbering via `Store::create_invoice`)
+  hold the lock end-to-end so numbers can't collide.

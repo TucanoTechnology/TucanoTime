@@ -1654,3 +1654,46 @@ async fn login_rate_limited_after_repeated_failures() {
         "locked after threshold (last was {last:?})"
     );
 }
+
+#[test]
+fn concurrent_writer_times_out_with_lock_busy() {
+    use fs2::FileExt;
+    use std::time::Duration;
+    let dir = tempfile::tempdir().unwrap();
+    // A store that gives up quickly when the writer lock is held.
+    let store = tucano_time::store::Store::with_lock_timeout(
+        dir.path().join("data"),
+        Duration::from_millis(50),
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("data")).unwrap();
+    // Simulate another process holding the advisory writer lock.
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(dir.path().join("data").join(".tucanotime.lock"))
+        .unwrap();
+    held.lock_exclusive().unwrap();
+
+    let cust = tucano_time::domain::Customer {
+        id: uuid::Uuid::new_v4(),
+        name: "X".into(),
+        currency: tucano_time::domain::Currency("EUR".into()),
+        default_rate_minor: 1,
+        active: true,
+    };
+    let err = store.put_customer(&cust).expect_err("should time out");
+    assert!(
+        matches!(err, tucano_time::store::StoreError::LockTimeout),
+        "{err:?}"
+    );
+
+    // Release -> the same write now succeeds.
+    held.unlock().unwrap();
+    drop(held);
+    store
+        .put_customer(&cust)
+        .expect("write succeeds once lock is free");
+}

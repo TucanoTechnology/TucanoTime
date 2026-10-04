@@ -4,7 +4,7 @@
     "title": "TucanoTime API",
     "version": "0.1.0",
     "license": { "name": "AGPL-3.0-or-later", "identifier": "AGPL-3.0-or-later" },
-    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /users and /invoices routes return 403 for members)."
+    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /users and /invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62)."
   },
   "servers": [{ "url": "/" }],
   "security": [{ "cookieAuth": [] }],
@@ -425,6 +425,11 @@
       },
       "BadRequest": {
         "description": "Malformed query or body.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Locked": {
+        "description": "A concurrent writer holds the store lock (#62); transient — retry. Sent with Retry-After.",
+        "headers": { "Retry-After": { "schema": { "type": "integer" } } },
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       }
     },
