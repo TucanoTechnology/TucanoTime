@@ -1568,3 +1568,40 @@ async fn member_cannot_invoice_or_approve() {
     .await;
     assert_eq!(s_dec, StatusCode::FORBIDDEN, "member cannot approve");
 }
+
+#[tokio::test]
+async fn security_headers_present() {
+    let (client, _d) = app().await;
+    let res = client
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/healthz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let h = res.headers();
+    assert_eq!(
+        h.get("x-content-type-options")
+            .and_then(|v| v.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(
+        h.get("x-frame-options").and_then(|v| v.to_str().ok()),
+        Some("DENY")
+    );
+    assert_eq!(
+        h.get("referrer-policy").and_then(|v| v.to_str().ok()),
+        Some("no-referrer")
+    );
+    let csp = h
+        .get("content-security-policy")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(csp.contains("default-src 'self'"), "CSP present: {csp}");
+    assert!(csp.contains("frame-ancestors 'none'"));
+}

@@ -137,8 +137,35 @@ pub fn build_router(state: AppState) -> Router {
         .merge(protected)
         .merge(admin)
         .fallback(static_assets)
+        .layer(axum::middleware::from_fn(security_headers))
         .layer(RequestBodyLimitLayer::new(256 * 1024))
         .with_state(state)
+}
+
+/// Baseline security response headers (#48). The docs page loads Swagger UI
+/// from unpkg, so the CSP allowlists it for scripts/styles/fonts.
+async fn security_headers(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::header::{
+        CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+    };
+    let mut res = next.run(req).await;
+    let h = res.headers_mut();
+    h.insert(X_CONTENT_TYPE_OPTIONS, "nosniff".parse().expect("static"));
+    h.insert(REFERRER_POLICY, "no-referrer".parse().expect("static"));
+    h.insert(X_FRAME_OPTIONS, "DENY".parse().expect("static"));
+    h.insert(
+        CONTENT_SECURITY_POLICY,
+        "default-src 'self'; script-src 'self' https://unpkg.com; \
+         style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data:; \
+         font-src 'self' https://unpkg.com; connect-src 'self'; frame-ancestors 'none'; \
+         base-uri 'self'; form-action 'self'"
+            .parse()
+            .expect("static"),
+    );
+    res
 }
 
 async fn openapi() -> impl IntoResponse {
