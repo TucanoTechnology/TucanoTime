@@ -16,6 +16,7 @@ pub mod domain;
 pub mod error;
 pub mod lock;
 pub mod notify;
+pub mod ratelimit;
 pub mod report;
 pub mod store;
 

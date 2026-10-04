@@ -490,7 +490,8 @@
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginInput" } } } },
         "responses": {
           "200": { "description": "Authenticated; session cookie set.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
-          "401": { "description": "Invalid credentials." }
+          "401": { "description": "Invalid credentials." },
+          "429": { "description": "Too many failed attempts; try again later (#47)." }
         }
       }
     },
