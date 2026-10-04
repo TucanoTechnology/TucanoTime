@@ -175,6 +175,8 @@ function initTabs() {
       t.tabIndex = on ? 0 : -1;
       $(t.getAttribute('aria-controls')).hidden = !on;
     });
+    const title = $('page-title');
+    if (title) title.textContent = tab.textContent.trim();
     tab.focus();
   }
   tabs.forEach((t, i) => {
