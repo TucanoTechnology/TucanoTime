@@ -604,6 +604,28 @@ pub async fn invoice_summary(State(app): State<AppState>) -> ApiResult {
     Ok(Json(summary).into_response())
 }
 
+pub async fn invoice_report_handler(
+    State(app): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> ApiResult {
+    let (from, to) = parse_range(&q)?;
+    let invoices = app.store.list_invoices()?;
+    let customers = app.store.list_customers()?;
+    let report = report::invoice_report(&invoices, &customers, from, to);
+    Ok(Json(report).into_response())
+}
+
+pub async fn invoice_export_csv(State(app): State<AppState>) -> ApiResult {
+    let invoices = app.store.list_invoices()?;
+    let customers = app.store.list_customers()?;
+    let csv = report::invoice_csv(&invoices, &customers);
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+        csv,
+    )
+        .into_response())
+}
+
 pub async fn delete_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     let invoice = app
         .store
