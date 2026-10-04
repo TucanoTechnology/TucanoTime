@@ -78,6 +78,11 @@ impl From<StoreError> for ApiError {
                 "write_lock_busy",
                 "another write is in progress; retry shortly",
             ),
+            StoreError::TooManyItems => {
+                // A collection exceeded MAX_DOCS — a server-side limit, not a
+                // client error; report generically without leaking the cap.
+                ApiError::internal("collection exceeds the configured size limit".into())
+            }
             StoreError::Io(detail) => ApiError::internal(detail),
         }
     }
