@@ -81,7 +81,7 @@ impl EntryLock for InvoiceLock {
             .iter()
             .find(|inv| {
                 inv.status == crate::domain::InvoiceStatus::Issued
-                    && inv.lines.iter().any(|l| l.entry_id == entry_id)
+                    && inv.lines.iter().any(|l| l.entry_id == Some(entry_id))
             })
             .map(|inv| LockReason::Invoiced {
                 id: inv.number.clone(),

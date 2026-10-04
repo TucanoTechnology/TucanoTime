@@ -1755,3 +1755,88 @@ async fn logout_revokes_the_session() {
         "revoked session must not work"
     );
 }
+
+#[tokio::test]
+async fn invoice_includes_billable_expenses_and_locks_them() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    // 2h billable time @60 = 12000
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
+    )
+    .await;
+    // billable expense 50.00 = 5000
+    let (_, exp) = json_req(&app, "POST", "/expenses", Some(json!({"date":"2026-10-03","customer_id":cid,"project_code":"P1","amount_minor":5000,"currency":"EUR"}))).await;
+    let xid = exp["id"].as_str().unwrap().to_string();
+
+    // Invoice includes both -> 12000 + 5000 = 17000, two lines of different kinds.
+    let (_, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    assert_eq!(inv["total_minor"], 17000);
+    let kinds: Vec<&str> = inv["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["kind"].as_str().unwrap())
+        .collect();
+    assert!(
+        kinds.contains(&"time") && kinds.contains(&"expense"),
+        "{kinds:?}"
+    );
+
+    // Issue, then the expense is locked from deletion.
+    json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/expenses/{xid}"), None).await;
+    assert_eq!(
+        s_del,
+        StatusCode::CONFLICT,
+        "issued invoice locks its expense"
+    );
+}
+
+#[tokio::test]
+async fn invoice_can_exclude_expenses() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
+    )
+    .await;
+    json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(json!({"date":"2026-10-03","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
+    )
+    .await;
+    let (_, inv) = json_req(&app, "POST", "/invoices", Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07","include_expenses":false}))).await;
+    assert_eq!(inv["total_minor"], 12000, "expenses excluded");
+    assert!(
+        inv["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|l| l["kind"] == "time")
+    );
+}

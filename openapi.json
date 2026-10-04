@@ -263,14 +263,16 @@
       "InvoiceStatus": { "type": "string", "enum": ["draft", "issued", "paid"] },
       "InvoiceLine": {
         "type": "object",
-        "required": ["entry_id", "date", "project_code", "hours", "rate_minor", "amount_minor", "note"],
+        "required": ["kind", "date", "amount_minor", "note"],
         "properties": {
-          "entry_id": { "type": "string", "format": "uuid" },
+          "kind": { "type": "string", "enum": ["time", "expense"] },
           "date": { "type": "string", "format": "date" },
-          "project_code": { "$ref": "#/components/schemas/ProjectCode" },
+          "entry_id": { "type": ["string", "null"], "format": "uuid" },
+          "expense_id": { "type": ["string", "null"], "format": "uuid" },
+          "project_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
           "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
-          "hours": { "$ref": "#/components/schemas/Hours" },
-          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "hours": { "oneOf": [ { "$ref": "#/components/schemas/Hours" }, { "type": "null" } ] },
+          "rate_minor": { "type": ["integer", "null"], "minimum": 0 },
           "amount_minor": { "type": "integer", "minimum": 0 },
           "note": { "type": "string" }
         },
@@ -315,7 +317,8 @@
         "properties": {
           "customer_id": { "type": "string", "format": "uuid" },
           "from": { "type": "string", "format": "date" },
-          "to": { "type": "string", "format": "date" }
+          "to": { "type": "string", "format": "date" },
+          "include_expenses": { "type": "boolean", "default": true, "description": "Roll billable expenses in (#25)." }
         },
         "additionalProperties": false
       },
