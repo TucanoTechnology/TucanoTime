@@ -983,6 +983,35 @@
         }
       }
     },
+    "/timer": {
+      "get": {
+        "operationId": "getTimer",
+        "tags": ["entries"],
+        "summary": "Current running timer for the caller (with elapsed), or null (#14)",
+        "responses": { "200": { "description": "Timer state.", "content": { "application/json": { "schema": { "nullable": true, "type": "object", "properties": { "timer": { "type": "object", "required": ["user_id", "customer_id", "project_code", "started_at"], "properties": { "user_id": { "type": "string", "format": "uuid" }, "customer_id": { "type": "string", "format": "uuid" }, "project_code": { "$ref": "#/components/schemas/ProjectCode" }, "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] }, "note": { "type": "string" }, "started_at": { "type": "string", "format": "date-time" } }, "additionalProperties": false }, "elapsed_seconds": { "type": "integer" }, "elapsed_hours": { "$ref": "#/components/schemas/Hours" } }, "additionalProperties": false } } } } }
+      },
+      "post": {
+        "operationId": "startTimer",
+        "tags": ["entries"],
+        "summary": "Start a timer (one active per user)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["customer_id", "project_code"], "properties": { "customer_id": { "type": "string", "format": "uuid" }, "project_code": { "$ref": "#/components/schemas/ProjectCode" }, "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] }, "note": { "type": "string", "default": "" } }, "additionalProperties": false } } } },
+        "responses": { "201": { "description": "Started." }, "409": { "$ref": "#/components/responses/Conflict" }, "422": { "$ref": "#/components/responses/ValidationError" } }
+      },
+      "delete": {
+        "operationId": "discardTimer",
+        "tags": ["entries"],
+        "summary": "Discard the running timer without logging",
+        "responses": { "204": { "description": "Discarded." } }
+      }
+    },
+    "/timer/stop": {
+      "post": {
+        "operationId": "stopTimer",
+        "tags": ["entries"],
+        "summary": "Stop the timer and create a timer-sourced entry for the elapsed time",
+        "responses": { "200": { "description": "Created entry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
     "/invoices": {
       "get": {
         "operationId": "listInvoices",

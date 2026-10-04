@@ -116,6 +116,13 @@ pub fn build_router(state: AppState) -> Router {
             "/claims/{id}/submit",
             axum::routing::post(api::submit_claim),
         )
+        .route(
+            "/timer",
+            get(api::get_timer)
+                .post(api::start_timer)
+                .delete(api::discard_timer),
+        )
+        .route("/timer/stop", axum::routing::post(api::stop_timer))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_auth,

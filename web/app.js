@@ -1214,6 +1214,88 @@ async function deleteSecret(key) {
   }
 }
 
+// ------------------------------------------------------------------- timer --
+
+let timerBase = 0;
+let timerInterval = null;
+
+function fmtHMS(total) {
+  const h = String(Math.floor(total / 3600)).padStart(2, '0');
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+  const s = String(total % 60).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
+function stopTimerTick() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+}
+
+function startTimerTick(elapsedSeconds) {
+  timerBase = elapsedSeconds;
+  $('timer-display').textContent = fmtHMS(timerBase);
+  stopTimerTick();
+  timerInterval = setInterval(() => {
+    timerBase += 1;
+    $('timer-display').textContent = fmtHMS(timerBase);
+  }, 1000);
+}
+
+async function refreshTimer() {
+  const data = await api.get('/timer');
+  const running = !!data;
+  ['timer-customer', 'timer-project', 'timer-start'].forEach((id) => {
+    $(id).hidden = running;
+  });
+  ['timer-display', 'timer-stop', 'timer-discard'].forEach((id) => {
+    $(id).hidden = !running;
+  });
+  if (running) {
+    startTimerTick(data.elapsed_seconds);
+  } else {
+    stopTimerTick();
+  }
+}
+
+async function startTimer() {
+  const customerId = $('timer-customer').value;
+  const projectCode = $('timer-project').value;
+  if (!customerId || !projectCode) {
+    announce('Choose a customer and project first.');
+    return;
+  }
+  try {
+    await api.post('/timer', { customer_id: customerId, project_code: projectCode });
+    await refreshTimer();
+    announce('Timer started.');
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
+async function stopTimer() {
+  try {
+    await api.post('/timer/stop');
+    await refreshTimer();
+    await refreshDay();
+    announce('Timer stopped and logged.');
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
+async function discardTimer() {
+  try {
+    await api.del('/timer');
+    await refreshTimer();
+    announce('Timer discarded.');
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
 // ---------------------------------------------------------------- boot ---
 
 function switchTab(tabId) {
@@ -1261,6 +1343,12 @@ async function startApp() {
   $('expense-form').addEventListener('submit', addExpense);
   $('submission-form').addEventListener('submit', submitWeek);
   $('secret-form').addEventListener('submit', addSecret);
+  $('timer-start').addEventListener('click', startTimer);
+  $('timer-stop').addEventListener('click', stopTimer);
+  $('timer-discard').addEventListener('click', discardTimer);
+  $('timer-customer').addEventListener('change', async (e) => {
+    await fillProjectSelect($('timer-project'), e.target.value, null);
+  });
   $('submission-week').value = mondayOf(today);
   $('expense-customer').addEventListener('change', async (e) => {
     await fillProjectSelect($('expense-project'), e.target.value, null);
@@ -1276,6 +1364,9 @@ async function startApp() {
   fillCustomerSelect($('invoice-customer'), '', true);
   await refreshInvoices();
   fillCustomerSelect($('expense-customer'), '', true);
+  fillCustomerSelect($('timer-customer'), '', true);
+  await fillProjectSelect($('timer-project'), '', null);
+  await refreshTimer();
   await fillProjectSelect($('expense-project'), '', null);
   $('expense-date').value = today;
   await refreshCategories();

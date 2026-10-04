@@ -61,6 +61,16 @@
 
     <!-- DAY -->
     <section id="panel-day" role="tabpanel" aria-labelledby="tab-day" tabindex="0">
+      <div class="timerbar" id="timerbar">
+        <label for="timer-customer" class="sr-only">Customer</label>
+        <select id="timer-customer"></select>
+        <label for="timer-project" class="sr-only">Project</label>
+        <select id="timer-project"></select>
+        <button type="button" id="timer-start">Start timer</button>
+        <span id="timer-display" class="timer-display" role="timer" hidden>00:00:00</span>
+        <button type="button" id="timer-stop" class="secondary" hidden>Stop</button>
+        <button type="button" id="timer-discard" class="link" hidden>Discard</button>
+      </div>
       <form id="day-picker" class="bar">
         <label for="day-date">Date</label>
         <input type="date" id="day-date" name="date" required>
