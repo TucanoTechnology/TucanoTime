@@ -62,3 +62,36 @@ jobs:
 
       - name: Gitleaks
         run: docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact
+
+  # Supply-chain (#53): dependency advisories + licenses via cargo-deny (the
+  # gate), plus a best-effort CycloneDX SBOM artifact.
+  supply-chain:
+    runs-on: [self-hosted, Linux, X64]
+    container:
+      image: rust:1.98.0-slim-trixie
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install git (advisory-db clone) and cargo-deny
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends git
+          cargo install --locked cargo-deny
+
+      - name: cargo deny check
+        run: cargo deny check advisories licenses sources bans
+
+      - name: Generate SBOM (CycloneDX)
+        continue-on-error: true
+        run: |
+          cargo install --locked cargo-cyclonedx
+          cargo cyclonedx --format json
+          ls -l target/cyclonedx
+
+      - name: Upload SBOM
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: target/cyclonedx/*.cdx.json
