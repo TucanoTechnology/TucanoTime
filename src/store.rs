@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::auth::User;
 use crate::domain::{
-    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, Project, Submission, Task,
+    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, Project, Submission, Task, Timer,
 };
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
@@ -415,6 +415,31 @@ impl Store {
         let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.root.join("claims"))?;
         write_json(&self.claim_path(claim.id), claim)
+    }
+
+    // ---------------------------------------------------------------- timers --
+
+    fn timer_path(&self, user_id: Uuid) -> PathBuf {
+        self.root.join("timers").join(format!("{user_id}.json"))
+    }
+
+    pub fn get_timer(&self, user_id: Uuid) -> Result<Option<Timer>, StoreError> {
+        read_json(&self.timer_path(user_id))
+    }
+
+    pub fn put_timer(&self, timer: &Timer) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        std::fs::create_dir_all(self.root.join("timers"))?;
+        write_json(&self.timer_path(timer.user_id), timer)
+    }
+
+    pub fn delete_timer(&self, user_id: Uuid) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.timer_path(user_id);
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        Ok(())
     }
 
     // ------------------------------------------------------------ customers --

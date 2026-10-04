@@ -2125,3 +2125,45 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     .await;
     assert_eq!(s4, StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn timer_start_stop_creates_entry() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+
+    // Start.
+    let (s, timer) = json_req(
+        &app,
+        "POST",
+        "/timer",
+        Some(json!({"customer_id":cid,"project_code":"P1","note":"focus"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{timer}");
+    // Second start while running -> 409.
+    assert_eq!(
+        json_req(
+            &app,
+            "POST",
+            "/timer",
+            Some(json!({"customer_id":cid,"project_code":"P1"}))
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    // Get shows it running.
+    let (sg, cur) = json_req(&app, "GET", "/timer", None).await;
+    assert_eq!(sg, StatusCode::OK);
+    assert_eq!(cur["timer"]["project_code"], "P1");
+    // Stop -> creates a timer-sourced entry.
+    let (ss, entry) = json_req(&app, "POST", "/timer/stop", None).await;
+    assert_eq!(ss, StatusCode::OK, "{entry}");
+    assert_eq!(entry["source"], "timer");
+    assert_eq!(entry["project_code"], "P1");
+    // Timer cleared.
+    let (_, none) = json_req(&app, "GET", "/timer", None).await;
+    assert!(none.is_null());
+}

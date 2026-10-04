@@ -519,6 +519,41 @@ pub struct ClaimInput {
     pub expense_ids: Vec<Uuid>,
 }
 
+// ------------------------------------------------------------------- timer --
+
+/// A running timer for one user (#14). Persisted so it survives reloads and is
+/// visible from any device (server-side state).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Timer {
+    pub user_id: Uuid,
+    pub customer_id: Uuid,
+    pub project_code: ProjectCode,
+    #[serde(default)]
+    pub task_code: Option<ProjectCode>,
+    #[serde(default)]
+    pub note: String,
+    pub started_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartTimerInput {
+    pub customer_id: Uuid,
+    pub project_code: ProjectCode,
+    #[serde(default)]
+    pub task_code: Option<ProjectCode>,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// Elapsed hundredths-of-an-hour for a running timer, rounded half-up and
+/// clamped to the valid entry range (0.01–24.00 h).
+pub fn elapsed_hundredths(started_at: DateTime<Utc>, now: DateTime<Utc>) -> u32 {
+    let secs = (now - started_at).num_seconds().max(0) as u64;
+    let hundredths = (secs * 100 + 1800) / 3600; // round half up
+    hundredths.clamp(1, 2400) as u32
+}
+
 // -------------------------------------------------------------- submissions --
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1170,5 +1205,25 @@ mod tests {
         let s = summarise_invoices(&invoices, today);
         assert_eq!((s.draft, s.issued, s.overdue, s.paid), (1, 2, 1, 1));
         assert_eq!(s.outstanding.get("EUR"), Some(&(800))); // both issued, unpaid
+    }
+}
+
+#[cfg(test)]
+mod timer_tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    fn at(secs: i64) -> DateTime<Utc> {
+        Utc.timestamp_opt(1_700_000_000 + secs, 0).unwrap()
+    }
+
+    #[test]
+    fn elapsed_rounds_and_clamps() {
+        let s = at(0);
+        assert_eq!(elapsed_hundredths(s, at(3600)), 100); // 1.00h
+        assert_eq!(elapsed_hundredths(s, at(1800)), 50); // 0.50h
+        assert_eq!(elapsed_hundredths(s, at(18)), 1); // ~0.005 -> 0.01 (min)
+        assert_eq!(elapsed_hundredths(s, at(0)), 1); // zero -> min 0.01
+        assert_eq!(elapsed_hundredths(s, at(25 * 3600)), 2400); // clamp 24h
     }
 }

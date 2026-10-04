@@ -19,10 +19,10 @@ use crate::auth::{
 };
 use crate::domain::{
     Category, CategoryInput, ClaimInput, ClaimState, Currency, Customer, CustomerInput, Entry,
-    EntryInput, Expense, ExpenseClaim, ExpenseInput, FieldError, Invoice, InvoiceError,
-    InvoiceStatus, Project, ProjectCode, ProjectInput, Task, TaskInput, generate_invoice,
-    validate_category_input, validate_customer_input, validate_entry_input, validate_expense_input,
-    validate_project_input, validate_task_input,
+    EntryInput, Expense, ExpenseClaim, ExpenseInput, FieldError, Hours, Invoice, InvoiceError,
+    InvoiceStatus, Project, ProjectCode, ProjectInput, Source, StartTimerInput, Task, TaskInput,
+    Timer, elapsed_hundredths, generate_invoice, validate_category_input, validate_customer_input,
+    validate_entry_input, validate_expense_input, validate_project_input, validate_task_input,
 };
 use crate::domain::{Submission, SubmissionState};
 use crate::error::ApiError;
@@ -1098,6 +1098,105 @@ pub async fn decide_claim(
     claim.decided_at = Some(app.clock.now());
     app.store.put_claim(&claim)?;
     Ok(Json(claim).into_response())
+}
+
+// ------------------------------------------------------------------- timer --
+
+/// Current running timer for the caller, with live elapsed, or null.
+pub async fn get_timer(State(app): State<AppState>, actor: AuthUser) -> ApiResult {
+    match app.store.get_timer(actor.0.id)? {
+        Some(t) => {
+            let now = app.clock.now();
+            let hundredths = elapsed_hundredths(t.started_at, now);
+            Ok(Json(serde_json::json!({
+                "timer": t,
+                "elapsed_seconds": (now - t.started_at).num_seconds().max(0),
+                "elapsed_hours": Hours(hundredths),
+            }))
+            .into_response())
+        }
+        None => Ok(Json(serde_json::Value::Null).into_response()),
+    }
+}
+
+/// Start a timer (one active per user).
+pub async fn start_timer(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    ValidJson(input): ValidJson<StartTimerInput>,
+) -> ApiResult {
+    if app.store.get_timer(actor.0.id)?.is_some() {
+        return Err(ApiError::conflict("a timer is already running"));
+    }
+    let mut errors = Vec::new();
+    if app.store.get_customer(input.customer_id)?.is_none() {
+        errors.push(FieldError::new("customer_id", "customer does not exist"));
+    }
+    let project = app
+        .store
+        .get_project(input.customer_id, &input.project_code.0)?;
+    if project.is_none() {
+        errors.push(FieldError::new(
+            "project_code",
+            "project does not exist for this customer",
+        ));
+    }
+    if let Some(tc) = &input.task_code {
+        let task = app
+            .store
+            .get_task(input.customer_id, &input.project_code.0, &tc.0)?;
+        if task.is_none() {
+            errors.push(FieldError::new(
+                "task_code",
+                "task does not exist for this project",
+            ));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    let timer = Timer {
+        user_id: actor.0.id,
+        customer_id: input.customer_id,
+        project_code: input.project_code,
+        task_code: input.task_code,
+        note: input.note,
+        started_at: app.clock.now(),
+    };
+    app.store.put_timer(&timer)?;
+    Ok((StatusCode::CREATED, Json(timer)).into_response())
+}
+
+/// Stop the timer: create a `timer`-sourced entry for the elapsed time.
+pub async fn stop_timer(State(app): State<AppState>, actor: AuthUser) -> ApiResult {
+    let timer = app
+        .store
+        .get_timer(actor.0.id)?
+        .ok_or_else(|| ApiError::not_found("timer"))?;
+    let now = app.clock.now();
+    let entry = Entry {
+        id: Uuid::new_v4(),
+        date: now.date_naive(),
+        customer_id: timer.customer_id,
+        user_id: Some(timer.user_id),
+        project_code: timer.project_code,
+        task_code: timer.task_code,
+        hours: Hours(elapsed_hundredths(timer.started_at, now)),
+        note: timer.note,
+        billable: true,
+        source: Source::Timer,
+        created_at: now,
+        updated_at: now,
+    };
+    app.store.put_entry(&entry)?;
+    app.store.delete_timer(timer.user_id)?;
+    Ok(Json(entry_json(&entry)).into_response())
+}
+
+/// Discard the running timer without creating an entry.
+pub async fn discard_timer(State(app): State<AppState>, actor: AuthUser) -> ApiResult {
+    app.store.delete_timer(actor.0.id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {
