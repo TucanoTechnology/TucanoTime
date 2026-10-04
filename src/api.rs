@@ -1199,6 +1199,42 @@ pub async fn discard_timer(State(app): State<AppState>, actor: AuthUser) -> ApiR
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+// ---------------------------------------------------------------- calendar --
+
+/// List calendar events overlapping the range, from the configured ICS feed
+/// (vault key `calendar.ics_url` or `TUCANO_CALENDAR_ICS`). #15.
+pub async fn calendar_events(
+    State(app): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> ApiResult {
+    let (from, to) = parse_range(&q)?;
+    let source = app
+        .vault
+        .as_ref()
+        .and_then(|v| v.get("calendar.ics_url"))
+        .or_else(|| std::env::var("TUCANO_CALENDAR_ICS").ok())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "calendar_not_configured",
+                "no calendar feed is configured",
+            )
+        })?;
+    let text = tokio::task::spawn_blocking(move || crate::calendar::fetch_ics(&source))
+        .await
+        .map_err(|_| ApiError::internal("calendar fetch panicked".into()))?
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "calendar_fetch",
+                "could not fetch the calendar feed",
+            )
+        })?;
+    let events = crate::calendar::parse_ics(&text, from, to);
+    Ok(Json(serde_json::json!({ "events": events })).into_response())
+}
+
 pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {
     chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
         .map_err(|_| ApiError::bad_request(format!("'{s}' is not a date in YYYY-MM-DD form")))

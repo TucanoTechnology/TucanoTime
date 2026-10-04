@@ -2167,3 +2167,63 @@ async fn timer_start_stop_creates_entry() {
     let (_, none) = json_req(&app, "GET", "/timer", None).await;
     assert!(none.is_null());
 }
+
+#[tokio::test]
+async fn calendar_events_from_configured_feed() {
+    use tucano_time::vault::SecretVault;
+    let dir = tempfile::tempdir().unwrap();
+    let ics = dir.path().join("cal.ics");
+    std::fs::write(&ics, "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:e1\r\nDTSTART:20261002T090000Z\r\nDTEND:20261002T100000Z\r\nSUMMARY:Stand-up\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n").unwrap();
+
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let root = store.root().to_path_buf();
+    let vault = std::sync::Arc::new(
+        SecretVault::open(&root, Some("unit-test-vault-key-000000000000"))
+            .unwrap()
+            .unwrap(),
+    );
+    vault
+        .put("calendar.ics_url", ics.to_str().unwrap())
+        .unwrap();
+    let session = std::sync::Arc::new(Session::new(
+        b"test-session-secret-0000000000000032".to_vec(),
+        3600,
+        false,
+    ));
+    let state = AppState {
+        store: std::sync::Arc::new(store),
+        clock: std::sync::Arc::new(SystemClock),
+        locks: std::sync::Arc::new(tucano_time::lock::NoLocks),
+        session,
+        rate: std::sync::Arc::new(tucano_time::ratelimit::RateLimiter::new(
+            8,
+            std::time::Duration::from_secs(300),
+        )),
+        audit: std::sync::Arc::new(tucano_time::audit::AuditLog::new(&root)),
+        revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
+        vault: Some(vault),
+    };
+    let router = tucano_time::build_router(state);
+    raw(
+        &router,
+        "POST",
+        "/auth/bootstrap",
+        Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+        None,
+    )
+    .await;
+    let admin = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
+
+    let (s, body, _) = raw(
+        &router,
+        "GET",
+        "/calendar/events?from=2026-10-01&to=2026-10-07",
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["title"], "Stand-up");
+}

@@ -12,6 +12,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 pub mod api;
 pub mod audit;
 pub mod auth;
+pub mod calendar;
 pub mod clock;
 pub mod domain;
 pub mod error;
@@ -123,6 +124,7 @@ pub fn build_router(state: AppState) -> Router {
                 .delete(api::discard_timer),
         )
         .route("/timer/stop", axum::routing::post(api::stop_timer))
+        .route("/calendar/events", get(api::calendar_events))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_auth,
