@@ -8,6 +8,8 @@
 const api = {
   async request(method, url, body) {
     const opts = { method, headers: {} };
+    // CSRF guard (#46): required on all mutating requests.
+    opts.headers['X-CSRF-Protection'] = '1';
     if (body !== undefined) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);

@@ -137,6 +137,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(protected)
         .merge(admin)
         .fallback(static_assets)
+        .layer(axum::middleware::from_fn(csrf_guard))
         .layer(axum::middleware::from_fn(security_headers))
         .layer(RequestBodyLimitLayer::new(256 * 1024))
         .with_state(state)
@@ -166,6 +167,40 @@ async fn security_headers(
             .expect("static"),
     );
     res
+}
+
+/// CSRF guard (#46): mutating requests must carry the `X-CSRF-Protection: 1`
+/// header. Combined with the SameSite=Lax session cookie, a cross-site form
+/// post cannot pass. The pre-auth login/bootstrap endpoints are exempt (no
+/// session to abuse yet).
+async fn csrf_guard(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let mutating = matches!(
+        method,
+        axum::http::Method::POST | axum::http::Method::PUT | axum::http::Method::DELETE
+    );
+    let exempt = path == "/auth/login" || path == "/auth/bootstrap";
+    if mutating && !exempt {
+        let ok = req
+            .headers()
+            .get("x-csrf-protection")
+            .and_then(|v| v.to_str().ok())
+            == Some("1");
+        if !ok {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": { "code": "csrf", "message": "missing X-CSRF-Protection header" }
+                })),
+            )
+                .into_response();
+        }
+    }
+    next.run(req).await
 }
 
 async fn openapi() -> impl IntoResponse {
