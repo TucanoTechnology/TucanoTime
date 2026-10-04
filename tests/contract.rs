@@ -37,6 +37,8 @@ async fn raw(
     if let Some(c) = cookie {
         b = b.header(header::COOKIE, c);
     }
+    // The CSRF guard requires this on mutations; send it on all test requests.
+    b = b.header("x-csrf-protection", "1");
     let req = match body {
         Some(v) => {
             b = b.header("content-type", "application/json");
@@ -1604,4 +1606,28 @@ async fn security_headers_present() {
         .unwrap_or("");
     assert!(csp.contains("default-src 'self'"), "CSP present: {csp}");
     assert!(csp.contains("frame-ancestors 'none'"));
+}
+
+#[tokio::test]
+async fn mutation_without_csrf_header_is_forbidden() {
+    let (client, _d) = app().await;
+    // POST without the X-CSRF-Protection header -> 403 (login is exempt, so
+    // use an authenticated data mutation).
+    let res = client
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/customers")
+                .header(header::COOKIE, &client.cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"name":"X","currency":"EUR","default_rate_minor":1}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
