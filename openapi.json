@@ -224,7 +224,8 @@
           "email": { "type": "string", "format": "email" },
           "role": { "type": "string", "enum": ["admin", "member"] },
           "active": { "type": "boolean" },
-          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" }
+          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "cost_rate_minor": { "$ref": "#/components/schemas/RateMinor" }
         },
         "additionalProperties": false
       },
@@ -256,7 +257,8 @@
           "password": { "type": "string", "minLength": 8 },
           "role": { "type": "string", "enum": ["admin", "member"] },
           "active": { "type": "boolean", "default": true },
-          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" }
+          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
+          "cost_rate_minor": { "$ref": "#/components/schemas/RateMinor" }
         },
         "additionalProperties": false
       },
@@ -892,8 +894,7 @@
     "/reports/summary": {
       "parameters": [
         { "$ref": "#/components/parameters/FromParam" },
-        { "$ref": "#/components/parameters/ToParam" },
-        {
+        { "$ref": "#/components/parameters/ToParam" },        {
           "name": "group",
           "in": "query",
           "required": false,
@@ -935,6 +936,21 @@
         "summary": "One CSV row per entry: date, customer, code, hours, currency, hourly_rate, amount, note",
         "responses": {
           "200": { "description": "CSV document (formula-injection escaped).", "content": { "text/csv": { "schema": { "type": "string" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/reports/profitability": {
+      "parameters": [
+        { "$ref": "#/components/parameters/FromParam" },
+        { "$ref": "#/components/parameters/ToParam" }
+      ],
+      "get": {
+        "operationId": "profitability",
+        "tags": ["reports"],
+        "summary": "Revenue vs cost (expenses + labour at cost rates) per customer (#29)",
+        "responses": {
+          "200": { "description": "Profitability rows.", "content": { "application/json": { "schema": { "type": "object", "required": ["rows"], "properties": { "rows": { "type": "array", "items": { "type": "object", "required": ["customer_id", "label", "currency", "revenue_minor", "cost_minor", "margin_minor"], "properties": { "customer_id": { "type": "string", "format": "uuid" }, "label": { "type": "string" }, "currency": { "type": "string" }, "revenue_minor": { "type": "integer" }, "cost_minor": { "type": "integer" }, "margin_minor": { "type": "integer" } }, "additionalProperties": false } } }, "additionalProperties": false } } } },
           "400": { "$ref": "#/components/responses/BadRequest" }
         }
       }

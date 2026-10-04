@@ -84,6 +84,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/reports/summary", get(api::summary))
         .route("/reports/export.csv", get(api::export_csv))
+        .route("/reports/profitability", get(api::profitability))
         .route(
             "/categories",
             get(api::list_categories).post(api::create_category),

@@ -252,7 +252,18 @@ pub async fn bootstrap(
             "required, at most 120 characters",
         )]));
     }
-    let user = new_user(name, &email, &input.password, Role::Admin, true, 0, &app)?;
+    let user = new_user(
+        name,
+        &email,
+        &input.password,
+        NewUser {
+            role: Role::Admin,
+            active: true,
+            default_rate_minor: 0,
+            cost_rate_minor: 0,
+        },
+        &app,
+    )?;
     app.rate.reset("bootstrap");
     app.audit.record("bootstrap", &email, app.clock.now());
     let (headers, pubuser) = set_cookie(&app, &user);
@@ -339,13 +350,19 @@ pub async fn audit_log(State(app): State<AppState>) -> ApiResult {
     Ok(Json(serde_json::json!({ "events": events })).into_response())
 }
 
+/// Non-identity attributes for creating a user.
+struct NewUser {
+    role: Role,
+    active: bool,
+    default_rate_minor: u64,
+    cost_rate_minor: u64,
+}
+
 fn new_user(
     name: &str,
     email: &str,
     password: &str,
-    role: Role,
-    active: bool,
-    default_rate_minor: u64,
+    p: NewUser,
     app: &AppState,
 ) -> Result<User, ApiError> {
     let password_hash = auth::hash_password(password)
@@ -354,9 +371,10 @@ fn new_user(
         id: Uuid::new_v4(),
         name: name.to_owned(),
         email: email.to_owned(),
-        role,
-        active,
-        default_rate_minor,
+        role: p.role,
+        active: p.active,
+        default_rate_minor: p.default_rate_minor,
+        cost_rate_minor: p.cost_rate_minor,
         password_hash,
         created_at: app.clock.now(),
     };
@@ -378,6 +396,8 @@ pub struct UserInput {
     active: bool,
     #[serde(default)]
     default_rate_minor: u64,
+    #[serde(default)]
+    cost_rate_minor: u64,
 }
 
 fn default_active_true() -> bool {
@@ -413,9 +433,12 @@ pub async fn create_user(
         input.name.trim(),
         &email,
         &input.password,
-        input.role.unwrap_or(Role::Member),
-        input.active,
-        input.default_rate_minor,
+        NewUser {
+            role: input.role.unwrap_or(Role::Member),
+            active: input.active,
+            default_rate_minor: input.default_rate_minor,
+            cost_rate_minor: input.cost_rate_minor,
+        },
         &app,
     )?;
     app.audit.record("user_created", &email, app.clock.now());
@@ -1328,6 +1351,23 @@ pub async fn export_csv(
         csv,
     )
         .into_response())
+}
+
+/// Profitability per customer: revenue (non-draft invoices) vs cost (billable
+/// expenses + labour at each person's cost rate) (#29).
+pub async fn profitability(
+    State(app): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> ApiResult {
+    let (from, to) = parse_range(&q)?;
+    let invoices = app.store.list_invoices()?;
+    let expenses = app.store.list_expenses()?;
+    let entries = app.store.list_range(from, to)?;
+    let customers = app.store.list_customers()?;
+    let users = app.store.list_users()?;
+    let result =
+        report::summarise_profit(&invoices, &expenses, &entries, &customers, &users, from, to);
+    Ok(Json(result).into_response())
 }
 
 /// Route guard: reject with 401 unless a valid session cookie is present.
