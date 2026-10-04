@@ -243,6 +243,7 @@ async function refreshDay() {
   $('day-total').textContent = (total / 100).toFixed(2);
   $('day-table').hidden = rows.length === 0;
   $('day-empty').hidden = rows.length !== 0;
+  await refreshCalendar(date);
 }
 
 function startEdit(e) {
@@ -1294,6 +1295,42 @@ async function discardTimer() {
   } catch (err) {
     announce(err.message);
   }
+}
+
+// ---------------------------------------------------------------- calendar --
+
+async function refreshCalendar(date) {
+  let events = [];
+  try {
+    const data = await api.get(`/calendar/events?from=${date}&to=${date}`);
+    events = data.events || [];
+    $('calendar-section').hidden = false;
+  } catch {
+    $('calendar-section').hidden = true;
+    return;
+  }
+  const ul = $('calendar-list');
+  ul.textContent = '';
+  for (const ev of events) {
+    const li = document.createElement('li');
+    li.className = 'cal-event';
+    const label = document.createElement('span');
+    const start = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    label.textContent = `${start} — ${ev.title}`;
+    const log = document.createElement('button');
+    log.type = 'button';
+    log.className = 'link';
+    log.textContent = 'Log time';
+    log.addEventListener('click', () => {
+      $('entry-date').value = date;
+      $('entry-note').value = ev.title;
+      $('entry-hours').focus();
+      $('entry-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    li.append(label, log);
+    ul.appendChild(li);
+  }
+  $('calendar-section').hidden = events.length === 0;
 }
 
 // ---------------------------------------------------------------- boot ---

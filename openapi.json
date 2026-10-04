@@ -1012,6 +1012,22 @@
         "responses": { "200": { "description": "Created entry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
+    "/calendar/events": {
+      "parameters": [
+        { "$ref": "#/components/parameters/FromParam" },
+        { "$ref": "#/components/parameters/ToParam" }
+      ],
+      "get": {
+        "operationId": "calendarEvents",
+        "tags": ["entries"],
+        "summary": "Calendar events overlapping the range, from the configured ICS feed (#15)",
+        "responses": {
+          "200": { "description": "Events.", "content": { "application/json": { "schema": { "type": "object", "required": ["events"], "properties": { "events": { "type": "array", "items": { "type": "object", "required": ["uid", "start", "end", "title", "location"], "properties": { "uid": { "type": "string" }, "start": { "type": "string", "format": "date-time" }, "end": { "type": "string", "format": "date-time" }, "title": { "type": "string" }, "location": { "type": "string" } }, "additionalProperties": false } } }, "additionalProperties": false } } } },
+          "404": { "description": "No calendar feed configured." },
+          "502": { "description": "Feed fetch failed." }
+        }
+      }
+    },
     "/invoices": {
       "get": {
         "operationId": "listInvoices",

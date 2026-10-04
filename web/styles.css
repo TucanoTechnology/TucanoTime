@@ -152,6 +152,9 @@ button.primary { width: 100%; }
 
 .beta { display: inline-block; font-size: .62rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 999px; padding: .05rem .4rem; vertical-align: middle; margin-left: .35rem; }
 
+.cal-events { list-style: none; padding: 0; margin: 0 0 1rem; }
+.cal-event { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: .35rem; background: var(--surface); }
+
 /* ---- narrow: sidebar collapses to a top bar ---- */
 @media (max-width: 720px) {
   .app { flex-direction: column; }
