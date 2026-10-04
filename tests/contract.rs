@@ -1950,3 +1950,84 @@ async fn invoice_report_and_export() {
     assert!(text.starts_with("number,customer,"), "csv header: {text}");
     assert!(text.contains("INV-0001") && text.contains("ACME"));
 }
+
+#[tokio::test]
+async fn reimbursement_claim_lifecycle_locks_expenses() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (_, e1) = json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
+    )
+    .await;
+    let (_, e2) = json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(json!({"date":"2026-10-03","customer_id":cid,"amount_minor":3000,"currency":"EUR"})),
+    )
+    .await;
+    let ids = json!([e1["id"], e2["id"]]);
+
+    // Create draft claim.
+    let (s, claim) = json_req(
+        &app,
+        "POST",
+        "/claims",
+        Some(json!({"title":"Oct costs","expense_ids":ids})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{claim}");
+    assert_eq!(claim["state"], "draft");
+    assert_eq!(claim["total_minor"], 8000);
+    let claim_id = claim["id"].as_str().unwrap().to_string();
+    let xid = e1["id"].as_str().unwrap().to_string();
+
+    // Draft does not lock; submit then it locks.
+    assert_eq!(
+        json_req(&app, "DELETE", &format!("/expenses/{xid}"), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    // (that deleted e1; recreate for the lock test)
+    let (_, e1b) = json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
+    )
+    .await;
+    let xid = e1b["id"].as_str().unwrap().to_string();
+    let (_, claim2) = json_req(
+        &app,
+        "POST",
+        "/claims",
+        Some(json!({"title":"Oct costs","expense_ids":[e1b["id"], e2["id"]]})),
+    )
+    .await;
+    let cid2 = claim2["id"].as_str().unwrap().to_string();
+    json_req(&app, "POST", &format!("/claims/{cid2}/submit"), None).await;
+    assert_eq!(
+        json_req(&app, "DELETE", &format!("/expenses/{xid}"), None)
+            .await
+            .0,
+        StatusCode::CONFLICT,
+        "submitted claim locks expense"
+    );
+
+    // Admin approves.
+    let (sd, decided) = json_req(
+        &app,
+        "POST",
+        &format!("/claims/{cid2}/decision"),
+        Some(json!({"decision":"approve"})),
+    )
+    .await;
+    assert_eq!(sd, StatusCode::OK, "{decided}");
+    assert_eq!(decided["state"], "approved");
+    let _ = claim_id;
+}

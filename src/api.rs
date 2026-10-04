@@ -18,11 +18,11 @@ use crate::auth::{
     valid_password, verify_password,
 };
 use crate::domain::{
-    Category, CategoryInput, Currency, Customer, CustomerInput, Entry, EntryInput, Expense,
-    ExpenseInput, FieldError, Invoice, InvoiceError, InvoiceStatus, Project, ProjectCode,
-    ProjectInput, Task, TaskInput, generate_invoice, validate_category_input,
-    validate_customer_input, validate_entry_input, validate_expense_input, validate_project_input,
-    validate_task_input,
+    Category, CategoryInput, ClaimInput, ClaimState, Currency, Customer, CustomerInput, Entry,
+    EntryInput, Expense, ExpenseClaim, ExpenseInput, FieldError, Invoice, InvoiceError,
+    InvoiceStatus, Project, ProjectCode, ProjectInput, Task, TaskInput, generate_invoice,
+    validate_category_input, validate_customer_input, validate_entry_input, validate_expense_input,
+    validate_project_input, validate_task_input,
 };
 use crate::domain::{Submission, SubmissionState};
 use crate::error::ApiError;
@@ -769,6 +769,16 @@ pub async fn delete_expense(
             "expense is on an issued invoice; delete the invoice draft or void it first",
         ));
     }
+    // An expense in a submitted/approved claim is locked (#24).
+    let claimed = app.store.list_claims()?.iter().any(|c| {
+        (c.state == ClaimState::Submitted || c.state == ClaimState::Approved)
+            && c.expense_ids.contains(&id)
+    });
+    if claimed {
+        return Err(ApiError::conflict(
+            "expense is on a submitted/approved claim; reject it first",
+        ));
+    }
     app.store.delete_expense(id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -870,6 +880,145 @@ pub async fn decide_submission(
     submission.decided_at = Some(app.clock.now());
     app.store.put_submission(&submission)?;
     Ok(Json(submission).into_response())
+}
+
+// ------------------------------------------------------------------ claims --
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClaimDecisionInput {
+    pub decision: String,
+    #[serde(default)]
+    pub comment: String,
+}
+
+pub async fn list_claims(State(app): State<AppState>, actor: AuthUser) -> ApiResult {
+    let claims: Vec<ExpenseClaim> = app
+        .store
+        .list_claims()?
+        .into_iter()
+        .filter(|c| visible_to(&actor.0, Some(c.user_id)))
+        .collect();
+    Ok(Json(serde_json::json!({ "claims": claims })).into_response())
+}
+
+/// Create a draft reimbursement claim over a set of the caller's expenses.
+pub async fn create_claim(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    ValidJson(input): ValidJson<ClaimInput>,
+) -> ApiResult {
+    let title = input.title.trim();
+    if title.is_empty() || title.chars().count() > 120 {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "title",
+            "required, at most 120 characters",
+        )]));
+    }
+    if input.expense_ids.is_empty() {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "expense_ids",
+            "at least one expense is required",
+        )]));
+    }
+    let mut errors = Vec::new();
+    let mut total: u64 = 0;
+    let mut currency: Option<Currency> = None;
+    for id in &input.expense_ids {
+        let Some(x) = app.store.get_expense(*id)? else {
+            errors.push(FieldError::new(
+                "expense_ids",
+                format!("unknown expense {id}"),
+            ));
+            continue;
+        };
+        if !visible_to(&actor.0, x.user_id) {
+            errors.push(FieldError::new(
+                "expense_ids",
+                "expense belongs to another user",
+            ));
+            continue;
+        }
+        total += x.amount_minor;
+        match &currency {
+            None => currency = Some(x.currency.clone()),
+            Some(c) if *c == x.currency => {}
+            Some(c) => {
+                errors.push(FieldError::new(
+                    "expense_ids",
+                    format!("mixed currencies ({} and {})", c.0, x.currency.0),
+                ));
+            }
+        }
+    }
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    let claim = ExpenseClaim {
+        id: Uuid::new_v4(),
+        user_id: actor.0.id,
+        title: title.to_owned(),
+        expense_ids: input.expense_ids.clone(),
+        total_minor: total,
+        currency: currency.expect("non-empty"),
+        state: ClaimState::Draft,
+        comment: String::new(),
+        created_at: app.clock.now(),
+        submitted_at: None,
+        decided_at: None,
+    };
+    app.store.put_claim(&claim)?;
+    Ok((StatusCode::CREATED, Json(claim)).into_response())
+}
+
+pub async fn submit_claim(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult {
+    let mut claim = app
+        .store
+        .get_claim(id)?
+        .filter(|c| visible_to(&actor.0, Some(c.user_id)))
+        .ok_or_else(|| ApiError::not_found("claim"))?;
+    if claim.state != ClaimState::Draft {
+        return Err(ApiError::conflict("only a draft claim can be submitted"));
+    }
+    claim.state = ClaimState::Submitted;
+    claim.submitted_at = Some(app.clock.now());
+    app.store.put_claim(&claim)?;
+    Ok(Json(claim).into_response())
+}
+
+/// Approve or reject a submitted claim (admin only, #24).
+pub async fn decide_claim(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<ClaimDecisionInput>,
+) -> ApiResult {
+    ensure_admin(&actor.0)?;
+    let mut claim = app
+        .store
+        .get_claim(id)?
+        .ok_or_else(|| ApiError::not_found("claim"))?;
+    if claim.state != ClaimState::Submitted {
+        return Err(ApiError::conflict("only a submitted claim can be decided"));
+    }
+    claim.state = match input.decision.as_str() {
+        "approve" => ClaimState::Approved,
+        "reject" => ClaimState::Rejected,
+        other => {
+            return Err(ApiError::validation(vec![FieldError::new(
+                "decision",
+                format!("'{other}' is not approve or reject"),
+            )]));
+        }
+    };
+    claim.comment = input.comment;
+    claim.decided_at = Some(app.clock.now());
+    app.store.put_claim(&claim)?;
+    Ok(Json(claim).into_response())
 }
 
 pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {
