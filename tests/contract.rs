@@ -83,16 +83,21 @@ impl Client {
             false,
         ));
         let state = match locks {
-            Some(l) => AppState {
-                store: Arc::new(store),
-                clock: Arc::new(SystemClock),
-                locks: l,
-                session,
-                rate: Arc::new(tucano_time::ratelimit::RateLimiter::new(
-                    8,
-                    std::time::Duration::from_secs(300),
-                )),
-            },
+            Some(l) => {
+                let store = Arc::new(store);
+                let audit = Arc::new(tucano_time::audit::AuditLog::new(store.root()));
+                AppState {
+                    store,
+                    clock: Arc::new(SystemClock),
+                    locks: l,
+                    session,
+                    rate: Arc::new(tucano_time::ratelimit::RateLimiter::new(
+                        8,
+                        std::time::Duration::from_secs(300),
+                    )),
+                    audit,
+                }
+            }
             None => AppState::with_session(store, session),
         };
         let router = tucano_time::build_router(state);
@@ -1696,4 +1701,30 @@ fn concurrent_writer_times_out_with_lock_busy() {
     store
         .put_customer(&cust)
         .expect("write succeeds once lock is free");
+}
+
+#[tokio::test]
+async fn audit_log_records_login_failure() {
+    let (client, _d) = app().await;
+    // A failed login (as an anonymous caller).
+    let _ = anon_req(
+        &client,
+        "POST",
+        "/auth/login",
+        Some(json!({"email":"ghost@test.local","password":"wrong"})),
+    )
+    .await;
+    // Admin reads the audit log and sees the event.
+    let (s, body) = json_req(&client, "GET", "/audit", None).await;
+    assert_eq!(s, StatusCode::OK);
+    let events = body["events"].as_array().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| e["event"] == "login_failed" && e["subject"] == "ghost@test.local"),
+        "audit missing login_failed: {events:?}"
+    );
+    // No password material is ever recorded.
+    let raw = serde_json::to_string(&events).unwrap();
+    assert!(!raw.contains("wrong"), "audit leaked a password");
 }
