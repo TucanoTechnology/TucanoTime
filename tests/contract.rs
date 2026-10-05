@@ -147,6 +147,7 @@ impl Client {
                     payments,
                     accounting,
                     sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
+                    oauth_flows: Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
                 }
             }
             None => AppState::with_session(store, session)
@@ -2121,6 +2122,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         payments: std::sync::Arc::new(tucano_time::payments::PaymentRegistry::default()),
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
+        oauth_flows: std::sync::Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
     };
     let router = tucano_time::build_router(state);
     // bootstrap admin
@@ -2266,6 +2268,7 @@ async fn calendar_events_from_configured_feed() {
         payments: std::sync::Arc::new(tucano_time::payments::PaymentRegistry::default()),
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
+        oauth_flows: std::sync::Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
     };
     let router = tucano_time::build_router(state);
     raw(
@@ -2885,4 +2888,36 @@ async fn sso_unknown_provider_is_400() {
     .await;
     // app() client is authenticated; endpoint is public but provider unknown.
     assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn calendar_oauth_start_and_callback_plumbing() {
+    let (app, _d) = app().await;
+    // No client id configured (no vault in this test app) -> 422.
+    let (s1, b1) = json_req(&app, "GET", "/calendar/oauth/start?provider=google", None).await;
+    assert_eq!(s1, StatusCode::UNPROCESSABLE_ENTITY, "{b1}");
+
+    // Unknown provider -> 400.
+    let (s2, _) = json_req(&app, "GET", "/calendar/oauth/start?provider=yahoo", None).await;
+    assert_eq!(s2, StatusCode::BAD_REQUEST);
+
+    // Callback with a state we never issued -> 401 (CSRF state is the defence).
+    let (s3, b3) = json_req(
+        &app,
+        "GET",
+        "/calendar/oauth/callback?code=abc&state=forged",
+        None,
+    )
+    .await;
+    assert_eq!(s3, StatusCode::UNAUTHORIZED, "{b3}");
+
+    // Calendar events endpoint still reports ICS-not-configured (no provider).
+    let (s4, _) = json_req(
+        &app,
+        "GET",
+        "/calendar/events?from=2026-10-01&to=2026-10-07",
+        None,
+    )
+    .await;
+    assert_eq!(s4, StatusCode::NOT_FOUND);
 }

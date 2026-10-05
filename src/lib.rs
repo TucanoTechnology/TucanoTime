@@ -15,6 +15,7 @@ pub mod audit;
 pub mod auth;
 pub mod budgets;
 pub mod calendar;
+pub mod calendar_oauth;
 pub mod clock;
 pub mod domain;
 pub mod email;
@@ -205,6 +206,11 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/schedules/{id}",
             axum::routing::delete(api::delete_schedule),
+        )
+        .route("/calendar/oauth/start", get(api::calendar_oauth_start))
+        .route(
+            "/calendar/oauth/callback",
+            get(api::calendar_oauth_callback),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

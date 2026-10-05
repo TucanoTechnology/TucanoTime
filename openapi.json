@@ -1079,6 +1079,39 @@
         "responses": { "200": { "description": "Created entry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
+    "/calendar/oauth/start": {
+      "get": {
+        "operationId": "calendarOAuthStart",
+        "tags": ["calendar"],
+        "summary": "Begin the Google/Microsoft calendar consent flow (#36); returns the provider authorize URL",
+        "parameters": [ { "name": "provider", "in": "query", "required": false, "schema": { "type": "string", "enum": ["google", "microsoft"], "default": "google" } } ],
+        "responses": {
+          "200": { "description": "Authorize URL.", "content": { "application/json": { "schema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string" } }, "additionalProperties": false } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "description": "Admin role required." },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/calendar/oauth/callback": {
+      "get": {
+        "operationId": "calendarOAuthCallback",
+        "tags": ["calendar"],
+        "summary": "OAuth callback: validates state, exchanges the code, stores tokens in the vault (#36); tokens are never echoed",
+        "parameters": [
+          { "name": "code", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Connected.", "content": { "application/json": { "schema": { "type": "object", "required": ["connected"], "properties": { "connected": { "type": "string" } }, "additionalProperties": false } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "description": "Unknown or expired OAuth state." },
+          "403": { "description": "Admin role required." },
+          "502": { "description": "Authorization code exchange failed." },
+          "503": { "description": "Secret vault not enabled." }
+        }
+      }
+    },
     "/calendar/events": {
       "parameters": [
         { "$ref": "#/components/parameters/FromParam" },

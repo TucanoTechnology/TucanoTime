@@ -109,6 +109,8 @@ pub struct AppState {
     pub accounting: Arc<crate::accounting::AccountingRegistry>,
     /// Identity providers for SSO (#32). Empty registry disables SSO.
     pub sso: Arc<crate::sso::SsoRegistry>,
+    /// Pending OAuth calendar consent flows (#36).
+    pub oauth_flows: Arc<crate::calendar_oauth::OAuthFlows>,
 }
 
 impl AppState {
@@ -161,6 +163,7 @@ impl AppState {
             payments,
             accounting,
             sso,
+            oauth_flows: Arc::new(crate::calendar_oauth::OAuthFlows::new()),
             store,
         }
     }
@@ -1699,6 +1702,23 @@ pub async fn calendar_events(
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let (from, to) = parse_range(&q)?;
+    // #36: Google/Microsoft OAuth providers take precedence when configured;
+    // otherwise the #15 ICS feed remains the default (locked decision).
+    if let Some(source) = crate::calendar_oauth::configured_provider(app.vault.as_deref())
+        .and_then(|p| crate::calendar_oauth::source_for(&p, app.vault.as_deref()))
+    {
+        let events = tokio::task::spawn_blocking(move || source.fetch(from, to))
+            .await
+            .map_err(|_| ApiError::internal("calendar provider fetch panicked".into()))?
+            .map_err(|_| {
+                ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "calendar_fetch",
+                    "could not fetch the calendar provider",
+                )
+            })?;
+        return Ok(Json(serde_json::json!({ "events": events })).into_response());
+    }
     let source = app
         .vault
         .as_ref()
@@ -1727,6 +1747,123 @@ pub async fn calendar_events(
 }
 
 // ---------------------------------------------------------- notifications --
+
+/// Starts the OAuth consent flow for a calendar provider (#36, admin). Returns
+/// the provider's authorize URL; the browser is redirected there.
+pub async fn calendar_oauth_start(
+    State(app): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> ApiResult {
+    let provider = q
+        .get("provider")
+        .map(|p| p.as_str())
+        .unwrap_or("google")
+        .to_ascii_lowercase();
+    if !matches!(provider.as_str(), "google" | "microsoft") {
+        return Err(ApiError::bad_request(
+            "provider must be google or microsoft",
+        ));
+    }
+    let get = |key: &str, env: &str| -> Option<String> {
+        app.vault
+            .as_ref()
+            .and_then(|v| v.get(key))
+            .or_else(|| std::env::var(env).ok())
+    };
+    let client_id = get(
+        &format!("calendar.{provider}.client_id"),
+        &provider_env(&provider, "CLIENT_ID"),
+    )
+    .filter(|s| !s.is_empty())
+    .ok_or_else(|| {
+        ApiError::validation(vec![crate::domain::FieldError::new(
+            "client_id",
+            "the provider's OAuth client id is not configured in the vault",
+        )])
+    })?;
+    let redirect = get("calendar.oauth_redirect", "TUCANO_CALENDAR_OAUTH_REDIRECT")
+        .unwrap_or_else(|| "/calendar/oauth/callback".into());
+    let state = app
+        .oauth_flows
+        .start(&provider, app.clock.now().timestamp());
+    let url = crate::calendar_oauth::authorize_url(&provider, &client_id, &redirect, &state);
+    Ok(Json(serde_json::json!({ "url": url })).into_response())
+}
+
+/// OAuth callback for the calendar consent flow (#36). Validates the CSRF
+/// state, exchanges the code, and stores tokens in the vault — they are never
+/// echoed back or logged.
+#[allow(clippy::unused_async)] // axum handler shape
+pub async fn calendar_oauth_callback(
+    State(app): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> ApiResult {
+    let code = q.get("code").cloned().unwrap_or_default();
+    let state = q.get("state").cloned().unwrap_or_default();
+    let Some(provider) = app.oauth_flows.take(&state, app.clock.now().timestamp()) else {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "bad_state",
+            "unknown or expired OAuth state",
+        ));
+    };
+    if code.is_empty() {
+        return Err(ApiError::bad_request("missing authorization code"));
+    }
+    let get = |key: &str| -> Option<String> { app.vault.as_ref().and_then(|v| v.get(key)) };
+    let client_id = get(&format!("calendar.{provider}.client_id")).unwrap_or_default();
+    let client_secret = get(&format!("calendar.{provider}.client_secret")).unwrap_or_default();
+    let redirect = get("calendar.oauth_redirect")
+        .or_else(|| std::env::var("TUCANO_CALENDAR_OAUTH_REDIRECT").ok())
+        .unwrap_or_else(|| "/calendar/oauth/callback".into());
+    let vault = app.vault.as_ref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no_vault",
+            "secret vault is not enabled (set TUCANO_SECRET_KEY)",
+        )
+    })?;
+    // The code exchange is a live provider call; run it off the async core.
+    let (provider2, code2, cid, cs, red) = (
+        provider.clone(),
+        code.clone(),
+        client_id.clone(),
+        client_secret.clone(),
+        redirect.clone(),
+    );
+    let tokens = tokio::task::spawn_blocking(move || {
+        crate::calendar_oauth::exchange_code(&provider2, &code2, &cid, &cs, &red)
+    })
+    .await
+    .map_err(|_| ApiError::internal("oauth exchange panicked".into()))?
+    .map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "oauth_exchange",
+            "authorization code exchange failed",
+        )
+    })?;
+    let (access, refresh) = tokens;
+    vault
+        .put(&format!("calendar.{provider}.access_token"), &access)
+        .map_err(|_| ApiError::internal("vault write failed".into()))?;
+    if !refresh.is_empty() {
+        vault
+            .put(&format!("calendar.{provider}.refresh_token"), &refresh)
+            .map_err(|_| ApiError::internal("vault write failed".into()))?;
+    }
+    // Turn the provider on only after tokens are safely stored.
+    vault
+        .put("calendar.provider", &provider)
+        .map_err(|_| ApiError::internal("vault write failed".into()))?;
+    app.audit
+        .record("calendar_oauth", &provider, app.clock.now());
+    Ok(Json(serde_json::json!({ "connected": provider })).into_response())
+}
+
+fn provider_env(provider: &str, suffix: &str) -> String {
+    format!("TUCANO_{}_{}", provider.to_ascii_uppercase(), suffix)
+}
 
 /// The caller's notifications, newest first (#22).
 pub async fn list_notifications(State(app): State<AppState>, actor: AuthUser) -> ApiResult {
