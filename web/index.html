@@ -71,32 +71,42 @@
         <button type="button" id="timer-stop" class="secondary" hidden>Stop</button>
         <button type="button" id="timer-discard" class="link" hidden>Discard</button>
       </div>
-      <form id="day-picker" class="bar">
-        <label for="day-date">Date</label>
-        <input type="date" id="day-date" name="date" required>
-        <button type="submit" class="secondary">Show day</button>
-      </form>
-      <h2>Entries for <span id="day-label"></span></h2>
+      <input type="date" id="day-date" hidden>
+      <div class="day-bar">
+        <button type="button" id="day-add" class="primary">+ Track time</button>
+        <nav class="day-nav" aria-label="Change day">
+          <button type="button" id="day-prev" aria-label="Previous day">‹</button>
+          <span id="day-label" class="day-label"></span>
+          <button type="button" id="day-next" aria-label="Next day">›</button>
+        </nav>
+      </div>
+      <nav id="week-strip" class="week-strip" aria-label="Days of this week"></nav>
       <div id="notif-section" hidden>
         <div class="notif-head"><span>Notifications</span><button type="button" id="notif-read" class="link">Mark all read</button></div>
         <ul id="notif-list" class="notifs"></ul>
       </div>
-      <table id="day-table">
+      <table id="day-table" aria-describedby="day-label">
         <caption class="sr-only">Time entries for the selected day</caption>
         <thead>
-          <tr><th scope="col">Customer</th><th scope="col">Project</th><th scope="col">Hours</th><th scope="col">Note</th><th scope="col" class="actions-col">Actions</th></tr>
+          <tr><th scope="col">Project / customer / note</th><th scope="col" class="num">Hours</th><th scope="col" class="actions-col">Actions</th></tr>
         </thead>
         <tbody></tbody>
-        <tfoot><tr><th scope="row" colspan="2">Total</th><td id="day-total"></td><td colspan="2"></td></tr></tfoot>
+        <tfoot><tr><th scope="row">Total:</th><td id="day-total" class="num"></td><td></td></tr></tfoot>
       </table>
-      <p id="day-empty" hidden>No entries recorded for this day yet.</p>
+      <p id="day-empty" hidden>Nothing logged on this day yet. Use <strong>+ Track time</strong> to add an entry, or copy the previous day's projects below.</p>
+      <div class="copy-bar">
+        <button type="button" id="copy-prev" class="secondary">Copy from previous day (projects only)</button>
+        <ul id="copy-rows" class="copy-rows" aria-label="Projects copied from the previous day"></ul>
+      </div>
 
       <div id="calendar-section" hidden>
         <h2>Calendar events</h2>
         <ul id="calendar-list" class="cal-events"></ul>
       </div>
 
+      <div id="entry-wrap" hidden>
       <h2 id="entry-form-title">Add an entry</h2>
+      <p class="hint" id="entry-form-date"></p>
       <form id="entry-form" class="card">
         <input type="hidden" id="entry-id">
         <div class="field">
@@ -111,10 +121,7 @@
           <label for="entry-task">Task (optional)</label>
           <select id="entry-task" name="task_code"></select>
         </div>
-        <div class="field">
-          <label for="entry-date">Date</label>
-          <input type="date" id="entry-date" name="date" required>
-        </div>
+        <input type="hidden" id="entry-date" name="date">
         <div class="field">
           <label for="entry-hours">Hours (0.01–24.00)</label>
           <input type="number" id="entry-hours" name="hours" min="0.01" max="24" step="0.01" required inputmode="decimal">
@@ -132,6 +139,7 @@
           <button type="button" class="secondary" id="entry-cancel" hidden>Cancel edit</button>
         </div>
       </form>
+      </div>
     </section>
 
     <!-- WEEK -->

@@ -159,6 +159,35 @@ button.primary { width: 100%; }
 .notifs { list-style: none; padding: 0; margin: 0 0 1rem; }
 .notif { padding: .5rem .7rem; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 var(--radius) var(--radius) 0; margin-bottom: .35rem; }
 
+/* Day view redesign (#12) */
+.day-bar { display: flex; align-items: center; gap: 1rem; margin-bottom: .75rem; flex-wrap: wrap; }
+.day-nav { display: flex; align-items: center; gap: .4rem; }
+.day-nav button { border: 1px solid var(--line); background: var(--surface); border-radius: 50%; width: 2rem; height: 2rem; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.day-nav button:hover { border-color: var(--accent); color: var(--accent); }
+.day-label { font-weight: 700; font-size: 1.1rem; min-width: 14ch; }
+.week-strip { display: flex; gap: .35rem; align-items: stretch; margin-bottom: 1rem; flex-wrap: wrap; }
+.ws-day { display: flex; flex-direction: column; gap: .15rem; min-width: 5.2rem; padding: .4rem .55rem; border: 1px solid var(--line); border-bottom-width: 3px; border-bottom-color: transparent; border-radius: var(--radius); background: var(--surface); cursor: pointer; text-align: left; }
+.ws-day:hover { border-color: var(--accent); }
+.ws-day.selected { border-bottom-color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+.ws-name { font-size: .8rem; opacity: .8; }
+.ws-total { font-variant-numeric: tabular-nums; }
+.ws-week { margin-left: auto; align-self: center; font-weight: 700; font-variant-numeric: tabular-nums; padding-left: .75rem; }
+.entry-main { padding: .5rem .6rem; }
+.entry-project { font-weight: 700; }
+.entry-customer { font-size: .9rem; }
+.entry-note { color: var(--muted, #667); font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46ch; }
+.entry-hours { font-variant-numeric: tabular-nums; font-weight: 600; }
+button.pill { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: .15rem .7rem; font-size: .82rem; cursor: pointer; margin-left: .3rem; }
+button.pill:hover { border-color: var(--accent); color: var(--accent); }
+button.pill.danger:hover { border-color: var(--danger, #b3261e); color: var(--danger, #b3261e); }
+.copy-bar { margin-top: .75rem; display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
+.copy-rows { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .35rem; width: 100%; }
+.copy-row { display: flex; align-items: center; gap: .6rem; padding: .4rem .6rem; border: 1px dashed var(--line); border-radius: var(--radius); background: var(--surface); }
+.copy-label { font-weight: 600; min-width: 22ch; }
+.copy-hours { width: 6.5rem; }
+#day-table tfoot th { text-align: left; }
+#day-table tfoot td { font-variant-numeric: tabular-nums; font-weight: 700; }
+
 /* ---- narrow: sidebar collapses to a top bar ---- */
 @media (max-width: 720px) {
   .app { flex-direction: column; }
