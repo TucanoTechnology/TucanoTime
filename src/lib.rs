@@ -12,6 +12,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 pub mod api;
 pub mod audit;
 pub mod auth;
+pub mod budgets;
 pub mod calendar;
 pub mod clock;
 pub mod domain;
@@ -90,6 +91,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/reports/summary", get(api::summary))
         .route("/reports/export.csv", get(api::export_csv))
         .route("/reports/profitability", get(api::profitability))
+        .route("/reports/budgets", get(api::budget_report))
         .route(
             "/categories",
             get(api::list_categories).post(api::create_category),

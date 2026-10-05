@@ -169,6 +169,12 @@ pub struct Project {
     /// The project's own hourly rate in minor units (required).
     pub rate_minor: u64,
     pub active: bool,
+    /// Optional total budget in hours (hundredths) (#30).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_hours: Option<u32>,
+    /// Optional total budget in minor units (#30).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_amount_minor: Option<u64>,
 }
 
 /// On-disk shape used only for reading. Pre-#11 project documents may omit
@@ -186,6 +192,10 @@ struct ProjectDoc {
     rate_minor: Option<u64>,
     #[serde(default = "default_active")]
     active: bool,
+    #[serde(default)]
+    budget_hours: Option<u32>,
+    #[serde(default)]
+    budget_amount_minor: Option<u64>,
 }
 
 impl ProjectDoc {
@@ -202,6 +212,8 @@ impl ProjectDoc {
             currency: self.currency.unwrap_or_else(|| customer.currency.clone()),
             rate_minor: self.rate_minor.unwrap_or(customer.default_rate_minor),
             active: self.active,
+            budget_hours: self.budget_hours,
+            budget_amount_minor: self.budget_amount_minor,
         }
     }
 }
@@ -881,6 +893,10 @@ pub struct ProjectInput {
     pub rate_minor: u64,
     #[serde(default = "default_active")]
     pub active: bool,
+    #[serde(default)]
+    pub budget_hours: Option<u32>,
+    #[serde(default)]
+    pub budget_amount_minor: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -985,6 +1001,8 @@ pub fn validate_project_input(input: &ProjectInput) -> Result<ProjectDraft, Vec<
             currency: input.currency.0.clone(),
             rate_minor: input.rate_minor,
             active: input.active,
+            budget_hours: input.budget_hours,
+            budget_amount_minor: input.budget_amount_minor,
         })
     } else {
         Err(errors)
@@ -1035,6 +1053,8 @@ pub struct ProjectDraft {
     pub currency: String,
     pub rate_minor: u64,
     pub active: bool,
+    pub budget_hours: Option<u32>,
+    pub budget_amount_minor: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -1214,6 +1234,8 @@ mod tests {
             currency: Currency("USD".into()),
             rate_minor: 3000,
             active: true,
+            budget_hours: None,
+            budget_amount_minor: None,
         };
         // Project value wins over customer default.
         assert_eq!(

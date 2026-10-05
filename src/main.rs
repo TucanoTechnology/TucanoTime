@@ -39,6 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(tucano_time::recurring::RecurringJob::new(
             state.store.clone(),
         )),
+        Arc::new(tucano_time::budgets::BudgetAlertJob::new(
+            state.store.clone(),
+        )),
     ];
     let scheduler = Arc::new(tucano_time::scheduler::Scheduler::new(
         std::path::Path::new(&data_dir),

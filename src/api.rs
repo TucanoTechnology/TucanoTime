@@ -1413,6 +1413,8 @@ fn build_project(cid: Uuid, draft: &crate::domain::ProjectDraft) -> Project {
         currency: Currency(draft.currency.clone()),
         rate_minor: draft.rate_minor,
         active: draft.active,
+        budget_hours: draft.budget_hours,
+        budget_amount_minor: draft.budget_amount_minor,
     }
 }
 
@@ -1820,6 +1822,27 @@ pub async fn profitability(
     let result =
         report::summarise_profit(&invoices, &expenses, &entries, &customers, &users, from, to);
     Ok(Json(result).into_response())
+}
+
+/// Budget burn vs budget for budgeted projects (#30).
+pub async fn budget_report(State(app): State<AppState>) -> ApiResult {
+    let customers = app.store.list_customers()?;
+    let mut projects = Vec::new();
+    let mut tasks = Vec::new();
+    for c in &customers {
+        for p in app.store.list_projects(c.id)? {
+            tasks.extend(app.store.list_tasks(c.id, &p.code.0)?);
+            projects.push((c.id, p));
+        }
+    }
+    let today = app.clock.today();
+    let entries = app.store.list_range(
+        today - chrono::Duration::days(crate::store::MAX_RANGE_DAYS),
+        today,
+    )?;
+    let users = app.store.list_users()?;
+    let rows = crate::budgets::burn_report(&projects, &entries, &customers, &tasks, &users);
+    Ok(Json(serde_json::json!({ "rows": rows })).into_response())
 }
 
 /// Route guard: reject with 401 unless a valid session cookie is present.
