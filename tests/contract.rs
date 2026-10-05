@@ -2272,3 +2272,35 @@ async fn schedule_crud_admin_only() {
         StatusCode::NO_CONTENT
     );
 }
+
+#[tokio::test]
+async fn budget_report_shows_burn() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(
+        &app,
+        cid,
+        "P1",
+        json!({"budget_hours": 1000, "budget_amount_minor": 60000}),
+    )
+    .await;
+    let (s, _) = json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(entry_body(cid, "P1", json!(6), "2026-10-02")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (sb, body) = json_req(&app, "GET", "/reports/budgets", None).await;
+    assert_eq!(sb, StatusCode::OK);
+    let rows = body["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["project"], "P1");
+    assert_eq!(rows[0]["burn_hours"], 6.0);
+    assert_eq!(rows[0]["hours_pct"], 60.0);
+    assert_eq!(rows[0]["over"], false);
+    assert_eq!(rows[0]["burn_amount_minor"], 36000);
+    assert_eq!(rows[0]["amount_pct"], 60.0);
+}

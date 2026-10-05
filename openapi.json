@@ -115,7 +115,9 @@
           "name": { "type": "string", "minLength": 1, "maxLength": 120 },
           "currency": { "$ref": "#/components/schemas/Currency" },
           "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean" }
+          "active": { "type": "boolean" },
+          "budget_hours": { "type": ["integer", "null"], "minimum": 1, "description": "Total budget in hundredths of an hour (#30)" },
+          "budget_amount_minor": { "type": ["integer", "null"], "minimum": 1 }
         },
         "additionalProperties": false
       },
@@ -127,7 +129,9 @@
           "name": { "type": "string", "maxLength": 120, "default": "" },
           "currency": { "$ref": "#/components/schemas/Currency" },
           "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean", "default": true }
+          "active": { "type": "boolean", "default": true },
+          "budget_hours": { "type": ["integer", "null"], "minimum": 1 },
+          "budget_amount_minor": { "type": ["integer", "null"], "minimum": 1 }
         },
         "additionalProperties": false
       },
@@ -994,6 +998,16 @@
         "responses": {
           "200": { "description": "CSV document (formula-injection escaped).", "content": { "text/csv": { "schema": { "type": "string" } } } },
           "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/reports/budgets": {
+      "get": {
+        "operationId": "budgetReport",
+        "tags": ["reports"],
+        "summary": "Budget burn vs budget for budgeted projects (#30)",
+        "responses": {
+          "200": { "description": "Budget rows.", "content": { "application/json": { "schema": { "type": "object", "required": ["rows"], "properties": { "rows": { "type": "array", "items": { "type": "object", "required": ["customer", "project", "currency", "budget_hours", "burn_hours", "hours_pct", "budget_amount_minor", "burn_amount_minor", "amount_pct", "over"], "properties": { "customer": { "type": "string" }, "project": { "type": "string" }, "currency": { "type": "string" }, "budget_hours": { "type": ["number", "null"] }, "burn_hours": { "type": "number" }, "hours_pct": { "type": ["number", "null"] }, "budget_amount_minor": { "type": ["integer", "null"] }, "burn_amount_minor": { "type": "integer" }, "amount_pct": { "type": ["number", "null"] }, "over": { "type": "boolean" } }, "additionalProperties": false } } }, "additionalProperties": false } } } }
         }
       }
     },
