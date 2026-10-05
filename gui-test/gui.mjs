@@ -224,9 +224,10 @@ check('week grid renders the ACME / P-9 row', wkRowText.includes('ACME') && wkRo
 const cellOf = (date) => window.document.querySelector(`#week-table input.cell-input[data-date="${date}"]`);
 const filledCell = cellOf('2026-11-11');
 check('filled cell is an editable input holding 4.25', filledCell && filledCell.value === '4.25');
-check('week row total is 4.25', wkRows[0].querySelector('.row-total').textContent.trim() === '4.25');
-const dayTotals = [...window.document.querySelectorAll('#week-table tfoot .day-total')];
-check('day totals row sums the week', dayTotals.length === 7 && dayTotals.reduce((a, t) => a + Number(t.textContent), 0) === 4.25);
+check('week row total is H:MM', wkRows[0].querySelector('.row-total').textContent.trim() === '4:15');
+const dayTotals = [...window.document.querySelectorAll('#week-table tfoot .day-total')].map((t) => t.textContent.trim());
+check('day totals row renders H:MM per day', dayTotals.length === 7 && dayTotals[2] === '4:15' && dayTotals.filter((t) => t !== '4:15').every((t) => t === '0'));
+check('week total footer is H:MM', window.document.querySelector('#week-table tfoot .week-total').textContent.trim() === '4:15');
 
 // Inline save: type into the empty 2026-11-09 cell and blur -> POST.
 const emptyCell = cellOf('2026-11-09');
@@ -235,7 +236,7 @@ emptyCell.dispatchEvent(new window.Event('focusout', { bubbles: true }));
 await tick(400);
 const sep9 = await (await fetch(BASE + '/entries?date=2026-11-09')).json();
 check('inline cell save created an entry via POST', sep9.entries.some((e) => e.hours === 2.5 && e.project_code === 'P-9'));
-check('row total updated to 6.75 after inline save', window.document.querySelector('#week-table tbody tr .row-total').textContent.trim() === '6.75');
+check('row total updated to 6:45 after inline save', window.document.querySelector('#week-table tbody tr .row-total').textContent.trim() === '6:45');
 
 // Clear-to-delete: blank the same cell and blur -> confirm + DELETE.
 const savedCell = cellOf('2026-11-09');
@@ -263,7 +264,7 @@ window.document.getElementById('ts-week').dispatchEvent(new window.Event('click'
 
 // Add row + copy-last-week controls exist.
 check('add-row control present', !!window.document.getElementById('week-add-row'));
-check('copy-last-week control present', !!window.document.getElementById('week-copy-last'));
+check('copy-from-week dropdown present', !!window.document.getElementById('week-copy-weeks'));
 
 // ---- PROJECT FORM: prefill from customer + required currency/rate (#11) ----
 const tabCust = window.document.getElementById('tab-customers');
@@ -455,13 +456,15 @@ weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
 await tick(300);
 
 // Copy last week's project rows into an empty week (MKT-2 has 2026-12-01).
-window.document.getElementById('week-copy-last').dispatchEvent(new window.Event('click', { bubbles: true }));
+const copyWeeks = window.document.getElementById('week-copy-weeks');
+copyWeeks.value = '1';
+copyWeeks.dispatchEvent(new window.Event('change', { bubbles: true }));
 await tick(400);
 const wkBody = window.document.querySelector('#week-table tbody');
 const copiedRow = [...wkBody.querySelectorAll('tr')].find((r) => r.textContent.includes('MKT-2'));
 check('copy-from-last-week added the MKT-2 row', !!copiedRow);
 check('copied row starts empty', !!copiedRow && [...copiedRow.querySelectorAll('input.cell-input')].every((i) => i.value === ''));
-check('copied row total is 0.00', copiedRow && copiedRow.querySelector('.row-total').textContent.trim() === '0.00');
+check('copied row total is 0:00', copiedRow && copiedRow.querySelector('.row-total').textContent.trim() === '0:00');
 
 // Add row control reveals the project picker and appends a new row.
 window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));

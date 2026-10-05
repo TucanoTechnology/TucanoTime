@@ -763,14 +763,22 @@ async function refreshWeek() {
 
   const htr = el('tr', {}, [
     el('th', { attrs: { scope: 'col' }, text: 'Project' }),
-    ...days.map((d) =>
-      el('th', {
-        attrs: { scope: 'col' },
-        cls: d === today ? 'today' : '',
-        data: { date: d },
-        text: `◷ ${new Date(d).toUTCString().slice(0, 3)} ${d.slice(8)}`,
-      }),
-    ),
+    ...days.map((d) => {
+      const [yy, mm, dd] = d.split('-').map(Number);
+      return el(
+        'th',
+        {
+          attrs: { scope: 'col' },
+          cls: d === today ? 'today' : '',
+          data: { date: d },
+        },
+        [
+          el('span', { cls: 'wk-clock', text: '◷', attrs: { 'aria-hidden': 'true' } }),
+          el('span', { cls: 'wk-dow', text: new Date(d).toUTCString().slice(0, 3) }),
+          el('span', { cls: 'wk-date', text: `${dd} ${MONTH_NAMES[mm - 1]}` }),
+        ],
+      );
+    }),
     el('th', { attrs: { scope: 'col' }, cls: 'num', text: 'Week' }),
   ]);
   table.appendChild(el('thead', {}, [htr]));
@@ -785,6 +793,8 @@ async function refreshWeek() {
   for (const row of sorted) {
     let weekTotal = 0;
     let anyLocked = false;
+    const projects = state.projectsByCustomer[row.customer_id] || [];
+    const projName = projects.find((p) => p.code === row.project_code);
     const cells = days.map((d, i) => {
       const hundredths = row.cells[d];
       const ids = row.ids[d] || [];
@@ -837,11 +847,23 @@ async function refreshWeek() {
       { cls: anyLocked ? 'has-lock' : '' },
       [
         el('th', { attrs: { scope: 'row' }, cls: 'row-band' }, [
-          el('div', { cls: 'entry-project', text: row.project_code }),
+          el('div', {
+            cls: 'entry-project',
+            text: projName ? `${row.project_code} — ${projName.name}` : row.project_code,
+          }),
           el('div', { cls: 'entry-customer', text: customerName(row.customer_id) }),
         ]),
         ...cells,
-        el('td', { cls: 'num row-total', text: (weekTotal / 100).toFixed(2) }),
+        el('td', { cls: 'num row-total' }, [
+          el('span', { text: fmtHM(weekTotal) }),
+          anyLocked
+            ? el('span', {
+                cls: 'lock',
+                text: '🔒',
+                attrs: { 'aria-label': 'locked', title: 'This row holds locked entries' },
+              })
+            : null,
+        ]),
       ],
     );
     tbody.appendChild(tr);
@@ -850,8 +872,8 @@ async function refreshWeek() {
 
   const grandRow = el('tr', {}, [
     el('th', { attrs: { scope: 'row' }, text: 'Day totals' }),
-    ...dayTotals.map((t) => el('td', { cls: 'num day-total', text: t ? (t / 100).toFixed(2) : '0' })),
-    el('td', { cls: 'num week-total', text: (dayTotals.reduce((a, b) => a + b, 0) / 100).toFixed(2) }),
+    ...dayTotals.map((t) => el('td', { cls: 'num day-total', text: t ? fmtHM(t) : '0' })),
+    el('td', { cls: 'num week-total', text: fmtHM(dayTotals.reduce((a, b) => a + b, 0)) }),
   ]);
   table.appendChild(el('tfoot', {}, [grandRow]));
 
@@ -971,8 +993,8 @@ function addWeekRow(customerId, projectCode) {
   }
 }
 
-async function copyLastWeek() {
-  const start = addDays($('week-date').value, -7);
+async function copyLastWeek(weeksAgo = 1) {
+  const start = addDays($('week-date').value, -7 * weeksAgo);
   const end = addDays(start, 6);
   try {
     const data = await api.get(`/entries?from=${start}&to=${end}`);
@@ -987,7 +1009,7 @@ async function copyLastWeek() {
       added += weekState.extraRows.length - before;
     }
     await refreshWeek();
-    announce(`Copied ${seen.size} project row(s) from last week — enter hours to save.`);
+    announce(`Copied ${seen.size} project row(s) from ${start} — enter hours to save.`);
   } catch (err) {
     announce(`Copy failed: ${err.message}`);
   }
@@ -2128,6 +2150,22 @@ async function startApp() {
   $('week-date').addEventListener('change', () => refreshWeek());
   $('week-prev').addEventListener('click', () => navigateWeek(-1));
   $('week-next').addEventListener('click', () => navigateWeek(1));
+  $('week-today').addEventListener('click', () => {
+    $('week-date').value = isoDate(new Date());
+    refreshWeek();
+  });
+  // Copy-from-N-weeks dropdown (#109): choosing an offset runs the copy.
+  fillSelect(
+    $('week-copy-weeks'),
+    [1, 2, 3, 4].map((n) => ({
+      value: String(n),
+      text: n === 1 ? 'Copy from last week (projects only)' : `Copy from ${n} weeks ago (projects only)`,
+      selected: n === 1,
+    })),
+  );
+  $('week-copy-weeks').addEventListener('change', () =>
+    copyLastWeek(Number($('week-copy-weeks').value) || 1),
+  );
   $('week-track').addEventListener('click', async () => {
     const today = isoDate(new Date());
     const days = weekState.days.length === 7 ? weekState.days : [today];
@@ -2149,7 +2187,6 @@ async function startApp() {
     await refreshWeek();
     announce(`Row added for ${code} — type hours to save.`);
   });
-  $('week-copy-last').addEventListener('click', copyLastWeek);
 
   $('customer-form').addEventListener('submit', saveCustomer);
   $('customer-cancel').addEventListener('click', cancelCustomerEdit);
