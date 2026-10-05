@@ -33,9 +33,8 @@ window.fetch = (input, init = {}) => {
   const url = typeof input === 'string' && input.startsWith('/') ? BASE + input : input;
   return fetch(url, init);
 };
-window.confirm = () => true;
-window.alert = () => {};
-window.prompt = () => '';
+// No window.confirm/prompt/alert stubs: the app drives one inline <dialog>
+// (#102) and the checks below exercise it like a user would.
 if (!window.Element.prototype.scrollIntoView) window.Element.prototype.scrollIntoView = () => {};
 
 // --- authenticate + seed against the live server (fresh data dir) ---
@@ -105,6 +104,44 @@ check('day total reflects 4.25h', totals.trim() === '4.25');
 // ---- live region announced the success (accessibility) ----
 const live = window.document.getElementById('live-region').textContent;
 check('aria-live region announced an add', /added|updated/i.test(live));
+
+// ---- inline <dialog> (#102): delete confirms through it, cancel keeps ----
+const dlgNode = window.document.getElementById('app-dialog');
+const isOpen = () => dlgNode.open === true || dlgNode.hasAttribute('open');
+const dayRow0 = window.document.querySelector('#day-table tbody tr');
+const dlgDel = [...dayRow0.querySelectorAll('button')].find((b) => b.textContent === 'Delete');
+dlgDel.dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(120);
+check('delete click opens the inline dialog', isOpen());
+check(
+  'dialog message names the entry being deleted',
+  /Delete this entry \(4\.25h on P-9\)/.test(window.document.getElementById('dlg-message').textContent),
+);
+window.document.getElementById('dlg-cancel').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(120);
+check('dialog closes on cancel', !isOpen());
+const kept = await (await fetch(BASE + '/entries?date=2026-11-11')).json();
+check('cancel keeps the entry (nothing deleted)', kept.entries.some((e) => e.id === made.id));
+// Confirm path: same flow, OK accepts and the entry disappears.
+dlgDel.dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(120);
+window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(400);
+const gone = await (await fetch(BASE + '/entries?date=2026-11-11')).json();
+check('confirming in the dialog deletes the entry', !gone.entries.some((e) => e.id === made.id));
+// Restore the entry (later checks assert the 4.25h day) and re-render.
+await postJson('/entries', {
+  date: '2026-11-11',
+  customer_id: acmeOpt.value,
+  project_code: 'P-9',
+  hours: 4.25,
+  note: 'gui-test entry',
+  billable: true,
+});
+window.document.getElementById('day-prev').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(150);
+window.document.getElementById('day-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
 
 // ---- DAY REDESIGN (#12): row structure, week strip, navigator, copy-forward ----
 const mainCell = rows[0].querySelector('.entry-main');
@@ -203,6 +240,13 @@ const savedCell = cellOf('2026-11-09');
 check('cleared cell re-rendered with the saved value', savedCell && savedCell.value === '2.50');
 savedCell.value = '';
 savedCell.dispatchEvent(new window.Event('focusout', { bubbles: true }));
+await tick(150);
+check(
+  'clearing a cell asks for confirmation in the dialog',
+  window.document.getElementById('app-dialog').open === true
+    || window.document.getElementById('app-dialog').hasAttribute('open'),
+);
+window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(400);
 const sep9b = await (await fetch(BASE + '/entries?date=2026-11-09')).json();
 check('clearing the cell deleted the entry', sep9b.entries.every((e) => e.hours !== 2.5));
@@ -326,6 +370,15 @@ if (payBtn) {
   await tick(300);
   const liveTxt = window.document.getElementById('live-region').textContent;
   check('Pay link announces a checkout URL', /checkout link: https:\/\//i.test(liveTxt));
+  // The URL is offered for copying in the prompt dialog (#102), not window.prompt.
+  const payDlgOpen = window.document.getElementById('app-dialog').open === true
+    || window.document.getElementById('app-dialog').hasAttribute('open');
+  check(
+    'Pay link offers the URL in the input dialog',
+    payDlgOpen && window.document.getElementById('dlg-input').value.startsWith('https://'),
+  );
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(100);
   // A signed webhook (fake-mode Stripe, signature ignored) marks the invoice paid.
   const chk = await (await fetch(`${BASE}/invoices/${acmeInv.id}/checkout`, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ provider: 'stripe' }) })).json();
   const whBody = JSON.stringify({ type: 'checkout.session.completed', payment_status: 'paid', amount_minor: 9500, currency: 'EUR', client_reference_id: chk.reference, metadata: { invoice_number: acmeInv.number } });

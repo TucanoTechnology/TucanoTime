@@ -8,6 +8,7 @@
 // directories by a validated `YYYY-MM-DD` date and entry files by `Uuid`.
 // Traversal input therefore cannot reach the filesystem.
 
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -360,6 +361,99 @@ impl Store {
         Ok(())
     }
 
+    // ---------------------------------------------------------- side indexes --
+    //
+    // Two full scans had crept onto hot paths (review D3): payment webhooks
+    // resolve invoices by human number, and login/SSO resolve users by email.
+    // Both are dot-file maps maintained under the same write lock as the
+    // documents they index — crash-safe tmp+rename via `write_json`, skipped
+    // by `dir_entries` so an index is never mistaken for a document. A
+    // missing or stale index never loses data: reads verify the fast path
+    // against the document itself, fall back to the old scan, and self-heal.
+
+    fn invoice_index_path(&self) -> PathBuf {
+        self.root.join("invoices").join(".idx.numbers.json")
+    }
+
+    fn email_index_path(&self) -> PathBuf {
+        self.root.join("users").join(".idx.emails.json")
+    }
+
+    /// Map `number -> id` for one invoice. The caller holds the write lock.
+    fn index_invoice_locked(&self, invoice: &Invoice) -> Result<(), StoreError> {
+        let path = self.invoice_index_path();
+        let mut idx: HashMap<String, String> = read_json(&path)?.unwrap_or_default();
+        let id = invoice.id.to_string();
+        idx.retain(|_, v| v != &id);
+        idx.insert(invoice.number.clone(), id);
+        write_json(&path, &idx)
+    }
+
+    /// Drop a deleted invoice from the index (its number is never recycled,
+    /// review B3 — the entry simply disappears with the document).
+    fn unindex_invoice_locked(&self, id: &str) -> Result<(), StoreError> {
+        let path = self.invoice_index_path();
+        if let Some(mut idx) = read_json::<HashMap<String, String>>(&path)? {
+            idx.retain(|_, v| v != id);
+            write_json(&path, &idx)?;
+        }
+        Ok(())
+    }
+
+    /// Rebuild the whole number index from the documents (self-heal after a
+    /// pre-index data dir or detected drift). Duplicate numbers (a restored
+    /// file) resolve to the earliest-created invoice, matching the scan.
+    fn rebuild_invoice_index(&self) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let mut best: HashMap<String, (String, chrono::DateTime<chrono::Utc>)> = HashMap::new();
+        for inv in self.list_invoices()? {
+            match best.get(&inv.number) {
+                Some((_, at)) if *at <= inv.created_at => {}
+                _ => {
+                    best.insert(inv.number.clone(), (inv.id.to_string(), inv.created_at));
+                }
+            }
+        }
+        let idx: HashMap<String, String> = best
+            .into_iter()
+            .map(|(number, (id, _))| (number, id))
+            .collect();
+        std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
+        write_json(&self.invoice_index_path(), &idx)
+    }
+
+    /// Map `email(lower) -> id` for one user. The caller holds the write lock.
+    fn index_user_locked(&self, user: &User) -> Result<(), StoreError> {
+        let path = self.email_index_path();
+        let mut idx: HashMap<String, String> = read_json(&path)?.unwrap_or_default();
+        let id = user.id.to_string();
+        idx.retain(|_, v| v != &id);
+        idx.insert(user.email.to_lowercase(), id);
+        write_json(&path, &idx)
+    }
+
+    fn unindex_user_locked(&self, id: &str) -> Result<(), StoreError> {
+        let path = self.email_index_path();
+        if let Some(mut idx) = read_json::<HashMap<String, String>>(&path)? {
+            idx.retain(|_, v| v != id);
+            write_json(&path, &idx)?;
+        }
+        Ok(())
+    }
+
+    fn rebuild_email_index(&self) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let mut idx: HashMap<String, String> = HashMap::new();
+        for u in self.list_users()? {
+            // list_users is name-sorted; the scan's first match wins, so keep
+            // the first insertion per address.
+            idx.entry(u.email.to_lowercase())
+                .or_insert_with(|| u.id.to_string());
+        }
+        std::fs::create_dir_all(self.doc_dir::<User>())?;
+        write_json(&self.email_index_path(), &idx)
+    }
+
     // ---------------------------------------------------------------- users --
 
     pub fn list_users(&self) -> Result<Vec<User>, StoreError> {
@@ -377,18 +471,41 @@ impl Store {
     }
 
     pub fn get_user_by_email(&self, email: &str) -> Result<Option<User>, StoreError> {
-        Ok(self
+        // Fast path: the email side index, verified against the document.
+        if let Some(id) =
+            read_json::<HashMap<String, String>>(&self.email_index_path())?.and_then(|idx| {
+                idx.get(&email.to_lowercase())
+                    .and_then(|s| Uuid::parse_str(s).ok())
+            })
+            && let Some(user) = self.get_user(id)?
+            && user.email.eq_ignore_ascii_case(email)
+        {
+            return Ok(Some(user));
+        }
+        // The scan stays authoritative (pre-index dirs, restored docs, drift).
+        let found = self
             .list_users()?
             .into_iter()
-            .find(|u| u.email.eq_ignore_ascii_case(email)))
+            .find(|u| u.email.eq_ignore_ascii_case(email));
+        // Reaching a hit through the scan means the fast path missed while a
+        // matching document exists: the index is absent or stale — heal it.
+        if found.is_some() {
+            self.rebuild_email_index()?;
+        }
+        Ok(found)
     }
 
     pub fn put_user(&self, user: &User) -> Result<(), StoreError> {
-        self.put_doc(user)
+        let _guard = self.write_lock()?;
+        std::fs::create_dir_all(self.doc_dir::<User>())?;
+        write_json(&self.doc_path::<User>(&user.id.to_string()), user)?;
+        self.index_user_locked(user)
     }
 
     pub fn delete_user(&self, id: Uuid) -> Result<(), StoreError> {
-        self.remove_doc::<User>(&id.to_string())
+        let _guard = self.write_lock()?;
+        self.remove_doc_locked::<User>(&id.to_string())?;
+        self.unindex_user_locked(&id.to_string())
     }
 
     // ------------------------------------------------------------- invoices --
@@ -409,8 +526,20 @@ impl Store {
 
     /// First invoice with this number (numbers are sequential but a restored
     /// file could duplicate one; the earliest wins). Used by payment webhooks
-    /// (#34), which know the invoice by its human number.
+    /// (#34), which know the invoice by its human number: the number index
+    /// turns that scan into one lookup (#102).
     pub fn find_invoice_by_number(&self, number: &str) -> Result<Option<Invoice>, StoreError> {
+        let idx = read_json::<HashMap<String, String>>(&self.invoice_index_path())?;
+        if let Some(id) = idx
+            .as_ref()
+            .and_then(|m| m.get(number))
+            .and_then(|s| Uuid::parse_str(s).ok())
+            && let Some(invoice) = self.get_invoice(id)?
+            && invoice.number == number
+        {
+            return Ok(Some(invoice));
+        }
+        // Authoritative scan (also covers an absent or drifted index).
         let mut found: Option<Invoice> = None;
         for inv in self.list_invoices()? {
             if inv.number == number && found.as_ref().is_none_or(|f| inv.created_at < f.created_at)
@@ -418,15 +547,24 @@ impl Store {
                 found = Some(inv);
             }
         }
+        // A hit through the scan means the fast path missed: rebuild.
+        if found.is_some() {
+            self.rebuild_invoice_index()?;
+        }
         Ok(found)
     }
 
     pub fn put_invoice(&self, invoice: &Invoice) -> Result<(), StoreError> {
-        self.put_doc(invoice)
+        let _guard = self.write_lock()?;
+        std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
+        write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), invoice)?;
+        self.index_invoice_locked(invoice)
     }
 
     pub fn delete_invoice(&self, id: Uuid) -> Result<(), StoreError> {
-        self.remove_doc::<Invoice>(&id.to_string())
+        let _guard = self.write_lock()?;
+        self.remove_doc_locked::<Invoice>(&id.to_string())?;
+        self.unindex_invoice_locked(&id.to_string())
     }
 
     /// Atomically assign the next invoice number and persist under one writer
@@ -1032,7 +1170,8 @@ impl Store {
         if !self.list_users()?.is_empty() {
             return Err(StoreError::AlreadyExists("initialised".into()));
         }
-        write_json(&self.doc_path::<User>(&user.id.to_string()), user)
+        write_json(&self.doc_path::<User>(&user.id.to_string()), user)?;
+        self.index_user_locked(user)
     }
 
     /// Number + persist an invoice with the lock **already** held.
@@ -1044,6 +1183,7 @@ impl Store {
         write_json(&seq_path, &n)?;
         invoice.number = format!("INV-{n:04}");
         write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), &invoice)?;
+        self.index_invoice_locked(&invoice)?;
         Ok(invoice)
     }
 }
@@ -1297,5 +1437,126 @@ mod txn_tests {
             })
             .unwrap();
         assert_eq!(out, vec![1, 2]);
+    }
+}
+
+#[cfg(test)]
+mod index_tests {
+    use super::*;
+    use crate::domain::{Invoice, InvoiceStatus};
+    use chrono::TimeZone;
+
+    fn user(email: &str) -> User {
+        User {
+            id: Uuid::new_v4(),
+            name: "U".into(),
+            email: email.into(),
+            role: crate::auth::Role::Member,
+            active: true,
+            default_rate_minor: 0,
+            cost_rate_minor: 0,
+            password_hash: String::new(),
+            created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+        }
+    }
+
+    fn draft() -> Invoice {
+        Invoice {
+            id: Uuid::new_v4(),
+            number: String::new(),
+            customer_id: Uuid::new_v4(),
+            currency: crate::domain::Currency("EUR".into()),
+            period_from: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            period_to: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+            lines: vec![],
+            total_minor: 0,
+            status: InvoiceStatus::Draft,
+            created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+            issued_at: None,
+            due_date: None,
+            paid_at: None,
+            payment_reference: String::new(),
+        }
+    }
+
+    #[test]
+    fn email_index_serves_lookup_and_self_heals() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let u = user("someone@Example.ORG");
+        store.put_user(&u).unwrap();
+        // Fast path (also case-insensitive).
+        assert_eq!(
+            store
+                .get_user_by_email("someone@example.org")
+                .unwrap()
+                .unwrap()
+                .id,
+            u.id
+        );
+        // Simulate a pre-index data dir: the scan still finds the user and
+        // the index is rebuilt.
+        std::fs::remove_file(store.root.join("users").join(".idx.emails.json")).unwrap();
+        assert_eq!(
+            store
+                .get_user_by_email("someone@example.org")
+                .unwrap()
+                .unwrap()
+                .id,
+            u.id
+        );
+        assert!(store.root.join("users").join(".idx.emails.json").exists());
+        // Delete unindexes; unknown email stays None without rebuilding churn.
+        store.delete_user(u.id).unwrap();
+        assert!(
+            store
+                .get_user_by_email("someone@example.org")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn invoice_number_index_find_create_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let a = store.create_invoice(draft()).unwrap();
+        assert_eq!(a.number, "INV-0001");
+        assert_eq!(
+            store
+                .find_invoice_by_number("INV-0001")
+                .unwrap()
+                .unwrap()
+                .id,
+            a.id
+        );
+        assert!(store.find_invoice_by_number("INV-0002").unwrap().is_none());
+        // The index dot file is never mistaken for an invoice document.
+        assert_eq!(store.list_invoices().unwrap().len(), 1);
+        // Delete drops the mapping; a deleted number is not recycled anyway.
+        store.delete_invoice(a.id).unwrap();
+        assert!(store.find_invoice_by_number("INV-0001").unwrap().is_none());
+        // Pre-index directory shape: rebuild happens on first hit.
+        let b = store.create_invoice(draft()).unwrap();
+        std::fs::remove_file(store.root.join("invoices").join(".idx.numbers.json")).unwrap();
+        assert_eq!(
+            store.find_invoice_by_number(&b.number).unwrap().unwrap().id,
+            b.id
+        );
+        assert!(
+            store
+                .root
+                .join("invoices")
+                .join(".idx.numbers.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn bootstrap_indexes_the_first_admin() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        store.put_user_if_none(&user("admin@x.co")).unwrap();
+        assert!(store.get_user_by_email("admin@x.co").unwrap().is_some());
     }
 }

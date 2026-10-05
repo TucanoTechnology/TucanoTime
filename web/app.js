@@ -34,6 +34,122 @@ const api = {
 
 const $ = (id) => document.getElementById(id);
 
+// ---------------------------------------------------------------- helpers --
+//
+// `el` replaces the hand-rolled `createElement` chains the renderers copied
+// around (#102): ~350 lines of identical boilerplate become one builder. As
+// everywhere in this file, values enter the DOM through `textContent` only —
+// never innerHTML.
+
+function el(tag, opts = {}, children = []) {
+  const node = document.createElement(tag);
+  if (opts.cls) node.className = opts.cls;
+  if (opts.text !== undefined) node.textContent = opts.text;
+  if (opts.type) node.type = opts.type;
+  if (opts.value !== undefined) node.value = opts.value;
+  if (opts.attrs) {
+    for (const [k, v] of Object.entries(opts.attrs)) node.setAttribute(k, v);
+  }
+  if (opts.data) {
+    for (const [k, v] of Object.entries(opts.data)) node.dataset[k] = v;
+  }
+  if (opts.on) {
+    for (const [evt, fn] of Object.entries(opts.on)) node.addEventListener(evt, fn);
+  }
+  for (const child of [].concat(children)) if (child) node.appendChild(child);
+  return node;
+}
+
+// The shared select-refill pattern: clear, then append options described as
+// `{ value, text, selected }`. Selection happens by property, as before.
+function fillSelect(select, options) {
+  select.textContent = '';
+  for (const o of options) {
+    const opt = el('option', { value: o.value, text: o.text });
+    if (o.selected) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
+// ---------------------------------------------------------------- dialogs --
+//
+// One inline <dialog> replaces window.confirm/prompt/alert (#102): focus is
+// trapped by the native element, Enter accepts, Escape cancels, and the jsdom
+// harness drives the same buttons a real user sees. Resolution is wired to
+// the buttons directly (no `method="dialog"`), so behaviour does not depend
+// on the host implementing dialog form submission.
+
+function dlgSettle(result) {
+  const dlg = $('app-dialog');
+  const resolve = dlg.__resolve;
+  if (!resolve) return; // already settled (button + Escape race)
+  dlg.__resolve = null;
+  if (typeof dlg.close === 'function') dlg.close();
+  else dlg.removeAttribute('open');
+  resolve(result);
+}
+
+function showDialog({ title, message, input = null, value = '', okLabel = 'OK', cancelLabel = null }) {
+  return new Promise((resolve) => {
+    $('dlg-title').textContent = title;
+    $('dlg-message').textContent = message;
+    const wrap = $('dlg-input-wrap');
+    wrap.hidden = !input;
+    if (input) $('dlg-input-label').textContent = input;
+    $('dlg-input').value = value;
+    const ok = $('dlg-ok');
+    ok.textContent = okLabel;
+    const cancel = $('dlg-cancel');
+    cancel.textContent = cancelLabel || 'Cancel';
+    cancel.hidden = !cancelLabel;
+    const dlg = $('app-dialog');
+    dlg.__resolve = resolve;
+    dlg.__inputMode = !!input;
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    else dlg.setAttribute('open', ''); // jsdom fallback: no modal support yet
+    (input ? $('dlg-input') : ok).focus();
+  });
+}
+
+function askConfirm(message, okLabel = 'Confirm') {
+  return showDialog({
+    title: 'Please confirm',
+    message,
+    okLabel,
+    cancelLabel: 'Cancel',
+  }).then((r) => r === 'ok');
+}
+
+// Resolves with the typed string, or null when cancelled (like prompt()).
+function askPrompt(message, defaultValue = '') {
+  return showDialog({ title: 'Input', message, input: message, value: defaultValue }).then(
+    (r) => (r === 'cancel' ? null : r),
+  );
+}
+
+function askAlert(message) {
+  return showDialog({ title: 'Notice', message });
+}
+
+function initDialog() {
+  const dlg = $('app-dialog');
+  $('dlg-ok').addEventListener('click', () => {
+    dlgSettle(dlg.__inputMode ? $('dlg-input').value : 'ok');
+  });
+  // The promise always resolves with a settle MARKER; `askConfirm` maps it to
+  // a boolean and `askPrompt` maps it to null-on-cancel, so a cancel marker
+  // can never collide with a falsy user value.
+  $('dlg-cancel').addEventListener('click', () => dlgSettle('cancel'));
+  dlg.addEventListener('cancel', () => dlgSettle('cancel')); // native Escape
+  dlg.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') dlgSettle('cancel'); // hosts without dialog keyboard
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      $('dlg-ok').click();
+    }
+  });
+}
+
 function announce(msg) {
   $('live-region').textContent = msg;
 }
@@ -105,63 +221,47 @@ function customerName(id) {
 // ------------------------------------------------------------- customer ---
 
 function fillCustomerSelect(select, selectedId, includePlaceholder) {
-  select.textContent = '';
-  if (includePlaceholder) {
-    const ph = document.createElement('option');
-    ph.value = '';
-    ph.textContent = 'Choose a customer…';
-    select.appendChild(ph);
-  }
-  for (const c of state.customers) {
-    const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.active ? c.name : `${c.name} (inactive)`;
-    if (c.id === selectedId) opt.selected = true;
-    select.appendChild(opt);
-  }
+  const opts = state.customers.map((c) => ({
+    value: c.id,
+    text: c.active ? c.name : `${c.name} (inactive)`,
+    selected: c.id === selectedId,
+  }));
+  if (includePlaceholder) opts.unshift({ value: '', text: 'Choose a customer…' });
+  fillSelect(select, opts);
 }
 
 async function fillProjectSelect(select, customerId, selectedCode) {
-  select.textContent = '';
   if (!customerId) {
-    const ph = document.createElement('option');
-    ph.value = '';
-    ph.textContent = 'Choose a customer first…';
-    select.appendChild(ph);
+    fillSelect(select, [{ value: '', text: 'Choose a customer first…' }]);
     return;
   }
   const projects = await loadProjects(customerId);
-  const ph = document.createElement('option');
-  ph.value = '';
-  ph.textContent = 'Choose a project…';
-  select.appendChild(ph);
-  for (const p of projects) {
-    const opt = document.createElement('option');
-    opt.value = p.code;
-    opt.textContent = p.active ? `${p.code} — ${p.name}` : `${p.code} — ${p.name} (inactive)`;
-    if (p.code === selectedCode) opt.selected = true;
-    select.appendChild(opt);
-  }
+  fillSelect(select, [
+    { value: '', text: 'Choose a project…' },
+    ...projects.map((p) => ({
+      value: p.code,
+      text: p.active ? `${p.code} — ${p.name}` : `${p.code} — ${p.name} (inactive)`,
+      selected: p.code === selectedCode,
+    })),
+  ]);
 }
 
 // Loads a project's tasks into the given select, with a leading "None".
 async function fillTaskSelect(select, customerId, projectCode, selectedCode) {
-  select.textContent = '';
-  const ph = document.createElement('option');
-  ph.value = '';
-  ph.textContent = projectCode ? 'None' : 'Choose a project first…';
-  select.appendChild(ph);
-  if (!customerId || !projectCode) return;
-  const data = await api.get(
-    `/customers/${customerId}/projects/${encodeURIComponent(projectCode)}/tasks`,
-  );
-  for (const t of data.tasks || []) {
-    const opt = document.createElement('option');
-    opt.value = t.code;
-    opt.textContent = t.active ? `${t.code} — ${t.name}` : `${t.code} — ${t.name} (inactive)`;
-    if (t.code === selectedCode) opt.selected = true;
-    select.appendChild(opt);
+  const opts = [{ value: '', text: projectCode ? 'None' : 'Choose a project first…' }];
+  if (customerId && projectCode) {
+    const data = await api.get(
+      `/customers/${customerId}/projects/${encodeURIComponent(projectCode)}/tasks`,
+    );
+    for (const t of data.tasks || []) {
+      opts.push({
+        value: t.code,
+        text: t.active ? `${t.code} — ${t.name}` : `${t.code} — ${t.name} (inactive)`,
+        selected: t.code === selectedCode,
+      });
+    }
   }
+  fillSelect(select, opts);
 }
 
 // ---------------------------------------------------------------- tabs ---
@@ -236,27 +336,29 @@ async function refreshWeekStrip() {
   strip.textContent = '';
   for (let i = 0; i < 7; i += 1) {
     const date = addDays(start, i);
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'ws-day' + (date === d ? ' selected' : '');
-    btn.dataset.date = date;
-    if (date === d) btn.setAttribute('aria-current', 'date');
-    const name = document.createElement('span');
-    name.className = 'ws-name';
     const [y, m, dd] = date.split('-').map(Number);
-    name.textContent = `${new Date(Date.UTC(y, m - 1, dd)).toUTCString().slice(0, 3)} ${dd}`;
-    const tot = document.createElement('span');
-    tot.className = 'ws-total num';
-    tot.textContent = fmtHM(totals[date] || 0);
-    btn.append(name, tot);
-    btn.addEventListener('click', () => selectDay(date));
-    strip.appendChild(btn);
+    strip.appendChild(
+      el(
+        'button',
+        {
+          type: 'button',
+          cls: 'ws-day' + (date === d ? ' selected' : ''),
+          data: { date },
+          attrs: date === d ? { 'aria-current': 'date' } : {},
+          on: { click: () => selectDay(date) },
+        },
+        [
+          el('span', {
+            cls: 'ws-name',
+            text: `${new Date(Date.UTC(y, m - 1, dd)).toUTCString().slice(0, 3)} ${dd}`,
+          }),
+          el('span', { cls: 'ws-total num', text: fmtHM(totals[date] || 0) }),
+        ],
+      ),
+    );
   }
-  const wk = document.createElement('span');
-  wk.className = 'ws-week num';
   const sum = Object.values(totals).reduce((a, b) => a + b, 0);
-  wk.textContent = `Week total ${fmtHM(sum)}`;
-  strip.appendChild(wk);
+  strip.appendChild(el('span', { cls: 'ws-week num', text: `Week total ${fmtHM(sum)}` }));
 }
 
 async function selectDay(date) {
@@ -281,49 +383,45 @@ async function refreshDay() {
   let total = 0;
   for (const e of rows) {
     total += Math.round(e.hours * 100);
-    const tr = document.createElement('tr');
-
-    const tdMain = document.createElement('td');
-    tdMain.className = 'entry-main';
-    const proj = document.createElement('div');
-    proj.className = 'entry-project';
     const projName = (state.projectsByCustomer[e.customer_id] || []).find((p) => p.code === e.project_code);
-    proj.textContent = projName ? `${e.project_code} — ${projName.name}` : e.project_code;
-    const cust = document.createElement('div');
-    cust.className = 'entry-customer';
-    cust.textContent = customerName(e.customer_id);
-    const note = document.createElement('div');
-    note.className = 'entry-note';
-    note.textContent = e.note || '';
-    note.title = e.note || '';
-    if (!e.billable) {
-      const nb = document.createElement('span');
-      nb.className = 'badge';
-      nb.textContent = ' non-billable';
-      note.appendChild(nb);
-    }
-    tdMain.append(proj, cust, note);
-
-    const tdHrs = document.createElement('td');
-    tdHrs.className = 'num entry-hours';
-    tdHrs.textContent = e.hours.toFixed(2);
-
-    const tdAct = document.createElement('td');
-    tdAct.className = 'actions-col';
-    const edit = document.createElement('button');
-    edit.className = 'pill';
-    edit.type = 'button';
-    edit.textContent = 'Edit';
-    edit.addEventListener('click', () => startEdit(e));
-    const del = document.createElement('button');
-    del.className = 'pill danger';
-    del.type = 'button';
-    del.textContent = 'Delete';
-    del.addEventListener('click', () => removeEntry(e));
-    tdAct.append(edit, del);
-
-    tr.dataset.entryId = e.id; // C7: target the exact row on jump-to-entry
-    tr.append(tdMain, tdHrs, tdAct);
+    const tr = el(
+      'tr',
+      { data: { entryId: e.id } }, // C7: target the exact row on jump-to-entry
+      [
+        el(
+          'td',
+          { cls: 'entry-main' },
+          [
+            el('div', {
+              cls: 'entry-project',
+              text: projName ? `${e.project_code} — ${projName.name}` : e.project_code,
+            }),
+            el('div', { cls: 'entry-customer', text: customerName(e.customer_id) }),
+            // The non-billable badge sits after the note text, as before.
+            el(
+              'div',
+              { cls: 'entry-note', text: e.note || '', attrs: { title: e.note || '' } },
+              e.billable ? [] : [el('span', { cls: 'badge', text: ' non-billable' })],
+            ),
+          ],
+        ),
+        el('td', { cls: 'num entry-hours', text: e.hours.toFixed(2) }),
+        el('td', { cls: 'actions-col' }, [
+          el('button', {
+            cls: 'pill',
+            type: 'button',
+            text: 'Edit',
+            on: { click: () => startEdit(e) },
+          }),
+          el('button', {
+            cls: 'pill danger',
+            type: 'button',
+            text: 'Delete',
+            on: { click: () => removeEntry(e) },
+          }),
+        ]),
+      ],
+    );
     tbody.appendChild(tr);
   }
   $('day-total').textContent = (total / 100).toFixed(2);
@@ -359,47 +457,54 @@ async function copyPreviousDay() {
     const key = `${e.customer_id}|${e.project_code}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const li = document.createElement('li');
-    li.className = 'copy-row';
-    const label = document.createElement('span');
-    label.className = 'copy-label';
-    label.textContent = `${customerName(e.customer_id)} / ${e.project_code}`;
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.min = '0.01';
-    input.max = '24';
-    input.step = '0.01';
-    input.className = 'copy-hours';
-    input.setAttribute('aria-label', `Hours for ${e.project_code} on ${target}`);
-    input.placeholder = 'h';
-    const save = document.createElement('button');
-    save.type = 'button';
-    save.textContent = 'Save';
-    save.addEventListener('click', async () => {
-      const hours = Number(input.value);
-      if (!(hours >= 0.01 && hours <= 24)) {
-        announce('Enter hours between 0.01 and 24.');
-        input.focus();
-        return;
-      }
-      try {
-        await api.post('/entries', {
-          date: target,
-          customer_id: e.customer_id,
-          project_code: e.project_code,
-          task_code: e.task_code || null,
-          hours,
-          note: '',
-          billable: e.billable !== false,
-        });
-        li.remove();
-        announce(`Copied ${e.project_code} to ${target}.`);
-        await refreshDay();
-      } catch (err) {
-        announce(`Copy failed: ${err.message}`);
-      }
+    const input = el('input', {
+      type: 'number',
+      cls: 'copy-hours',
+      attrs: {
+        min: '0.01',
+        max: '24',
+        step: '0.01',
+        'aria-label': `Hours for ${e.project_code} on ${target}`,
+        placeholder: 'h',
+      },
     });
-    li.append(label, input, save);
+    const li = el('li', { cls: 'copy-row' }, [
+      el('span', {
+        cls: 'copy-label',
+        text: `${customerName(e.customer_id)} / ${e.project_code}`,
+      }),
+      input,
+      el('button', {
+        type: 'button',
+        text: 'Save',
+        on: {
+          click: async () => {
+            const hours = Number(input.value);
+            if (!(hours >= 0.01 && hours <= 24)) {
+              announce('Enter hours between 0.01 and 24.');
+              input.focus();
+              return;
+            }
+            try {
+              await api.post('/entries', {
+                date: target,
+                customer_id: e.customer_id,
+                project_code: e.project_code,
+                task_code: e.task_code || null,
+                hours,
+                note: '',
+                billable: e.billable !== false,
+              });
+              li.remove();
+              announce(`Copied ${e.project_code} to ${target}.`);
+              await refreshDay();
+            } catch (err) {
+              announce(`Copy failed: ${err.message}`);
+            }
+          },
+        },
+      }),
+    ]);
     list.appendChild(li);
   }
   announce(`${seen.size} project row(s) ready — enter hours to copy them to ${target}.`);
@@ -443,7 +548,7 @@ function resetEntryForm() {
 
 async function removeEntry(e) {
   const label = `${e.hours}h on ${e.project_code}`;
-  if (!window.confirm(`Delete this entry (${label})? This cannot be undone.`)) return;
+  if (!(await askConfirm(`Delete this entry (${label})? This cannot be undone.`))) return;
   try {
     await api.del(`/entries/${e.id}`);
     announce(`Deleted ${label}.`);
@@ -573,30 +678,21 @@ async function refreshWeek() {
   const table = $('week-table');
   table.textContent = '';
 
-  const thead = document.createElement('thead');
-  const htr = document.createElement('tr');
-  const corner = document.createElement('th');
-  corner.scope = 'col';
-  corner.textContent = 'Project';
-  htr.appendChild(corner);
-  for (const d of days) {
-    const th = document.createElement('th');
-    th.scope = 'col';
-    th.dataset.date = d;
-    if (d === today) th.classList.add('today');
-    const name = new Date(d).toUTCString().slice(0, 3);
-    th.textContent = `◷ ${name} ${d.slice(8)}`;
-    htr.appendChild(th);
-  }
-  const totHead = document.createElement('th');
-  totHead.scope = 'col';
-  totHead.className = 'num';
-  totHead.textContent = 'Week';
-  htr.appendChild(totHead);
-  thead.appendChild(htr);
-  table.appendChild(thead);
+  const htr = el('tr', {}, [
+    el('th', { attrs: { scope: 'col' }, text: 'Project' }),
+    ...days.map((d) =>
+      el('th', {
+        attrs: { scope: 'col' },
+        cls: d === today ? 'today' : '',
+        data: { date: d },
+        text: `◷ ${new Date(d).toUTCString().slice(0, 3)} ${d.slice(8)}`,
+      }),
+    ),
+    el('th', { attrs: { scope: 'col' }, cls: 'num', text: 'Week' }),
+  ]);
+  table.appendChild(el('thead', {}, [htr]));
 
-  const tbody = document.createElement('tbody');
+  const tbody = el('tbody');
   const sorted = Array.from(byKey.values()).sort(
     (a, b) =>
       customerName(a.customer_id).localeCompare(customerName(b.customer_id)) ||
@@ -604,96 +700,77 @@ async function refreshWeek() {
   );
   const dayTotals = days.map(() => 0);
   for (const row of sorted) {
-    const tr = document.createElement('tr');
-    const label = document.createElement('th');
-    label.scope = 'row';
-    label.className = 'row-band';
-    const pl = document.createElement('div');
-    pl.className = 'entry-project';
-    pl.textContent = row.project_code;
-    const cl = document.createElement('div');
-    cl.className = 'entry-customer';
-    cl.textContent = customerName(row.customer_id);
-    label.append(pl, cl);
-    tr.appendChild(label);
     let weekTotal = 0;
     let anyLocked = false;
-    for (let i = 0; i < days.length; i += 1) {
-      const d = days[i];
-      const td = document.createElement('td');
-      td.className = 'cell';
+    const cells = days.map((d, i) => {
       const hundredths = row.cells[d];
       const ids = row.ids[d] || [];
       if (hundredths) {
-        td.classList.add('has');
         weekTotal += hundredths;
         dayTotals[i] += hundredths;
       }
       const isLocked = ids.some((id) => locked.has(id));
-      if (isLocked) {
-        td.classList.add('locked');
-        anyLocked = true;
-      }
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.className = 'cell-input';
-      input.min = '0.01';
-      input.max = '24';
-      input.step = '0.01';
-      input.inputMode = 'decimal';
-      if (hundredths) input.value = (hundredths / 100).toFixed(2);
-      input.dataset.customer = row.customer_id;
-      input.dataset.project = row.project_code;
-      input.dataset.date = d;
-      input.dataset.ids = ids.join(',');
-      input.dataset.was = input.value;
-      input.setAttribute(
-        'aria-label',
-        `${row.project_code}, ${customerName(row.customer_id)}, ${d}: hours`,
-      );
-      if (isLocked) input.disabled = true;
-      td.appendChild(input);
+      if (isLocked) anyLocked = true;
+      const input = el('input', {
+        type: 'number',
+        cls: 'cell-input',
+        value: hundredths ? (hundredths / 100).toFixed(2) : '',
+        attrs: {
+          min: '0.01',
+          max: '24',
+          step: '0.01',
+          inputmode: 'decimal',
+          'aria-label': `${row.project_code}, ${customerName(row.customer_id)}, ${d}: hours`,
+          ...(isLocked ? { disabled: '' } : {}),
+        },
+        data: {
+          customer: row.customer_id,
+          project: row.project_code,
+          date: d,
+          ids: ids.join(','),
+          was: hundredths ? (hundredths / 100).toFixed(2) : '',
+        },
+      });
+      const children = [input];
       if (row.notes[d]) {
-        const note = document.createElement('button');
-        note.type = 'button';
-        note.className = 'note-flag';
-        note.textContent = '¶';
-        note.title = row.notes[d];
-        note.setAttribute('aria-label', `Note: ${row.notes[d]}. Open to edit.`);
-        note.addEventListener('click', () => jumpToEntry(ids[0]));
-        td.appendChild(note);
+        children.push(
+          el('button', {
+            type: 'button',
+            cls: 'note-flag',
+            text: '¶',
+            attrs: { title: row.notes[d], 'aria-label': `Note: ${row.notes[d]}. Open to edit.` },
+            on: { click: () => jumpToEntry(ids[0]) },
+          }),
+        );
       }
-      tr.appendChild(td);
-    }
-    if (anyLocked) tr.classList.add('has-lock');
-    const tw = document.createElement('td');
-    tw.className = 'num row-total';
-    tw.textContent = (weekTotal / 100).toFixed(2);
-    tr.appendChild(tw);
+      return el(
+        'td',
+        { cls: `cell${hundredths ? ' has' : ''}${isLocked ? ' locked' : ''}` },
+        children,
+      );
+    });
+    const tr = el(
+      'tr',
+      { cls: anyLocked ? 'has-lock' : '' },
+      [
+        el('th', { attrs: { scope: 'row' }, cls: 'row-band' }, [
+          el('div', { cls: 'entry-project', text: row.project_code }),
+          el('div', { cls: 'entry-customer', text: customerName(row.customer_id) }),
+        ]),
+        ...cells,
+        el('td', { cls: 'num row-total', text: (weekTotal / 100).toFixed(2) }),
+      ],
+    );
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
 
-  const tfoot = document.createElement('tfoot');
-  const ftr = document.createElement('tr');
-  const ft = document.createElement('th');
-  ft.scope = 'row';
-  ft.textContent = 'Day totals';
-  ftr.appendChild(ft);
-  let grand = 0;
-  for (const t of dayTotals) {
-    grand += t;
-    const td = document.createElement('td');
-    td.className = 'num day-total';
-    td.textContent = t ? (t / 100).toFixed(2) : '0';
-    ftr.appendChild(td);
-  }
-  const gt = document.createElement('td');
-  gt.className = 'num week-total';
-  gt.textContent = (grand / 100).toFixed(2);
-  ftr.appendChild(gt);
-  tfoot.appendChild(ftr);
-  table.appendChild(tfoot);
+  const grandRow = el('tr', {}, [
+    el('th', { attrs: { scope: 'row' }, text: 'Day totals' }),
+    ...dayTotals.map((t) => el('td', { cls: 'num day-total', text: t ? (t / 100).toFixed(2) : '0' })),
+    el('td', { cls: 'num week-total', text: (dayTotals.reduce((a, b) => a + b, 0) / 100).toFixed(2) }),
+  ]);
+  table.appendChild(el('tfoot', {}, [grandRow]));
 
   $('week-table').hidden = sorted.length === 0;
   $('week-empty').hidden = sorted.length !== 0;
@@ -712,7 +789,7 @@ async function commitCell(input) {
     if (raw === '') {
       if (ids.length === 0) return;
       const label = `${was}h on ${projectCode}, ${date}`;
-      if (!window.confirm(`Delete this entry (${label})?`)) {
+      if (!(await askConfirm(`Delete this entry (${label})?`))) {
         input.value = was;
         return;
       }
@@ -731,7 +808,7 @@ async function commitCell(input) {
       });
       announce(`Saved ${raw}h — ${projectCode}, ${date}.`);
     } else if (ids.length > 1) {
-      const merge = window.confirm(
+      const merge = await askConfirm(
         `This cell combines ${ids.length} entries for ${projectCode} on ${date}. Saving sets the first to ${raw}h and removes the others.`,
       );
       if (!merge) {
@@ -793,19 +870,16 @@ function toggleWeekAddRow(show) {
 }
 
 async function fillWeekProjectSelect() {
-  const sel = $('week-add-project');
-  sel.textContent = '';
+  const options = [];
   for (const c of state.customers) {
     if (!c.active) continue;
     const projects = await loadProjects(c.id);
     for (const p of projects) {
       if (!p.active) continue;
-      const opt = document.createElement('option');
-      opt.value = `${c.id}|${p.code}`;
-      opt.textContent = `${c.name} / ${p.code} — ${p.name}`;
-      sel.appendChild(opt);
+      options.push({ value: `${c.id}|${p.code}`, text: `${c.name} / ${p.code} — ${p.name}` });
     }
   }
+  fillSelect($('week-add-project'), options);
 }
 
 function addWeekRow(customerId, projectCode) {
@@ -852,42 +926,39 @@ async function refreshCustomerTable() {
   const tbody = $('customer-table').querySelector('tbody');
   tbody.textContent = '';
   for (const c of state.customers) {
-    const tr = document.createElement('tr');
-    const name = document.createElement('th');
-    name.scope = 'row';
-    name.textContent = c.name;
-    const cur = document.createElement('td');
-    cur.textContent = c.currency;
-    const rate = document.createElement('td');
-    rate.className = 'num';
-    rate.textContent = `${c.currency} ${formatMoney(c.default_rate_minor)}`;
-    const status = document.createElement('td');
-    const badge = document.createElement('span');
-    badge.className = c.active ? 'badge on' : 'badge';
-    badge.textContent = c.active ? 'Active' : 'Inactive';
-    status.appendChild(badge);
-
-    const act = document.createElement('td');
-    act.className = 'actions-col';
-    const projects = document.createElement('button');
-    projects.className = 'link';
-    projects.type = 'button';
-    projects.textContent = 'Projects';
-    projects.addEventListener('click', () => selectCustomerForProjects(c.id));
-    const edit = document.createElement('button');
-    edit.className = 'link';
-    edit.type = 'button';
-    edit.textContent = 'Edit';
-    edit.addEventListener('click', () => startCustomerEdit(c));
-    const del = document.createElement('button');
-    del.className = 'danger';
-    del.type = 'button';
-    del.textContent = 'Delete';
-    del.addEventListener('click', () => removeCustomer(c));
-    act.append(projects, edit, del);
-
-    tr.append(name, cur, rate, status, act);
-    tbody.appendChild(tr);
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: c.name }),
+        el('td', { text: c.currency }),
+        el('td', { cls: 'num', text: `${c.currency} ${formatMoney(c.default_rate_minor)}` }),
+        el('td', {}, [
+          el('span', {
+            cls: c.active ? 'badge on' : 'badge',
+            text: c.active ? 'Active' : 'Inactive',
+          }),
+        ]),
+        el('td', { cls: 'actions-col' }, [
+          el('button', {
+            cls: 'link',
+            type: 'button',
+            text: 'Projects',
+            on: { click: () => selectCustomerForProjects(c.id) },
+          }),
+          el('button', {
+            cls: 'link',
+            type: 'button',
+            text: 'Edit',
+            on: { click: () => startCustomerEdit(c) },
+          }),
+          el('button', {
+            cls: 'danger',
+            type: 'button',
+            text: 'Delete',
+            on: { click: () => removeCustomer(c) },
+          }),
+        ]),
+      ]),
+    );
   }
 }
 
@@ -938,7 +1009,7 @@ function cancelCustomerEdit() {
 }
 
 async function removeCustomer(c) {
-  if (!window.confirm(`Delete customer "${c.name}"?`)) return;
+  if (!(await askConfirm(`Delete customer "${c.name}"?`))) return;
   try {
     await api.del(`/customers/${c.id}`);
     await loadCustomers();
@@ -987,42 +1058,40 @@ async function refreshProjectTable() {
   const tbody = $('project-table').querySelector('tbody');
   tbody.textContent = '';
   for (const p of projects) {
-    const tr = document.createElement('tr');
-    const code = document.createElement('th');
-    code.scope = 'row';
-    code.textContent = p.code;
-    const name = document.createElement('td');
-    name.textContent = p.name;
-    const cur = document.createElement('td');
-    cur.textContent = p.currency || 'customer';
-    const rate = document.createElement('td');
-    rate.className = 'num';
-    rate.textContent = p.rate_minor != null ? formatMoney(p.rate_minor) : 'customer';
-    const status = document.createElement('td');
-    const badge = document.createElement('span');
-    badge.className = p.active ? 'badge on' : 'badge';
-    badge.textContent = p.active ? 'Active' : 'Inactive';
-    status.appendChild(badge);
-    const act = document.createElement('td');
-    act.className = 'actions-col';
-    const tasks = document.createElement('button');
-    tasks.className = 'link';
-    tasks.type = 'button';
-    tasks.textContent = 'Tasks';
-    tasks.addEventListener('click', () => selectProjectForTasks(p.code));
-    const edit = document.createElement('button');
-    edit.className = 'link';
-    edit.type = 'button';
-    edit.textContent = 'Edit';
-    edit.addEventListener('click', () => startProjectEdit(p));
-    const del = document.createElement('button');
-    del.className = 'danger';
-    del.type = 'button';
-    del.textContent = 'Delete';
-    del.addEventListener('click', () => removeProject(p));
-    act.append(tasks, edit, del);
-    tr.append(code, name, cur, rate, status, act);
-    tbody.appendChild(tr);
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: p.code }),
+        el('td', { text: p.name }),
+        el('td', { text: p.currency || 'customer' }),
+        el('td', { cls: 'num', text: p.rate_minor != null ? formatMoney(p.rate_minor) : 'customer' }),
+        el('td', {}, [
+          el('span', {
+            cls: p.active ? 'badge on' : 'badge',
+            text: p.active ? 'Active' : 'Inactive',
+          }),
+        ]),
+        el('td', { cls: 'actions-col' }, [
+          el('button', {
+            cls: 'link',
+            type: 'button',
+            text: 'Tasks',
+            on: { click: () => selectProjectForTasks(p.code) },
+          }),
+          el('button', {
+            cls: 'link',
+            type: 'button',
+            text: 'Edit',
+            on: { click: () => startProjectEdit(p) },
+          }),
+          el('button', {
+            cls: 'danger',
+            type: 'button',
+            text: 'Delete',
+            on: { click: () => removeProject(p) },
+          }),
+        ]),
+      ]),
+    );
   }
 }
 
@@ -1081,7 +1150,7 @@ function cancelProjectEdit() {
 }
 
 async function removeProject(p) {
-  if (!window.confirm(`Delete project ${p.code}?`)) return;
+  if (!(await askConfirm(`Delete project ${p.code}?`))) return;
   const cid = state.selectedCustomerId;
   try {
     await api.del(`/customers/${cid}/projects/${encodeURIComponent(p.code)}`);
@@ -1089,7 +1158,7 @@ async function removeProject(p) {
     announce('Project deleted.');
   } catch (err) {
     announce(err.message);
-    window.alert(err.message);
+    await askAlert(err.message);
   }
 }
 
@@ -1116,37 +1185,34 @@ async function refreshTaskTable() {
   const tbody = $('task-table').querySelector('tbody');
   tbody.textContent = '';
   for (const t of data.tasks || []) {
-    const tr = document.createElement('tr');
-    const code = document.createElement('th');
-    code.scope = 'row';
-    code.textContent = t.code;
-    const name = document.createElement('td');
-    name.textContent = t.name;
-    const cur = document.createElement('td');
-    cur.textContent = t.currency || 'project';
-    const rate = document.createElement('td');
-    rate.className = 'num';
-    rate.textContent = t.rate_minor != null ? formatMoney(t.rate_minor) : 'project';
-    const status = document.createElement('td');
-    const badge = document.createElement('span');
-    badge.className = t.active ? 'badge on' : 'badge';
-    badge.textContent = t.active ? 'Active' : 'Inactive';
-    status.appendChild(badge);
-    const act = document.createElement('td');
-    act.className = 'actions-col';
-    const edit = document.createElement('button');
-    edit.className = 'link';
-    edit.type = 'button';
-    edit.textContent = 'Edit';
-    edit.addEventListener('click', () => startTaskEdit(t));
-    const del = document.createElement('button');
-    del.className = 'danger';
-    del.type = 'button';
-    del.textContent = 'Delete';
-    del.addEventListener('click', () => removeTask(t));
-    act.append(edit, del);
-    tr.append(code, name, cur, rate, status, act);
-    tbody.appendChild(tr);
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: t.code }),
+        el('td', { text: t.name }),
+        el('td', { text: t.currency || 'project' }),
+        el('td', { cls: 'num', text: t.rate_minor != null ? formatMoney(t.rate_minor) : 'project' }),
+        el('td', {}, [
+          el('span', {
+            cls: t.active ? 'badge on' : 'badge',
+            text: t.active ? 'Active' : 'Inactive',
+          }),
+        ]),
+        el('td', { cls: 'actions-col' }, [
+          el('button', {
+            cls: 'link',
+            type: 'button',
+            text: 'Edit',
+            on: { click: () => startTaskEdit(t) },
+          }),
+          el('button', {
+            cls: 'danger',
+            type: 'button',
+            text: 'Delete',
+            on: { click: () => removeTask(t) },
+          }),
+        ]),
+      ]),
+    );
   }
 }
 
@@ -1197,7 +1263,7 @@ async function saveTask(evt) {
 }
 
 async function removeTask(t) {
-  if (!window.confirm(`Delete task ${t.code}?`)) return;
+  if (!(await askConfirm(`Delete task ${t.code}?`))) return;
   const cid = state.selectedCustomerId;
   const pcode = state.selectedProjectCode;
   try {
@@ -1208,7 +1274,7 @@ async function removeTask(t) {
     announce('Task deleted.');
   } catch (err) {
     announce(err.message);
-    window.alert(err.message);
+    await askAlert(err.message);
   }
 }
 
@@ -1217,8 +1283,8 @@ async function refreshCustomerPickers() {
   // from one place — previously a newly added customer could not be invoiced
   // until a full page reload.
   for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer']) {
-    const el = $(id);
-    if (el) fillCustomerSelect(el, el.value, true);
+    const picker = $(id);
+    if (picker) fillCustomerSelect(picker, picker.value, true);
   }
   const keep = $('entry-customer').value;
   if (keep && !state.customers.some((c) => c.id === keep)) {
@@ -1240,23 +1306,15 @@ async function runReport(evt) {
   const tbody = $('report-table').querySelector('tbody');
   tbody.textContent = '';
   for (const row of summary.rows) {
-    const tr = document.createElement('tr');
-    const label = document.createElement('th');
-    label.scope = 'row';
-    label.textContent = row.label;
-    const cur = document.createElement('td');
-    cur.textContent = row.currency;
-    const hrs = document.createElement('td');
-    hrs.className = 'num';
-    hrs.textContent = row.hours.toFixed(2);
-    const amt = document.createElement('td');
-    amt.className = 'num';
-    amt.textContent = `${row.currency} ${formatMoney(row.amount_minor)}`;
-    const ent = document.createElement('td');
-    ent.className = 'num';
-    ent.textContent = String(row.entries);
-    tr.append(label, cur, hrs, amt, ent);
-    tbody.appendChild(tr);
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: row.label }),
+        el('td', { text: row.currency }),
+        el('td', { cls: 'num', text: row.hours.toFixed(2) }),
+        el('td', { cls: 'num', text: `${row.currency} ${formatMoney(row.amount_minor)}` }),
+        el('td', { cls: 'num', text: String(row.entries) }),
+      ]),
+    );
   }
   $('report-total').textContent = `${summary.total_hours.toFixed(2)}  (billable ${summary.billable_hours.toFixed(2)} / non-billable ${summary.nonbillable_hours.toFixed(2)})`;
   const link = $('csv-link');
@@ -1272,78 +1330,50 @@ async function refreshInvoices() {
   const invoices = data.invoices || [];
   const tbody = $('invoice-table').querySelector('tbody');
   tbody.textContent = '';
+  const action = (cls, text, fn, title) =>
+    el('button', {
+      cls,
+      type: 'button',
+      text,
+      attrs: title ? { title } : {},
+      on: { click: fn },
+    });
   for (const inv of invoices) {
-    const tr = document.createElement('tr');
-    const num = document.createElement('th');
-    num.scope = 'row';
-    num.textContent = inv.number;
-    const cust = document.createElement('td');
-    cust.textContent = customerName(inv.customer_id);
-    const period = document.createElement('td');
-    period.textContent = `${inv.period_from} → ${inv.period_to}`;
-    const total = document.createElement('td');
-    total.className = 'num';
-    total.textContent = `${inv.currency} ${formatMoney(inv.total_minor)}`;
-    const status = document.createElement('td');
-    const badge = document.createElement('span');
-    badge.className = inv.status === 'issued' ? 'badge on' : 'badge';
-    badge.textContent = inv.status;
-    status.appendChild(badge);
-    const act = document.createElement('td');
-    act.className = 'actions-col';
+    const actions = [];
     if (inv.status === 'draft') {
-      const issue = document.createElement('button');
-      issue.className = 'link';
-      issue.type = 'button';
-      issue.textContent = 'Issue';
-      issue.addEventListener('click', () => issueInvoice(inv.id));
-      const del = document.createElement('button');
-      del.className = 'danger';
-      del.type = 'button';
-      del.textContent = 'Delete';
-      del.addEventListener('click', () => removeInvoice(inv.id));
-      act.append(issue, del);
+      actions.push(
+        action('link', 'Issue', () => issueInvoice(inv.id)),
+        action('danger', 'Delete', () => removeInvoice(inv.id)),
+      );
     } else if (inv.status === 'issued') {
-      const pay = document.createElement('button');
-      pay.className = 'link';
-      pay.type = 'button';
-      pay.textContent = 'Mark paid';
-      pay.addEventListener('click', () => markInvoicePaid(inv.id));
-      const checkout = document.createElement('button');
-      checkout.className = 'link';
-      checkout.type = 'button';
-      checkout.textContent = 'Pay link';
-      checkout.title = 'Create a hosted checkout link (Stripe) for this invoice';
-      checkout.addEventListener('click', () => createCheckoutLink(inv.id, 'stripe'));
-      const sync = document.createElement('button');
-      sync.className = 'link';
-      sync.type = 'button';
-      sync.textContent = 'Sync';
-      sync.title = 'Copy this invoice to the accounting provider (QBO/Xero)';
-      sync.addEventListener('click', () => syncInvoice(inv.id));
-      const email = document.createElement('button');
-      email.className = 'link';
-      email.type = 'button';
-      email.textContent = 'Email';
-      email.title = 'Send this invoice to the customer billing email';
-      email.addEventListener('click', () => emailInvoice(inv.id));
-      act.append(pay, checkout, sync, email);
+      actions.push(
+        action('link', 'Mark paid', () => markInvoicePaid(inv.id)),
+        action('link', 'Pay link', () => createCheckoutLink(inv.id, 'stripe'),
+          'Create a hosted checkout link (Stripe) for this invoice'),
+        action('link', 'Sync', () => syncInvoice(inv.id),
+          'Copy this invoice to the accounting provider (QBO/Xero)'),
+        action('link', 'Email', () => emailInvoice(inv.id),
+          'Send this invoice to the customer billing email'),
+      );
     } else if (inv.status === 'paid') {
-      const sync = document.createElement('button');
-      sync.className = 'link';
-      sync.type = 'button';
-      sync.textContent = 'Sync';
-      sync.title = 'Copy this invoice (and payment) to the accounting provider';
-      sync.addEventListener('click', () => syncInvoice(inv.id));
-      const email = document.createElement('button');
-      email.className = 'link';
-      email.type = 'button';
-      email.textContent = 'Email';
-      email.addEventListener('click', () => emailInvoice(inv.id));
-      act.append(sync, email);
+      actions.push(
+        action('link', 'Sync', () => syncInvoice(inv.id),
+          'Copy this invoice (and payment) to the accounting provider'),
+        action('link', 'Email', () => emailInvoice(inv.id)),
+      );
     }
-    tr.append(num, cust, period, total, status, act);
-    tbody.appendChild(tr);
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: inv.number }),
+        el('td', { text: customerName(inv.customer_id) }),
+        el('td', { text: `${inv.period_from} → ${inv.period_to}` }),
+        el('td', { cls: 'num', text: `${inv.currency} ${formatMoney(inv.total_minor)}` }),
+        el('td', {}, [
+          el('span', { cls: inv.status === 'issued' ? 'badge on' : 'badge', text: inv.status }),
+        ]),
+        el('td', { cls: 'actions-col' }, actions),
+      ]),
+    );
   }
   $('invoice-empty').hidden = invoices.length !== 0;
   await refreshInvoiceSummary();
@@ -1360,7 +1390,7 @@ async function refreshInvoiceSummary() {
 }
 
 async function markInvoicePaid(id) {
-  const reference = window.prompt('Payment reference (optional):') || '';
+  const reference = (await askPrompt('Payment reference (optional):')) || '';
   try {
     await api.post(`/invoices/${id}/pay`, { reference });
     announce('Invoice marked paid.');
@@ -1387,7 +1417,7 @@ async function generateInvoice(evt) {
 }
 
 async function issueInvoice(id) {
-  if (!window.confirm('Issue this invoice? Its entries will be locked from editing.')) return;
+  if (!(await askConfirm('Issue this invoice? Its entries will be locked from editing.'))) return;
   try {
     await api.post(`/invoices/${id}/issue`);
     announce('Invoice issued.');
@@ -1411,7 +1441,7 @@ async function createCheckoutLink(id, provider) {
   try {
     const res = await api.post(`/invoices/${id}/checkout`, { provider });
     announce(`Checkout link: ${res.url}`);
-    window.prompt('Payment link (copy to send to the customer):', res.url);
+    await askPrompt('Payment link (copy to send to the customer):', res.url);
   } catch (err) {
     announce(`Checkout failed: ${err.message}`);
   }
@@ -1436,7 +1466,7 @@ async function syncInvoice(id) {
 }
 
 async function removeInvoice(id) {
-  if (!window.confirm('Delete this draft invoice?')) return;
+  if (!(await askConfirm('Delete this draft invoice?'))) return;
   try {
     await api.del(`/invoices/${id}`);
     await refreshInvoices();
@@ -1454,25 +1484,31 @@ async function refreshCategories() {
   const ul = $('category-list');
   ul.textContent = '';
   for (const cat of state.categories) {
-    const li = document.createElement('li');
-    li.className = 'chip';
-    li.textContent = cat.name;
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'chip-x';
-    del.setAttribute('aria-label', `Delete category ${cat.name}`);
-    del.textContent = '×';
-    del.addEventListener('click', async () => {
-      try {
-        await api.del(`/categories/${cat.id}`);
-        await refreshCategories();
-        await fillCategorySelect();
-      } catch (err) {
-        announce(err.message);
-      }
-    });
-    li.append(del);
-    ul.appendChild(li);
+    ul.appendChild(
+      el(
+        'li',
+        { cls: 'chip', text: cat.name },
+        [
+          el('button', {
+            type: 'button',
+            cls: 'chip-x',
+            text: '×',
+            attrs: { 'aria-label': `Delete category ${cat.name}` },
+            on: {
+              click: async () => {
+                try {
+                  await api.del(`/categories/${cat.id}`);
+                  await refreshCategories();
+                  await fillCategorySelect();
+                } catch (err) {
+                  announce(err.message);
+                }
+              },
+            },
+          }),
+        ],
+      ),
+    );
   }
 }
 
@@ -1490,18 +1526,10 @@ async function addCategory(evt) {
 }
 
 async function fillCategorySelect() {
-  const select = $('expense-category');
-  select.textContent = '';
-  const ph = document.createElement('option');
-  ph.value = '';
-  ph.textContent = 'None';
-  select.appendChild(ph);
-  for (const cat of state.categories || []) {
-    const opt = document.createElement('option');
-    opt.value = cat.id;
-    opt.textContent = cat.name;
-    select.appendChild(opt);
-  }
+  fillSelect($('expense-category'), [
+    { value: '', text: 'None' },
+    ...(state.categories || []).map((cat) => ({ value: cat.id, text: cat.name })),
+  ]);
 }
 
 async function refreshExpenses() {
@@ -1510,37 +1538,32 @@ async function refreshExpenses() {
   const tbody = $('expense-table').querySelector('tbody');
   tbody.textContent = '';
   for (const x of expenses) {
-    const tr = document.createElement('tr');
-    const date = document.createElement('th');
-    date.scope = 'row';
-    date.textContent = x.date;
-    const cust = document.createElement('td');
-    cust.textContent = customerName(x.customer_id);
-    const proj = document.createElement('td');
-    proj.textContent = x.project_code || '';
-    const cat = document.createElement('td');
     const c = (state.categories || []).find((k) => k.id === x.category_id);
-    cat.textContent = c ? c.name : '';
-    const amt = document.createElement('td');
-    amt.className = 'num';
-    amt.textContent = `${x.currency} ${formatMoney(x.amount_minor)}`;
-    const bill = document.createElement('td');
-    bill.textContent = x.billable ? 'yes' : 'no';
-    const act = document.createElement('td');
-    act.className = 'actions-col';
-    const del = document.createElement('button');
-    del.className = 'danger';
-    del.type = 'button';
-    del.textContent = 'Delete';
-    del.addEventListener('click', async () => {
-      if (!window.confirm('Delete this expense?')) return;
-      await api.del(`/expenses/${x.id}`);
-      await refreshExpenses();
-      announce('Expense deleted.');
-    });
-    act.append(del);
-    tr.append(date, cust, proj, cat, amt, bill, act);
-    tbody.appendChild(tr);
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: x.date }),
+        el('td', { text: customerName(x.customer_id) }),
+        el('td', { text: x.project_code || '' }),
+        el('td', { text: c ? c.name : '' }),
+        el('td', { cls: 'num', text: `${x.currency} ${formatMoney(x.amount_minor)}` }),
+        el('td', { text: x.billable ? 'yes' : 'no' }),
+        el('td', { cls: 'actions-col' }, [
+          el('button', {
+            cls: 'danger',
+            type: 'button',
+            text: 'Delete',
+            on: {
+              click: async () => {
+                if (!(await askConfirm('Delete this expense?'))) return;
+                await api.del(`/expenses/${x.id}`);
+                await refreshExpenses();
+                announce('Expense deleted.');
+              },
+            },
+          }),
+        ]),
+      ]),
+    );
   }
   $('expense-empty').hidden = expenses.length !== 0;
 }
@@ -1577,37 +1600,34 @@ async function refreshSubmissions() {
   const tbody = $('submission-table').querySelector('tbody');
   tbody.textContent = '';
   for (const s of subs) {
-    const tr = document.createElement('tr');
-    const week = document.createElement('th');
-    week.scope = 'row';
-    week.textContent = `${s.week_start} → ${s.week_end}`;
-    const count = document.createElement('td');
-    count.className = 'num';
-    count.textContent = String(s.entry_ids.length);
-    const state = document.createElement('td');
-    const badge = document.createElement('span');
-    badge.className = s.state === 'approved' ? 'badge on' : 'badge';
-    badge.textContent = s.state;
-    state.appendChild(badge);
-    const comment = document.createElement('td');
-    comment.textContent = s.comment || '';
-    const act = document.createElement('td');
-    act.className = 'actions-col';
+    const actions = [];
     if (s.state === 'submitted') {
-      const approve = document.createElement('button');
-      approve.className = 'link';
-      approve.type = 'button';
-      approve.textContent = 'Approve';
-      approve.addEventListener('click', () => decideSubmission(s.id, 'approve'));
-      const reject = document.createElement('button');
-      reject.className = 'danger';
-      reject.type = 'button';
-      reject.textContent = 'Reject';
-      reject.addEventListener('click', () => decideSubmission(s.id, 'reject'));
-      act.append(approve, reject);
+      actions.push(
+        el('button', {
+          cls: 'link',
+          type: 'button',
+          text: 'Approve',
+          on: { click: () => decideSubmission(s.id, 'approve') },
+        }),
+        el('button', {
+          cls: 'danger',
+          type: 'button',
+          text: 'Reject',
+          on: { click: () => decideSubmission(s.id, 'reject') },
+        }),
+      );
     }
-    tr.append(week, count, state, comment, act);
-    tbody.appendChild(tr);
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: `${s.week_start} → ${s.week_end}` }),
+        el('td', { cls: 'num', text: String(s.entry_ids.length) }),
+        el('td', {}, [
+          el('span', { cls: s.state === 'approved' ? 'badge on' : 'badge', text: s.state }),
+        ]),
+        el('td', { text: s.comment || '' }),
+        el('td', { cls: 'actions-col' }, actions),
+      ]),
+    );
   }
   $('submission-empty').hidden = subs.length !== 0;
 }
@@ -1646,22 +1666,20 @@ async function refreshSettings() {
     tbody.textContent = '';
     const secrets = data.secrets || [];
     for (const s of secrets) {
-      const tr = document.createElement('tr');
-      const key = document.createElement('th');
-      key.scope = 'row';
-      key.textContent = s.key;
-      const hint = document.createElement('td');
-      hint.textContent = s.hint;
-      const act = document.createElement('td');
-      act.className = 'actions-col';
-      const del = document.createElement('button');
-      del.className = 'danger';
-      del.type = 'button';
-      del.textContent = 'Delete';
-      del.addEventListener('click', () => deleteSecret(s.key));
-      act.append(del);
-      tr.append(key, hint, act);
-      tbody.appendChild(tr);
+      tbody.appendChild(
+        el('tr', {}, [
+          el('th', { attrs: { scope: 'row' }, text: s.key }),
+          el('td', { text: s.hint }),
+          el('td', { cls: 'actions-col' }, [
+            el('button', {
+              cls: 'danger',
+              type: 'button',
+              text: 'Delete',
+              on: { click: () => deleteSecret(s.key) },
+            }),
+          ]),
+        ]),
+      );
     }
     $('secret-empty').hidden = secrets.length !== 0;
   } catch (err) {
@@ -1700,29 +1718,19 @@ async function refreshConfig() {
   configRows = data.config || [];
   const tbody = $('config-table').querySelector('tbody');
   tbody.textContent = '';
+  tbody.append(
+    ...configRows.map((row) =>
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row', title: row.description }, text: row.key }),
+        el('td', { cls: 'num', text: configValueForInput(row.value) }),
+        el('td', {}, [
+          el('span', { cls: row.source === 'default' ? 'badge' : 'badge on', text: row.source }),
+        ]),
+      ]),
+    ),
+  );
   const sel = $('config-key');
-  sel.textContent = '';
-  for (const row of configRows) {
-    const tr = document.createElement('tr');
-    const key = document.createElement('th');
-    key.scope = 'row';
-    key.textContent = row.key;
-    key.title = row.description;
-    const val = document.createElement('td');
-    val.className = 'num';
-    val.textContent = configValueForInput(row.value);
-    const src = document.createElement('td');
-    const badge = document.createElement('span');
-    badge.className = row.source === 'default' ? 'badge' : 'badge on';
-    badge.textContent = row.source;
-    src.appendChild(badge);
-    tr.append(key, val, src);
-    tbody.appendChild(tr);
-    const opt = document.createElement('option');
-    opt.value = row.key;
-    opt.textContent = row.key;
-    sel.appendChild(opt);
-  }
+  fillSelect(sel, configRows.map((row) => ({ value: row.key, text: row.key })));
   // Pre-fill the value box when the key changes.
   sel.onchange = () => {
     const row = configRows.find((c) => c.key === sel.value);
@@ -1776,7 +1784,7 @@ async function addSecret(evt) {
 }
 
 async function deleteSecret(key) {
-  if (!window.confirm(`Delete secret "${key}"?`)) return;
+  if (!(await askConfirm(`Delete secret "${key}"?`))) return;
   try {
     await api.del(`/admin/secrets/${encodeURIComponent(key)}`);
     await refreshSettings();
@@ -1883,25 +1891,27 @@ async function refreshCalendar(date) {
   const ul = $('calendar-list');
   ul.textContent = '';
   for (const ev of events) {
-    const li = document.createElement('li');
-    li.className = 'cal-event';
-    const label = document.createElement('span');
     const start = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    label.textContent = `${start} — ${ev.title}`;
-    const log = document.createElement('button');
-    log.type = 'button';
-    log.className = 'link';
-    log.textContent = 'Log time';
-    log.addEventListener('click', () => {
-      showEntryForm(true);
-      $('entry-date').value = date;
-      $('entry-hours').value = '';
-      $('entry-note').value = ev.title;
-      $('entry-hours').focus();
-      $('entry-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-    li.append(label, log);
-    ul.appendChild(li);
+    ul.appendChild(
+      el('li', { cls: 'cal-event' }, [
+        el('span', { text: `${start} — ${ev.title}` }),
+        el('button', {
+          type: 'button',
+          cls: 'link',
+          text: 'Log time',
+          on: {
+            click: () => {
+              showEntryForm(true);
+              $('entry-date').value = date;
+              $('entry-hours').value = '';
+              $('entry-note').value = ev.title;
+              $('entry-hours').focus();
+              $('entry-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            },
+          },
+        }),
+      ]),
+    );
   }
   $('calendar-section').hidden = events.length === 0;
 }
@@ -1917,14 +1927,12 @@ async function refreshNotifications() {
     const ul = $('notif-list');
     ul.textContent = '';
     for (const n of unread) {
-      const li = document.createElement('li');
-      li.className = 'notif';
-      const strong = document.createElement('strong');
-      strong.textContent = n.title;
-      const body = document.createElement('span');
-      body.textContent = ` ${n.body}`;
-      li.append(strong, body);
-      ul.appendChild(li);
+      ul.appendChild(
+        el('li', { cls: 'notif' }, [
+          el('strong', { text: n.title }),
+          el('span', { text: ` ${n.body}` }),
+        ]),
+      );
     }
   } catch {
     $('notif-section').hidden = true;
@@ -2170,6 +2178,7 @@ async function logout() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  initDialog(); // one <dialog> for confirm/prompt/alert (#102)
   $('auth-form').addEventListener('submit', onAuthSubmit);
   $('logout').addEventListener('click', logout);
   loadSsoProviders(); // advertise configured identity providers (#32)
@@ -2193,17 +2202,21 @@ async function loadSsoProviders() {
     const box = $('sso-buttons');
     box.textContent = '';
     for (const name of providers) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'secondary';
-      btn.textContent = `Sign in with ${name}`;
-      btn.addEventListener('click', () => {
-        announce(
-          `Point your ${name} IdP at POST /auth/sso/assertion (provider "${name}"). ` +
-          'Local sign-in stays available.',
-        );
-      });
-      box.appendChild(btn);
+      box.appendChild(
+        el('button', {
+          type: 'button',
+          cls: 'secondary',
+          text: `Sign in with ${name}`,
+          on: {
+            click: () => {
+              announce(
+                `Point your ${name} IdP at POST /auth/sso/assertion (provider "${name}"). ` +
+                'Local sign-in stays available.',
+              );
+            },
+          },
+        }),
+      );
     }
   } catch {
     /* providers are optional */
