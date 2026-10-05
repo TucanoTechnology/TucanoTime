@@ -39,13 +39,12 @@
       <div class="brand">TucanoTime</div>
       <nav aria-label="Sections">
         <div class="tabs" role="tablist" id="tabs" aria-orientation="vertical">
-          <button role="tab" id="tab-day" aria-controls="panel-day" aria-selected="true">Day</button>
-          <button role="tab" id="tab-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
+          <button role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true">Timesheets</button>
           <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
           <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
           <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
           <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
-          <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Timesheets</button>
+          <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Approvals</button>
           <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button>
         </div>
       </nav>
@@ -63,8 +62,18 @@
       <main id="main">
         <p class="sr-only" role="status" aria-live="polite" id="live-region"></p>
 
+    <!-- TIMESHEETS (top-level section, #107): Day | Week as in-page segments -->
+    <section id="panel-timesheet" role="tabpanel" aria-labelledby="tab-timesheet" tabindex="0">
+      <div class="ts-head">
+        <h2 class="ts-title">Timesheet</h2>
+        <div class="seg" role="tablist" aria-label="Timesheet view" id="ts-seg">
+          <button type="button" role="tab" id="ts-day" aria-controls="panel-day" aria-selected="true">Day</button>
+          <button type="button" role="tab" id="ts-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
+        </div>
+      </div>
+
     <!-- DAY -->
-    <section id="panel-day" role="tabpanel" aria-labelledby="tab-day" tabindex="0">
+    <section id="panel-day" role="tabpanel" aria-labelledby="ts-day" tabindex="0">
       <div class="timerbar" id="timerbar">
         <label for="timer-customer" class="sr-only">Customer</label>
         <select id="timer-customer"></select>
@@ -147,7 +156,7 @@
     </section>
 
     <!-- WEEK -->
-    <section id="panel-week" role="tabpanel" aria-labelledby="tab-week" tabindex="0" hidden>
+    <section id="panel-week" role="tabpanel" aria-labelledby="ts-week" tabindex="0" hidden>
       <input type="date" id="week-date" hidden>
       <div class="day-bar">
         <button type="button" id="week-track" class="primary">+ Track time</button>
@@ -170,6 +179,8 @@
         <button type="button" id="week-add-cancel" class="link" hidden>Cancel</button>
       </div>
     </section>
+
+    </section><!-- /panel-timesheet -->
 
     <!-- CUSTOMERS -->
     <section id="panel-customers" role="tabpanel" aria-labelledby="tab-customers" tabindex="0" hidden>

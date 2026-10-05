@@ -205,13 +205,13 @@ const csvHref = window.document.getElementById('csv-link').getAttribute('href');
 check('CSV download link wired', csvHref && csvHref.includes('export.csv'));
 
 // ---- tab keyboard nav moves selection ----
-const tabDay = window.document.getElementById('tab-day');
+const tabDay = window.document.getElementById('ts-day');
 tabDay.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
 await tick(50);
-check('arrow key switches tab', window.document.getElementById('tab-week').getAttribute('aria-selected') === 'true');
+check('arrow key switches tab', window.document.getElementById('ts-week').getAttribute('aria-selected') === 'true');
 
 // ---- WEEK GRID VIEW (#13): inline editable cells ----
-const tabWeek = window.document.getElementById('tab-week');
+const tabWeek = window.document.getElementById('ts-week');
 tabWeek.dispatchEvent(new window.Event('click', { bubbles: true }));
 window.document.getElementById('week-date').value = '2026-11-11';
 window.document.getElementById('week-date').dispatchEvent(new window.Event('change', { bubbles: true }));
@@ -257,7 +257,7 @@ check('note indicator shown for cells with notes', !!flag);
 flag.dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(400);
 check('note indicator opens the entry for editing', window.document.getElementById('entry-id').value !== '');
-window.document.getElementById('tab-week').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 
 // Add row + copy-last-week controls exist.
 check('add-row control present', !!window.document.getElementById('week-add-row'));
@@ -446,7 +446,7 @@ const lockRes = await fetch(`${BASE}/entries/${fresh.id}`, { method: 'PUT', head
 check('submitted week locks its entries (edit -> 409)', lockRes.status === 409);
 
 // ---- WEEK GRID (#13): add row, copy last week, lock column ----
-window.document.getElementById('tab-week').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 const weekDateEl = window.document.getElementById('week-date');
 weekDateEl.value = '2026-12-07';
 weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));

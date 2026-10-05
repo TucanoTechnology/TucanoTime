@@ -264,10 +264,63 @@ async function fillTaskSelect(select, customerId, projectCode, selectedCode) {
   fillSelect(select, opts);
 }
 
+// ------------------------------------------------------- timesheet segment --
+//
+// #107: Day and Week are views *inside* the Timesheets section — a second,
+// horizontal tablist with its own roving tabindex (the sidebar list is
+// scoped to #tabs, so the two never mix).
+
+let segActiveId = 'ts-day';
+
+function activateSeg(segId, refresh = true) {
+  for (const id of ['ts-day', 'ts-week']) {
+    const on = id === segId;
+    const tab = $(id);
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    $(tab.getAttribute('aria-controls')).hidden = !on;
+  }
+  segActiveId = segId;
+  if (refresh) refreshTimesheetView();
+}
+
+function refreshTimesheetView() {
+  (segActiveId === 'ts-day' ? refreshDay() : refreshWeek()).catch?.(() => {});
+}
+
+function initSegTabs() {
+  const segs = [$('ts-day'), $('ts-week')];
+  segs.forEach((t, i) => {
+    t.addEventListener('click', () => activateSeg(t.id));
+    t.addEventListener('keydown', (e) => {
+      let j = null;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') j = (i + 1) % segs.length;
+      if (e.key === 'Home') j = 0;
+      if (e.key === 'End') j = segs.length - 1;
+      if (j !== null) {
+        e.preventDefault();
+        activateSeg(segs[j].id);
+        segs[j].focus();
+      }
+    });
+  });
+}
+
+/// Opens the Timesheets section with a given segment (used by jump-to-entry
+/// and the week grid's "track time" flow).
+function showTimesheet(segId) {
+  if ($('tab-timesheet').getAttribute('aria-selected') !== 'true') {
+    suppressPanelRefresh = true;
+    $('tab-timesheet').click();
+    suppressPanelRefresh = false;
+  }
+  activateSeg(segId, false);
+}
+
 // ---------------------------------------------------------------- tabs ---
 
 function initTabs() {
-  const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+  const tabs = Array.from(document.querySelectorAll('#tabs [role="tab"]'));
   function activate(tab) {
     tabs.forEach((t) => {
       const on = t === tab;
@@ -912,7 +965,7 @@ async function copyLastWeek() {
 
 async function jumpToEntry(entryId) {
   const e = await api.get(`/entries/${entryId}`);
-  switchTab('tab-day'); // suppressed — we await the refresh ourselves
+  showTimesheet('ts-day'); // suppressed — we await the refresh ourselves
   $('day-date').value = e.date;
   await refreshDay();
   startEdit(e);
@@ -1966,8 +2019,7 @@ function refreshPanel(tabId) {
   if (suppressPanelRefresh) return; // caller will refresh explicitly
   // C7: customers & settings were missing — re-shown panels re-pull now.
   const fn = {
-    'tab-day': refreshDay,
-    'tab-week': refreshWeek,
+    'tab-timesheet': refreshTimesheetView,
     'tab-invoices': refreshInvoices,
     'tab-expenses': refreshExpenses,
     'tab-submissions': refreshSubmissions,
@@ -1991,6 +2043,7 @@ async function startApp() {
   $('report-to').value = addDays(mondayOf(today), 6);
 
   initTabs();
+  initSegTabs(); // Day | Week inside the Timesheets section (#107)
 
   $('day-add').addEventListener('click', () => {
     resetEntryForm();
@@ -2032,7 +2085,7 @@ async function startApp() {
     const today = isoDate(new Date());
     const days = weekState.days.length === 7 ? weekState.days : [today];
     $('day-date').value = days.includes(today) ? today : days[0];
-    switchTab('tab-day');
+    showTimesheet('ts-day');
     await refreshDay();
     $('day-add').click();
   });
