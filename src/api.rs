@@ -100,6 +100,9 @@ pub struct AppState {
     pub audit: Arc<crate::audit::AuditLog>,
     pub revocations: Arc<crate::revoke::Revocations>,
     pub vault: Option<Arc<crate::vault::SecretVault>>,
+    /// Email transport (#35). Disabled unless SMTP is configured; tests inject
+    /// a recording sender.
+    pub email: Arc<dyn crate::email::EmailSender>,
 }
 
 impl AppState {
@@ -124,6 +127,12 @@ impl AppState {
         .ok()
         .flatten()
         .map(Arc::new);
+        // Email adapter (#35): SMTP if configured (vault or env), else disabled.
+        let email: Arc<dyn crate::email::EmailSender> =
+            match crate::email::SmtpConfig::from_sources(vault.as_deref()) {
+                Some(cfg) => Arc::new(crate::email::SmtpEmailSender::new(cfg)),
+                None => Arc::new(crate::email::DisabledEmailSender),
+            };
         Self {
             clock: Arc::new(crate::clock::SystemClock),
             locks,
@@ -136,8 +145,16 @@ impl AppState {
             audit,
             revocations,
             vault,
+            email,
             store,
         }
+    }
+
+    /// Swaps the email transport (tests inject a `RecordingEmailSender`).
+    #[must_use]
+    pub fn with_email(mut self, sender: Arc<dyn crate::email::EmailSender>) -> Self {
+        self.email = sender;
+        self
     }
 }
 
@@ -681,6 +698,85 @@ pub async fn invoice_summary(State(app): State<AppState>) -> ApiResult {
     let invoices = app.store.list_invoices()?;
     let summary = crate::domain::summarise_invoices(&invoices, app.clock.today());
     Ok(Json(summary).into_response())
+}
+
+/// Formats minor units for an email body, e.g. `120000` + `EUR` -> `1,200.00 EUR`.
+pub fn money_for_email(minor: u64, currency: &str) -> String {
+    let whole = minor / 100;
+    let frac = minor % 100;
+    let grouped = whole
+        .to_string()
+        .chars()
+        .rev()
+        .enumerate()
+        .fold(String::new(), |mut acc, (i, c)| {
+            if i > 0 && i % 3 == 0 {
+                acc.push(',');
+            }
+            acc.push(c);
+            acc
+        })
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("{grouped}.{:02} {currency}", frac)
+}
+
+/// Emails an issued invoice to the customer's billing address (#35). Admin
+/// only (invoices are admin surface). Non-blocking: the transport runs on a
+/// blocking thread so a slow relay never stalls the request.
+pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    let invoice = app
+        .store
+        .get_invoice(id)?
+        .ok_or_else(|| ApiError::not_found("invoice"))?;
+    if invoice.status == crate::domain::InvoiceStatus::Draft {
+        return Err(ApiError::conflict("issue the invoice before emailing it"));
+    }
+    let customer = get_customer(&app.store, invoice.customer_id)?;
+    if customer.email.trim().is_empty() {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "email",
+            "customer has no billing email on file",
+        )]));
+    }
+    let amount = money_for_email(invoice.total_minor, &invoice.currency.0);
+    let due = invoice.due_date.map(|d| d.to_string());
+    let text = crate::email::render_invoice_email(
+        &customer.name,
+        &invoice.number,
+        &amount,
+        due.as_deref(),
+        "TucanoTime",
+    );
+    let subject = crate::email::invoice_subject(&invoice.number, "TucanoTime");
+    let msg = crate::email::EmailMessage {
+        to: customer.email.clone(),
+        subject,
+        text,
+        html: None,
+        attachment: None,
+    };
+    let sent_to = msg.to.clone();
+    let sender = app.email.clone();
+    // A slow relay must not stall the async request thread (#35).
+    tokio::task::spawn_blocking(move || sender.send(&msg))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "email_failed",
+                "email task panicked",
+            )
+        })?
+        .map_err(|e| {
+            ApiError::new(
+                axum::http::StatusCode::BAD_GATEWAY,
+                "email_failed",
+                e.to_string(),
+            )
+        })?;
+    Ok(Json(serde_json::json!({ "sent_to": sent_to })).into_response())
 }
 
 pub async fn invoice_report_handler(
@@ -1341,6 +1437,7 @@ pub async fn create_customer(
         currency: Currency(draft.currency),
         default_rate_minor: draft.default_rate_minor,
         active: draft.active,
+        email: draft.email,
     };
     app.store.put_customer(&customer)?;
     Ok((StatusCode::CREATED, Json(&customer)).into_response())
@@ -1369,6 +1466,7 @@ pub async fn update_customer(
         currency: Currency(draft.currency),
         default_rate_minor: draft.default_rate_minor,
         active: draft.active,
+        email: draft.email,
     };
     app.store.put_customer(&updated)?;
     Ok(Json(&updated).into_response())

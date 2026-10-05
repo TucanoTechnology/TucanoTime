@@ -190,6 +190,7 @@ mod tests {
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,
+            email: String::new(),
         };
         let entries = vec![Entry {
             id: uuid::Uuid::new_v4(),

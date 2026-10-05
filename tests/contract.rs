@@ -24,6 +24,8 @@ const ADMIN_PW: &str = "supersecret1";
 struct Client {
     router: Router,
     cookie: String,
+    /// The recording email transport installed on the router (#35).
+    email: Arc<tucano_time::email::RecordingEmailSender>,
 }
 
 async fn raw(
@@ -82,6 +84,7 @@ impl Client {
             3600,
             false,
         ));
+        let recorder = Arc::new(tucano_time::email::RecordingEmailSender::default());
         let state = match locks {
             Some(l) => {
                 let store = Arc::new(store);
@@ -99,9 +102,10 @@ impl Client {
                     audit,
                     revocations,
                     vault: None,
+                    email: recorder.clone(),
                 }
             }
-            None => AppState::with_session(store, session),
+            None => AppState::with_session(store, session).with_email(recorder.clone()),
         };
         let router = tucano_time::build_router(state);
         // Bootstrap the first admin (403 if users already exist — fine).
@@ -114,7 +118,11 @@ impl Client {
         )
         .await;
         let cookie = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
-        Self { router, cookie }
+        Self {
+            router,
+            cookie,
+            email: recorder,
+        }
     }
 }
 
@@ -1691,6 +1699,7 @@ fn concurrent_writer_times_out_with_lock_busy() {
         currency: tucano_time::domain::Currency("EUR".into()),
         default_rate_minor: 1,
         active: true,
+        email: String::new(),
     };
     let err = store.put_customer(&cust).expect_err("should time out");
     assert!(
@@ -2061,6 +2070,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         audit: std::sync::Arc::new(tucano_time::audit::AuditLog::new(&root)),
         revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
         vault: Some(vault),
+        email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
     };
     let router = tucano_time::build_router(state);
     // bootstrap admin
@@ -2202,6 +2212,7 @@ async fn calendar_events_from_configured_feed() {
         audit: std::sync::Arc::new(tucano_time::audit::AuditLog::new(&root)),
         revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
         vault: Some(vault),
+        email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
     };
     let router = tucano_time::build_router(state);
     raw(
@@ -2303,4 +2314,80 @@ async fn budget_report_shows_burn() {
     assert_eq!(rows[0]["over"], false);
     assert_eq!(rows[0]["burn_amount_minor"], 36000);
     assert_eq!(rows[0]["amount_pct"], 60.0);
+}
+
+#[tokio::test]
+async fn invoice_email_sends_to_customer() {
+    let (app, _d) = app().await;
+    // Customer with a billing email (#35).
+    let (sc, cust) = json_req(
+        &app,
+        "POST",
+        "/customers",
+        Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{cust}");
+    assert_eq!(cust["email"], "billing@acme.test");
+    let cid = cust["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+
+    // Draft invoices must be issued before emailing.
+    let (sd, _) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    assert_eq!(sd, StatusCode::CONFLICT);
+
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::OK, "{body}");
+    assert_eq!(body["sent_to"], "billing@acme.test");
+    let msgs = app.email.messages();
+    assert_eq!(msgs.len(), 1);
+    assert!(
+        msgs[0].text.contains("3h") || msgs[0].text.contains("180.00"),
+        "{}",
+        msgs[0].text
+    );
+    assert!(msgs[0].subject.contains(inv["number"].as_str().unwrap()));
+}
+
+#[tokio::test]
+async fn invoice_email_without_customer_email_is_422() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "NOEMAIL", "EUR", 6000).await; // no email field
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(app.email.messages().len(), 0);
 }

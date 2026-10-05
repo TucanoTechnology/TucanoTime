@@ -287,6 +287,30 @@ const editRes = await fetch(`${BASE}/entries/${invoicedEntryId}`, {
 });
 check('issuing locks the invoiced entry (edit -> 409)', editRes.status === 409);
 
+// ---- EMAIL (#35): set a billing email, then email the issued invoice ----
+const custObj = (await (await fetch(BASE + `/customers/${acmeOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
+custObj.email = 'billing@acme.test';
+const putC = await fetch(`${BASE}/customers/${acmeOpt.value}`, {
+  method: 'PUT',
+  headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE },
+  body: JSON.stringify({ name: custObj.name, currency: custObj.currency, default_rate_minor: custObj.default_rate_minor, active: custObj.active, email: 'billing@acme.test' }),
+});
+check('customer email round-trips via API', putC.status === 200 && (await putC.json()).email === 'billing@acme.test');
+const emailRes = await fetch(`${BASE}/invoices/${acmeInv.id}/email`, { method: 'POST', headers: { Cookie: SESSION_COOKIE } });
+const emailBody = await emailRes.json();
+check('invoice email endpoint sends to the billing address', emailRes.status === 200 && emailBody.sent_to === 'billing@acme.test');
+
+// The GUI shows an Email button on the issued invoice and announces the send.
+window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(300); // tab is shown -> refreshInvoices() re-pulls, now reflecting the issued state
+const emailBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Email');
+check('issued invoice renders an Email button', !!emailBtn);
+if (emailBtn) {
+  emailBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  check('Email button announces the send', /emailed to billing@acme.test/i.test(window.document.getElementById('live-region').textContent));
+}
+
 // ---- EXPENSES (#23): add a category + an expense via the forms ----
 const tabExp = window.document.getElementById('tab-expenses');
 tabExp.dispatchEvent(new window.Event('click', { bubbles: true }));

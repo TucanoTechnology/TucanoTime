@@ -177,6 +177,7 @@ mod tests {
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,
+            email: String::new(),
         };
         store.put_customer(&cust).unwrap();
         let sched = RecurringSchedule {

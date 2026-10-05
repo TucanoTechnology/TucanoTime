@@ -178,6 +178,9 @@ function initTabs() {
     const title = $('page-title');
     if (title) title.textContent = tab.textContent.trim();
     tab.focus();
+    // Re-pull the panel's data on show so it reflects changes made elsewhere
+    // (e.g. an invoice issued via the API) without a full reload.
+    refreshPanel(tab.id);
   }
   tabs.forEach((t, i) => {
     t.addEventListener('click', () => activate(t));
@@ -887,6 +890,7 @@ function startCustomerEdit(c) {
   $('customer-currency').value = c.currency;
   $('customer-rate').value = (c.default_rate_minor / 100).toFixed(2);
   $('customer-active').checked = c.active;
+  $('customer-email').value = c.email || '';
   $('customer-save').textContent = 'Update customer';
   $('customer-cancel').hidden = false;
   clearFormError($('customer-error'));
@@ -902,6 +906,7 @@ async function saveCustomer(evt) {
     currency: $('customer-currency').value.trim().toUpperCase(),
     default_rate_minor: Math.round(Number($('customer-rate').value) * 100),
     active: $('customer-active').checked,
+    email: $('customer-email').value.trim(),
   };
   try {
     if (id) await api.put(`/customers/${id}`, body);
@@ -1282,7 +1287,20 @@ async function refreshInvoices() {
       pay.type = 'button';
       pay.textContent = 'Mark paid';
       pay.addEventListener('click', () => markInvoicePaid(inv.id));
-      act.append(pay);
+      const email = document.createElement('button');
+      email.className = 'link';
+      email.type = 'button';
+      email.textContent = 'Email';
+      email.title = 'Send this invoice to the customer billing email';
+      email.addEventListener('click', () => emailInvoice(inv.id));
+      act.append(pay, email);
+    } else if (inv.status === 'paid') {
+      const email = document.createElement('button');
+      email.className = 'link';
+      email.type = 'button';
+      email.textContent = 'Email';
+      email.addEventListener('click', () => emailInvoice(inv.id));
+      act.append(email);
     }
     tr.append(num, cust, period, total, status, act);
     tbody.appendChild(tr);
@@ -1336,6 +1354,15 @@ async function issueInvoice(id) {
     await refreshInvoices();
   } catch (err) {
     announce(err.message);
+  }
+}
+
+async function emailInvoice(id) {
+  try {
+    const res = await api.post(`/invoices/${id}/email`);
+    announce(`Invoice emailed to ${res.sent_to}.`);
+  } catch (err) {
+    announce(`Email failed: ${err.message}`);
   }
 }
 
@@ -1764,6 +1791,19 @@ async function markNotificationsRead() {
 function switchTab(tabId) {
   const tab = $(tabId);
   if (tab) tab.click();
+}
+
+/// Reloads a panel's data when its tab is shown (keeps views fresh after
+/// changes made from another panel or the API).
+function refreshPanel(tabId) {
+  const fn = {
+    'tab-day': refreshDay,
+    'tab-week': refreshWeek,
+    'tab-invoices': refreshInvoices,
+    'tab-expenses': refreshExpenses,
+    'tab-submissions': refreshSubmissions,
+  }[tabId];
+  if (fn) fn();
 }
 
 // Wires the app listeners and loads the first data. Called once authenticated.
