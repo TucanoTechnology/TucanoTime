@@ -170,15 +170,17 @@
           <span id="week-label" class="day-label"></span>
           <button type="button" id="week-next" aria-label="Next week">›</button>
         </nav>
+        <button type="button" id="week-today" class="link">Return to this week</button>
       </div>
       <p class="hint">Type hours into a cell and press Enter or click away to save. Clearing a cell deletes that entry.</p>
       <div class="table-scroll">
         <table id="week-table" class="grid"></table>
       </div>
-      <p id="week-empty" hidden>No entries this week. Use “+ Add row” to start a project row, or “Copy last week”.</p>
+      <p id="week-empty" hidden>No entries this week. Use “+ Add row” to start a project row, or copy projects from an earlier week.</p>
       <div class="week-controls">
         <button type="button" id="week-add-row" class="secondary">+ Add row</button>
-        <button type="button" id="week-copy-last" class="secondary">Copy from last week (projects only)</button>
+        <label for="week-copy-weeks" class="sr-only">Copy project rows from an earlier week</label>
+        <select id="week-copy-weeks" aria-label="Copy project rows from an earlier week"></select>
         <select id="week-add-project" hidden aria-label="Project to add"></select>
         <button type="button" id="week-add-confirm" hidden>Add</button>
         <button type="button" id="week-add-cancel" class="link" hidden>Cancel</button>
