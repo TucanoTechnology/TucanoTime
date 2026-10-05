@@ -322,6 +322,7 @@ async function refreshDay() {
     del.addEventListener('click', () => removeEntry(e));
     tdAct.append(edit, del);
 
+    tr.dataset.entryId = e.id; // C7: target the exact row on jump-to-entry
     tr.append(tdMain, tdHrs, tdAct);
     tbody.appendChild(tr);
   }
@@ -330,8 +331,8 @@ async function refreshDay() {
   $('day-empty').hidden = rows.length !== 0;
   $('entry-date').value = date;
   $('entry-form-date').textContent = date ? `For ${date}` : '';
-  await refreshWeekStrip();
-  await refreshCalendar(date);
+  // D2: the strip and calendar pulls are independent — fetch them at once.
+  await Promise.all([refreshWeekStrip(), refreshCalendar(date)]);
 }
 
 /// Copy-forward (#12): pending rows for the previous day's projects, saved
@@ -485,10 +486,7 @@ async function saveEntry(evt) {
     resetEntryForm();
     if (savedId) showEntryForm(false); // editing closes the inline row
     await refreshDay();
-    if (!savedId) {
-      $('entry-hours').focus();
-      $('entry-note').focus();
-    }
+    if (!savedId) $('entry-note').focus(); // note is the next useful field
   } catch (err) {
     showFormError($('entry-error'), err);
   }
@@ -508,7 +506,11 @@ const weekState = {
 
 // Entry ids locked by submitted weeks or issued invoices. Fetched fresh on
 // every grid render — locks can appear while the grid is open (#8/#16).
+let weekLockCache = { at: 0, ids: null }; // D2: 5s TTL — one commit reuses it
+
 async function weekLockIds() {
+  const nowMs = Date.now();
+  if (weekLockCache.ids && nowMs - weekLockCache.at < 5000) return weekLockCache.ids;
   const locked = new Set();
   try {
     const subs = await api.get('/submissions');
@@ -524,6 +526,7 @@ async function weekLockIds() {
       if (i.status === 'issued') for (const l of i.lines || []) if (l.entry_id) locked.add(l.entry_id);
     }
   } catch { /* members cannot list invoices */ }
+  weekLockCache = { at: Date.now(), ids: locked };
   return locked;
 }
 
@@ -765,8 +768,9 @@ async function commitCell(input) {
     input.focus();
     try {
       await refreshWeek();
-      const again = document.querySelector(
-        `#week-table input.cell-input[data-customer="${customerId}"][data-project="${projectCode}"][data-date="${date}"]`,
+      const again = [...document.querySelectorAll('#week-table input.cell-input')].find(
+        (i) =>
+          i.dataset.customer === customerId && i.dataset.project === projectCode && i.dataset.date === date,
       );
       if (again) {
         again.value = raw;
@@ -834,11 +838,11 @@ async function copyLastWeek() {
 
 async function jumpToEntry(entryId) {
   const e = await api.get(`/entries/${entryId}`);
-  switchTab('tab-day');
+  switchTab('tab-day'); // suppressed — we await the refresh ourselves
   $('day-date').value = e.date;
   await refreshDay();
-  const target = $('day-table').querySelector('tbody tr');
   startEdit(e);
+  const target = document.querySelector(`#day-table tbody tr[data-entry-id="${entryId}"]`);
   if (target) target.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -940,10 +944,20 @@ async function removeCustomer(c) {
     await loadCustomers();
     await refreshCustomerTable();
     await refreshCustomerPickers();
+    // C7: reset the project panel — it used to keep pointing at the deleted
+    // customer, so the next project save 404'd, and leak its cache entry.
+    if (state.selectedCustomerId === c.id) {
+      state.selectedCustomerId = null;
+      $('project-form').hidden = true;
+      $('project-table').hidden = true;
+      $('task-form').hidden = true;
+      $('task-table').hidden = true;
+      $('project-customer-label').textContent = '— select a customer —';
+    }
+    delete state.projectsByCustomer[c.id];
     announce('Customer deleted.');
   } catch (err) {
     announce(err.message);
-    window.alert(err.message);
   }
 }
 
@@ -1199,9 +1213,14 @@ async function removeTask(t) {
 }
 
 async function refreshCustomerPickers() {
-  // The day entry form picker plus the project picker for the chosen customer.
+  // C7: every customer picker (day form, invoices, expenses, timer) refreshes
+  // from one place — previously a newly added customer could not be invoiced
+  // until a full page reload.
+  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer']) {
+    const el = $(id);
+    if (el) fillCustomerSelect(el, el.value, true);
+  }
   const keep = $('entry-customer').value;
-  fillCustomerSelect($('entry-customer'), keep, true);
   if (keep && !state.customers.some((c) => c.id === keep)) {
     await fillProjectSelect($('entry-project'), '', null);
   }
@@ -1923,20 +1942,33 @@ async function markNotificationsRead() {
 
 // ---------------------------------------------------------------- boot ---
 
+let suppressPanelRefresh = false; // C7: avoid double-fetch when jumping panels
+
 function switchTab(tabId) {
   const tab = $(tabId);
-  if (tab) tab.click();
+  if (!tab) return;
+  suppressPanelRefresh = true;
+  tab.click();
+  suppressPanelRefresh = false;
 }
 
 /// Reloads a panel's data when its tab is shown (keeps views fresh after
 /// changes made from another panel or the API).
 function refreshPanel(tabId) {
+  if (suppressPanelRefresh) return; // caller will refresh explicitly
+  // C7: customers & settings were missing — re-shown panels re-pull now.
   const fn = {
     'tab-day': refreshDay,
     'tab-week': refreshWeek,
     'tab-invoices': refreshInvoices,
     'tab-expenses': refreshExpenses,
     'tab-submissions': refreshSubmissions,
+    'tab-customers': async () => {
+      await loadCustomers();
+      await refreshCustomerTable();
+      await refreshCustomerPickers();
+    },
+    'tab-settings': refreshSettings,
   }[tabId];
   if (fn) fn();
 }
@@ -2042,25 +2074,24 @@ async function startApp() {
   });
 
   await loadCustomers();
-  await refreshCustomerTable();
-  await refreshCustomerPickers();
-  await fillProjectSelect($('entry-project'), '', null);
-  await refreshDay();
-  await refreshWeek();
-  fillCustomerSelect($('invoice-customer'), '', true);
-  await refreshInvoices();
-  fillCustomerSelect($('expense-customer'), '', true);
-  fillCustomerSelect($('timer-customer'), '', true);
-  await fillProjectSelect($('timer-project'), '', null);
-  await refreshTimer();
-  await refreshNotifications();
-  await fillProjectSelect($('expense-project'), '', null);
+  await refreshCustomerPickers(); // fills all four pickers, no fetches
+  // D1: paint the day view first, then fetch the independent panels together
+  // (~17 sequential RTTs used to gate first paint; now ~2).
+  const firstPaint = refreshDay();
   $('expense-date').value = today;
-  await refreshCategories();
-  await fillCategorySelect();
-  await refreshExpenses();
-  await refreshSubmissions();
-  await refreshSettings();
+  await Promise.all([
+    firstPaint,
+    refreshWeek(),
+    refreshCustomerTable(),
+    refreshInvoices(),
+    refreshTimer(),
+    refreshNotifications(),
+    refreshCategories(),
+    fillCategorySelect(),
+    refreshExpenses(),
+    refreshSubmissions(),
+    refreshSettings(),
+  ]);
   $('version').textContent = 'TucanoTime';
 }
 
