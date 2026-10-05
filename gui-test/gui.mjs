@@ -36,6 +36,10 @@ window.fetch = (input, init = {}) => {
 // No window.confirm/prompt/alert stubs: the app drives one inline <dialog>
 // (#102) and the checks below exercise it like a user would.
 if (!window.Element.prototype.scrollIntoView) window.Element.prototype.scrollIntoView = () => {};
+// jsdom has no blob URLs; the #113 download check stubs these and captures
+// the transient <a download> instead of letting jsdom attempt a navigation.
+window.URL.createObjectURL = () => 'blob:jsdom-stub';
+window.URL.revokeObjectURL = () => {};
 
 // --- authenticate + seed against the live server (fresh data dir) ---
 const postJson = (path, body) =>
@@ -341,6 +345,19 @@ const editRes = await fetch(`${BASE}/entries/${invoicedEntryId}`, {
 });
 check('issuing locks the invoiced entry (edit -> 409)', editRes.status === 409);
 
+// ---- INVOICE PDF (#113): archived at issue, downloadable, hinted in JSON ----
+const issuedBody = await issueRes.clone().json();
+check('issue persists the pdf hint', issuedBody.pdf && /^INV-\d+\.pdf$/.test(issuedBody.pdf.filename) && issuedBody.pdf.sha256.length === 64 && issuedBody.pdf.bytes > 100);
+const pdfRes = await fetch(`${BASE}/invoices/${acmeInv.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } });
+const pdfHead = new Uint8Array(await pdfRes.arrayBuffer().then((b) => b.slice(0, 8)));
+check(
+  'GET /invoices/{id}/pdf serves the archived PDF',
+  pdfRes.status === 200
+    && (pdfRes.headers.get('content-type') || '').includes('application/pdf')
+    && String.fromCharCode(...pdfHead) === '%PDF-1.4',
+);
+check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/.test(pdfRes.headers.get('content-disposition') || ''));
+
 // ---- EMAIL (#35): set a billing email, then email the issued invoice ----
 const custObj = (await (await fetch(BASE + `/customers/${acmeOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
 custObj.email = 'billing@acme.test';
@@ -363,6 +380,26 @@ if (emailBtn) {
   emailBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(300);
   check('Email button announces the send', /emailed to billing@acme.test/i.test(window.document.getElementById('live-region').textContent));
+}
+
+// ---- PDF DOWNLOAD (#113): GUI button fetches the blob and saves it ----
+const pdfBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'PDF');
+check('issued invoice renders a PDF download button', !!pdfBtn);
+if (pdfBtn) {
+  // Capture the transient <a download> instead of letting jsdom navigate:
+  // the app's contract is "blob fetch (cookie intact) -> object URL -> a.click".
+  let savedName = null;
+  const origCreate = window.document.createElement.bind(window.document);
+  window.document.createElement = (tag) => {
+    const node = origCreate(tag);
+    if (tag === 'a') node.addEventListener('click', (e) => { e.preventDefault(); savedName = node.download; });
+    return node;
+  };
+  pdfBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  window.document.createElement = origCreate;
+  check('PDF button saves the numbered file', !!savedName && /^INV-\d+\.pdf$/.test(savedName));
+  check('PDF download announces success', /Invoice PDF downloaded/i.test(window.document.getElementById('live-region').textContent));
 }
 
 // ---- PAYMENTS (#34): checkout link via the Pay link button + webhook pays it ----

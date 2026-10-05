@@ -136,7 +136,7 @@
         "type": "number",
         "minimum": 0.01,
         "maximum": 24,
-        "description": "Hours as a decimal with at most two fractional digits (0.01–24.00). Stored as integer hundredths.",
+        "description": "Hours as a decimal with at most two fractional digits (0.01\u201324.00). Stored as integer hundredths.",
         "examples": [
           7.5
         ]
@@ -865,6 +865,16 @@
           },
           "payment_reference": {
             "type": "string"
+          },
+          "pdf": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PdfHint"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -1441,6 +1451,33 @@
           }
         },
         "additionalProperties": false
+      },
+      "PdfHint": {
+        "type": "object",
+        "description": "Metadata for the PDF archived beside the invoice (#113).",
+        "required": [
+          "filename",
+          "bytes",
+          "sha256",
+          "archived_at"
+        ],
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "archived_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -1485,7 +1522,7 @@
         }
       },
       "Locked": {
-        "description": "A concurrent writer holds the store lock (#62); transient — retry. Sent with Retry-After.",
+        "description": "A concurrent writer holds the store lock (#62); transient \u2014 retry. Sent with Retry-After.",
         "headers": {
           "Retry-After": {
             "schema": {
@@ -3595,7 +3632,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Issue a draft invoice, locking its entries from edits/deletes",
+        "summary": "Issue a draft invoice (locks entries; archives the PDF, #113)",
         "responses": {
           "200": {
             "description": "Issued invoice.",
@@ -3612,6 +3649,60 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/invoices/{id}/pdf": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getInvoicePdf",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Download the archived invoice PDF (#113); admin only",
+        "description": "Returns the PDF archived at issue time, unmodified. A legacy issued invoice without an archive renders it from the snapshot-locked document on first read. Drafts are refused (409). Responses carry Content-Disposition and an ETag from the archive sha256.",
+        "responses": {
+          "200": {
+            "description": "PDF document.",
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 of the archived bytes, quoted."
+              },
+              "Content-Disposition": {
+                "description": "attachment; filename=\"<number>.pdf\""
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "description": "The archive could not be read or written."
           }
         }
       }
@@ -3837,7 +3928,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Provider webhook (public; authenticated by HMAC signature) — verifies amount/currency against the invoice and marks it paid (#34, review A11)",
+        "summary": "Provider webhook (public; authenticated by HMAC signature) \u2014 verifies amount/currency against the invoice and marks it paid (#34, review A11)",
         "requestBody": {
           "required": true,
           "content": {

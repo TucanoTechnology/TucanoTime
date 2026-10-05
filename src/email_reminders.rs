@@ -21,6 +21,8 @@ pub struct EmailReminderJob {
     sender: Arc<dyn EmailSender>,
     cadence_days: i64,
     state_path: PathBuf,
+    /// Issuing organisation, resolved from config at boot (#113).
+    org: crate::pdf::Org,
 }
 
 impl EmailReminderJob {
@@ -29,12 +31,14 @@ impl EmailReminderJob {
         sender: Arc<dyn EmailSender>,
         cadence_days: i64,
         root: &Path,
+        org: crate::pdf::Org,
     ) -> Self {
         Self {
             store,
             sender,
             cadence_days,
             state_path: root.join("email_reminders.json"),
+            org,
         }
     }
 
@@ -94,6 +98,41 @@ impl EmailReminderJob {
             })
             .collect()
     }
+    /// The archived (or lazily-rendered) PDF for a reminder email. A store
+    /// error must not drop the reminder: on failure we send without the
+    /// attachment, exactly as the pre-#113 path did.
+    fn resolve_pdf(
+        &self,
+        inv: &Invoice,
+        customer: &crate::domain::Customer,
+        now: DateTime<Utc>,
+    ) -> Option<(String, Vec<u8>)> {
+        match self.store.invoice_pdf_bytes(inv.id) {
+            Ok(Some(bytes)) => Some((
+                inv.pdf
+                    .as_ref()
+                    .map(|h| h.filename.clone())
+                    .unwrap_or_else(|| format!("{}.pdf", inv.number)),
+                bytes,
+            )),
+            Ok(None) => {
+                let doc = crate::pdf::doc_for(inv, customer, &self.org);
+                let bytes = crate::pdf::render_invoice_pdf(&doc);
+                let filename = match self.store.attach_invoice_pdf(inv.id, &bytes, now) {
+                    Ok(updated) => updated
+                        .pdf
+                        .map(|h| h.filename)
+                        .unwrap_or_else(|| format!("{}.pdf", inv.number)),
+                    Err(_) => format!("{}.pdf", inv.number),
+                };
+                Some((filename, bytes))
+            }
+            Err(e) => {
+                tracing::warn!(invoice = %inv.number, error = %e, "reminder pdf read failed");
+                None
+            }
+        }
+    }
 }
 
 impl Job for EmailReminderJob {
@@ -121,6 +160,11 @@ impl Job for EmailReminderJob {
             if customer.email.trim().is_empty() {
                 continue;
             }
+            // Resolve the PDF to attach (#113): the archived bytes when the
+            // invoice has them, else render from the snapshot-locked document
+            // and archive on first sight. The reminder must carry the same
+            // document the customer was issued, never a freshly derived one.
+            let attachment = self.resolve_pdf(&inv, customer, now);
             let amount = crate::api::money_for_email(inv.total_minor, &inv.currency.0);
             let due = inv.due_date.map(|d| d.to_string()).unwrap_or_default();
             let text = render_reminder_email(
@@ -129,14 +173,15 @@ impl Job for EmailReminderJob {
                 &amount,
                 &due,
                 days_over,
-                "TucanoTime",
+                &self.org.name,
+                attachment.is_some(),
             );
             let msg = EmailMessage {
                 to: customer.email.clone(),
                 subject: format!("Overdue invoice {}", inv.number),
                 text,
                 html: None,
-                attachment: None,
+                attachment,
             };
             match self.sender.send(&msg) {
                 Ok(()) => {
@@ -171,6 +216,7 @@ mod tests {
             due_date: Some(due),
             paid_at: None,
             payment_reference: String::new(),
+            pdf: None,
         }
     }
 

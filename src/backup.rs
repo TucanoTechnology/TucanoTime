@@ -490,6 +490,33 @@ mod tests {
     }
 
     #[test]
+    fn archived_pdf_round_trips_with_intact_sha256() {
+        // #113: the archive under invoices/ is a non-JSON file the backup
+        // walk already covers; prove the PDF bytes survive untouched and the
+        // manifest checksum matches the original.
+        use sha2::{Digest, Sha256};
+        let src = tempfile::tempdir().unwrap();
+        let hold = tempfile::tempdir().unwrap();
+        seed_data(src.path());
+        let pdf = b"%PDF-1.4\n\x80\x81\xfe rest of the invoice document".to_vec();
+        std::fs::write(src.path().join("invoices/INV-1.pdf"), &pdf).unwrap();
+        let original_sha = Sha256::digest(&pdf);
+
+        let archive = hold.path().join("out.tar.gz");
+        create(src.path(), &archive).unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        restore(&archive, dst.path(), false).unwrap();
+
+        let restored = std::fs::read(dst.path().join("invoices/INV-1.pdf")).unwrap();
+        assert_eq!(restored, pdf, "PDF bytes round-trip byte-for-byte");
+        assert_eq!(Sha256::digest(&restored), original_sha);
+        // `restore()` verifies each file's manifest sha256 as it streams (it
+        // returns Corrupt on any mismatch), so a clean restore is the proof
+        // the archived PDF's checksum survived the round-trip.
+        let _ = &hold;
+    }
+
+    #[test]
     fn backup_restore_roundtrip_with_checksums() {
         let src = tempfile::tempdir().unwrap();
         let hold = tempfile::tempdir().unwrap(); // archive lives outside the backup root

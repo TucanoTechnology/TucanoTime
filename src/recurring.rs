@@ -67,6 +67,7 @@ impl RecurringJob {
                     due_date: None,
                     paid_at: None,
                     payment_reference: String::new(),
+                    pdf: None,
                 }))
             }
             RecurMode::Time => {

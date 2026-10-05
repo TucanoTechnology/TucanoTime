@@ -100,7 +100,20 @@ pub async fn get_invoice_handler(State(app): State<AppState>, Path(id): Path<Uui
     Ok(Json(get_invoice_or_404(&app, id)?).into_response())
 }
 
-/// Issue a draft invoice: this locks its entries from edits/deletes (#18 seam).
+/// The issuing organisation for invoice documents (#113), from
+/// `config.json`/`TUCANO_ORG_NAME` (#94); the email surface shares it.
+pub(crate) fn org_for(app: &AppState) -> crate::pdf::Org {
+    crate::pdf::Org {
+        name: app
+            .cfg()
+            .get_str("org_name", &crate::appconfig::process_env),
+    }
+}
+
+/// Issue a draft invoice: this locks its entries from edits/deletes (#18 seam)
+/// and archives its PDF for the first time (#113). The document is rendered
+/// from the exact state the store is about to persist (same clock, same due
+/// date), so issuing and archiving commit or fail as one transaction.
 pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     // Draft check + transition happen inside one store lock (review B4):
     // an issue racing a pay (or another issue) cannot double-transition.
@@ -110,8 +123,81 @@ pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) ->
         .period_to
         .checked_add_days(chrono::Days::new(14))
         .unwrap_or(invoice.period_to);
-    let issued = app.store.issue_invoice(id, app.clock.now(), due)?;
+    let customer = get_customer(&app.store, invoice.customer_id)?;
+    // Render against the to-be-issued snapshot: the PDF is the issue-time
+    // document, and bytes are pure in this state (legacy re-renders match).
+    let mut snapshot = invoice;
+    snapshot.status = crate::domain::InvoiceStatus::Issued;
+    snapshot.issued_at = Some(app.clock.now());
+    snapshot.due_date = Some(due);
+    let doc = crate::pdf::doc_for(&snapshot, &customer, &org_for(&app));
+    let pdf = crate::pdf::render_invoice_pdf(&doc);
+    let issued = app.store.issue_invoice(id, app.clock.now(), due, &pdf)?;
     Ok(Json(issued).into_response())
+}
+
+/// Download the archived invoice PDF (#113). Admin tier only (the whole
+/// `/invoices` surface is, #51). A legacy issued invoice with no archive yet
+/// gets it rendered lazily from the snapshot-locked document — byte-stable by
+/// the renderer's determinism contract — and persisted on first read.
+pub async fn invoice_pdf(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    let invoice = get_invoice_or_404(&app, id)?;
+    if invoice.status == crate::domain::InvoiceStatus::Draft {
+        return Err(ApiError::conflict(
+            "issue the invoice before downloading its PDF",
+        ));
+    }
+    let (bytes, filename) = match app.store.invoice_pdf_bytes(id)? {
+        Some(b) => (b, format!("{}.pdf", sanitize_number(&invoice.number))),
+        None => {
+            let customer = get_customer(&app.store, invoice.customer_id)?;
+            let doc = crate::pdf::doc_for(&invoice, &customer, &org_for(&app));
+            let b = crate::pdf::render_invoice_pdf(&doc);
+            // Persist the archive + hint; a failure here is a plain 500 and
+            // costs nothing (the invoice JSON remains the record of truth).
+            let attached = app.store.attach_invoice_pdf(id, &b, app.clock.now())?;
+            let name = attached
+                .pdf
+                .map(|h| h.filename)
+                .unwrap_or_else(|| format!("{}.pdf", sanitize_number(&invoice.number)));
+            (b, name)
+        }
+    };
+    use sha2::{Digest, Sha256};
+    let sha = Sha256::digest(&bytes);
+    let etag = sha.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    tracing::debug!(invoice = %invoice.number, bytes = bytes.len(), "invoice pdf download");
+    Ok((
+        StatusCode::OK,
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/pdf".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+            (axum::http::header::ETAG, format!("\"{etag}\"")),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+/// Download names come from `Invoice::number` (minted server-side), sanitised
+/// defensively — never from user input (#50).
+fn sanitize_number(number: &str) -> String {
+    number
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 #[derive(serde::Deserialize)]
@@ -169,9 +255,38 @@ pub fn money_for_email(minor: u64, currency: &str) -> String {
     format!("{grouped}.{:02} {currency}", frac)
 }
 
+/// Resolve the invoice PDF for delivery: the archived bytes when present,
+/// otherwise rendered on demand from the snapshot-locked invoice and archived
+/// (#113: "fall back to rendering it on demand if the archive is missing").
+pub(crate) fn invoice_pdf_for_delivery(
+    app: &AppState,
+    invoice: &Invoice,
+) -> Result<(String, Vec<u8>), ApiError> {
+    if let Some(bytes) = app.store.invoice_pdf_bytes(invoice.id)? {
+        let name = invoice
+            .pdf
+            .as_ref()
+            .map(|h| h.filename.clone())
+            .unwrap_or_else(|| format!("{}.pdf", sanitize_number(&invoice.number)));
+        return Ok((name, bytes));
+    }
+    let customer = get_customer(&app.store, invoice.customer_id)?;
+    let doc = crate::pdf::doc_for(invoice, &customer, &org_for(app));
+    let bytes = crate::pdf::render_invoice_pdf(&doc);
+    let attached = app
+        .store
+        .attach_invoice_pdf(invoice.id, &bytes, app.clock.now())?;
+    let name = attached
+        .pdf
+        .map(|h| h.filename)
+        .unwrap_or_else(|| format!("{}.pdf", sanitize_number(&invoice.number)));
+    Ok((name, bytes))
+}
+
 /// Emails an issued invoice to the customer's billing address (#35). Admin
 /// only (invoices are admin surface). Non-blocking: the transport runs on a
-/// blocking thread so a slow relay never stalls the request.
+/// blocking thread so a slow relay never stalls the request. The archived
+/// PDF rides along as an `application/pdf` attachment (#113).
 pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     let invoice = get_invoice_or_404(&app, id)?;
     if invoice.status == crate::domain::InvoiceStatus::Draft {
@@ -184,22 +299,25 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
             "customer has no billing email on file",
         )]));
     }
+    let (filename, pdf) = invoice_pdf_for_delivery(&app, &invoice)?;
     let amount = money_for_email(invoice.total_minor, &invoice.currency.0);
     let due = invoice.due_date.map(|d| d.to_string());
+    let org = org_for(&app);
     let text = crate::email::render_invoice_email(
         &customer.name,
         &invoice.number,
         &amount,
         due.as_deref(),
-        "TucanoTime",
+        &org.name,
+        true,
     );
-    let subject = crate::email::invoice_subject(&invoice.number, "TucanoTime");
+    let subject = crate::email::invoice_subject(&invoice.number, &org.name);
     let msg = crate::email::EmailMessage {
         to: customer.email.clone(),
         subject,
         text,
         html: None,
-        attachment: None,
+        attachment: Some((filename, pdf)),
     };
     let sent_to = msg.to.clone();
     let sender = app.email.clone();

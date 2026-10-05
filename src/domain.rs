@@ -317,6 +317,29 @@ pub struct Invoice {
     pub paid_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub payment_reference: String,
+    /// Archived PDF document hint (#113): metadata about the immutable
+    /// `invoices/<id>.pdf` written at issue time. `None` for drafts and for
+    /// legacy issued invoices whose PDF has not been resolved yet (the first
+    /// download renders it from the snapshot-locked invoice).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdf: Option<PdfHint>,
+}
+
+/// Metadata for a PDF archived next to the invoice document (#113). Lets the
+/// GUI say "document on file" without reading the file; `sha256` is the
+/// download `ETag` and the archive's verification handle.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PdfHint {
+    /// Sanitised download filename, e.g. `INV-0001.pdf` (derived from
+    /// `Invoice::number`, never from user input).
+    pub filename: String,
+    /// Size of the archived file in bytes.
+    pub bytes: u64,
+    /// Lower-case hex SHA-256 of the archived bytes.
+    pub sha256: String,
+    /// When the archive was written (issue time, or lazy first-download for
+    /// legacy invoices).
+    pub archived_at: DateTime<Utc>,
 }
 
 /// Aggregate of invoice states for the dashboard (#27).
@@ -833,6 +856,7 @@ pub fn generate_invoice(
         due_date: None,
         paid_at: None,
         payment_reference: String::new(),
+        pdf: None,
     })
 }
 
@@ -1310,6 +1334,7 @@ mod tests {
             due_date: due,
             paid_at: None,
             payment_reference: String::new(),
+            pdf: None,
         }
     }
 

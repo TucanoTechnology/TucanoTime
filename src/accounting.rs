@@ -572,6 +572,7 @@ mod tests {
             due_date: Some(chrono::NaiveDate::from_ymd_opt(2026, 10, 21).unwrap()),
             paid_at: None,
             payment_reference: String::new(),
+            pdf: None,
         };
         (inv, customer)
     }

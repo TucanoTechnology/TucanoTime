@@ -211,6 +211,67 @@ async fn json_req(
     (s, v)
 }
 
+/// Authenticated request that keeps the **raw response bytes and headers** —
+/// needed for the binary PDF download (#113), where the body is not JSON.
+async fn raw_req(
+    client: &Client,
+    method: &str,
+    uri: &str,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::COOKIE, &client.cookie)
+        .header("x-csrf-protection", "1")
+        .body(Body::empty())
+        .unwrap();
+    let res = client.router.clone().oneshot(req).await.expect("oneshot");
+    let status = res.status();
+    let headers = res.headers().clone();
+    let bytes = res
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+/// Seed a customer (with billing email), one project and an entry, then
+/// generate + issue an invoice. Returns the issued invoice JSON and the
+/// invoice id. Shared by the #113 PDF tests.
+async fn seed_issued_invoice(client: &Client) -> (Value, String) {
+    let (sc, cust) = json_req(
+        client,
+        "POST",
+        "/customers",
+        Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{cust}");
+    let cid = cust["id"].as_str().unwrap();
+    new_project(client, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        client,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        client,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    let (si, issued) = json_req(client, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    assert_eq!(si, StatusCode::OK, "{issued}");
+    (issued, iid)
+}
+
 /// Unauthenticated request (for the auth tests).
 async fn anon_req(
     client: &Client,
@@ -3163,4 +3224,191 @@ async fn demo_flags_cannot_be_persisted_via_config() {
         let (s, body) = json_req(&app, "PUT", "/admin/config", Some(json!({key: true}))).await;
         assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{key}: {body}");
     }
+}
+
+// ------------------------------------------------------------------ #113 ---
+
+#[tokio::test]
+async fn invoice_pdf_archived_at_issue_and_downloadable() {
+    let (app, d) = app().await;
+    let (issued, iid) = seed_issued_invoice(&app).await;
+
+    // The invoice JSON carries the hint.
+    let hint = &issued["pdf"];
+    assert_eq!(
+        hint["filename"],
+        format!("{}.pdf", issued["number"].as_str().unwrap())
+    );
+    assert_eq!(hint["sha256"].as_str().unwrap().len(), 64);
+    assert!(hint["bytes"].as_u64().unwrap() > 100);
+    assert!(hint["archived_at"].is_string());
+
+    // The file is on disk next to the document, atomically written at issue.
+    let pdf_path = d
+        .path()
+        .join("data")
+        .join("invoices")
+        .join(format!("{iid}.pdf"));
+    assert!(pdf_path.exists(), "archive written at issue");
+    let on_disk = std::fs::read(&pdf_path).unwrap();
+
+    // Download contract: admin 200 + binary headers, ETag from the sha256.
+    let (status, headers, body) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "application/pdf");
+    let disp = headers[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        disp.contains(format!("filename=\"{}.pdf\"", issued["number"].as_str().unwrap()).as_str()),
+        "{disp}"
+    );
+    let etag = headers[header::ETAG].to_str().unwrap().to_string();
+    assert_eq!(etag, format!("\"{}\"", hint["sha256"].as_str().unwrap()));
+    assert!(body.starts_with(b"%PDF-1.4"), "bytes start with %PDF");
+    assert_eq!(body, on_disk, "download is the archived bytes");
+
+    // Independent sha: body hashes to the advertised ETag.
+    use sha2::{Digest, Sha256};
+    let sha = Sha256::digest(&body);
+    assert_eq!(
+        sha.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        hint["sha256"].as_str().unwrap()
+    );
+
+    // Re-download: same bytes (immutable archive, stable ETag).
+    let (s2, h2, body2) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    assert_eq!(s2, StatusCode::OK);
+    assert_eq!(h2[header::ETAG], headers[header::ETAG]);
+    assert_eq!(body, body2);
+}
+
+#[tokio::test]
+async fn invoice_pdf_legacy_invoice_resolves_byte_stably() {
+    let (app, d) = app().await;
+    let (_issued, iid) = seed_issued_invoice(&app).await;
+    let (_s, headers, first) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    assert!(headers[header::ETAG].to_str().unwrap().starts_with('"'));
+
+    // Simulate a legacy archive: the file vanishes while the (immutable)
+    // invoice document stays. The first read must re-render **identical**
+    // bytes and re-persist the archive.
+    std::fs::remove_file(
+        d.path()
+            .join("data")
+            .join("invoices")
+            .join(format!("{iid}.pdf")),
+    )
+    .unwrap();
+    let (_s2, _h2, second) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    assert_eq!(first, second, "legacy re-render is byte-stable");
+    let path = d
+        .path()
+        .join("data")
+        .join("invoices")
+        .join(format!("{iid}.pdf"));
+    assert!(path.exists(), "archive re-persisted on first read");
+    assert_eq!(std::fs::read(&path).unwrap(), second);
+    // The hint's sha still matches (recomputed, but from identical bytes).
+    let (_s3, fresh) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    use sha2::{Digest, Sha256};
+    assert_eq!(
+        fresh["pdf"]["sha256"].as_str().unwrap(),
+        Sha256::digest(&second)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+}
+
+#[tokio::test]
+async fn invoice_pdf_rejects_draft_and_unknown() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "NOEMAIL", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+
+    // Draft: 409, nothing persisted.
+    let (status, _h, body) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(String::from_utf8_lossy(&body).contains("issue the invoice"));
+
+    // Unknown id: 404, never a PDF-shaped answer.
+    let (s404, _, _) = raw_req(
+        &app,
+        "GET",
+        "/invoices/00000000-0000-0000-0000-000000000000/pdf",
+    )
+    .await;
+    assert_eq!(s404, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn member_cannot_download_invoice_pdf() {
+    let (app, _d) = app().await;
+    let (_issued, iid) = seed_issued_invoice(&app).await;
+    json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(
+            json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
+        ),
+    )
+    .await;
+    let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
+    let (s, _, _) = raw(
+        &app.router,
+        "GET",
+        &format!("/invoices/{iid}/pdf"),
+        None,
+        Some(&cookie),
+    )
+    .await;
+    // Invoices are the admin tier (#51): the whole surface refuses a member.
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn invoice_email_carries_the_archived_pdf_attachment() {
+    let (app, _d) = app().await;
+    let (issued, iid) = seed_issued_invoice(&app).await;
+    let (_s, _h, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+
+    let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::OK, "{body}");
+    let msgs = app.email.messages();
+    assert_eq!(msgs.len(), 1);
+    let (name, bytes) = msgs[0]
+        .attachment
+        .as_ref()
+        .expect("the invoice email carries the PDF (#113)");
+    assert_eq!(*name, format!("{}.pdf", issued["number"].as_str().unwrap()));
+    assert_eq!(*bytes, pdf, "the attachment is the archived document");
+    assert!(
+        msgs[0].text.contains("PDF document is attached"),
+        "{}",
+        msgs[0].text
+    );
+
+    // The MIME builder labels the part as a PDF.
+    let mime = tucano_time::email::build_mime(&msgs[0]);
+    assert!(mime.contains("Content-Type: application/pdf"));
+    assert!(mime.contains("base64"));
 }

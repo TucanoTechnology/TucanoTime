@@ -26,6 +26,25 @@ const api = {
     }
     return data;
   },
+  // Fetch a binary body with the session cookie intact (#113). A bare
+  // <a href> would also send the cookie, but we need to inspect the status
+  // and map error JSON, so this mirrors request() for the non-JSON case.
+  async getBlob(url) {
+    const res = await fetch(url, { method: 'GET', headers: {}, credentials: 'same-origin' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let msg = `HTTP ${res.status}`;
+      try {
+        msg = JSON.parse(text)?.error?.message || msg;
+      } catch {
+        /* body was not the JSON error shape */
+      }
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    return res.blob();
+  },
   get: (u) => api.request('GET', u),
   post: (u, b) => api.request('POST', u, b),
   put: (u, b) => api.request('PUT', u, b),
@@ -1457,14 +1476,19 @@ async function refreshInvoices() {
           'Create a hosted checkout link (Stripe) for this invoice'),
         action('link', 'Sync', () => syncInvoice(inv.id),
           'Copy this invoice to the accounting provider (QBO/Xero)'),
+        action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
+          'Download the archived invoice PDF'),
         action('link', 'Email', () => emailInvoice(inv.id),
-          'Send this invoice to the customer billing email'),
+          'Send this invoice (PDF attached) to the customer billing email'),
       );
     } else if (inv.status === 'paid') {
       actions.push(
         action('link', 'Sync', () => syncInvoice(inv.id),
           'Copy this invoice (and payment) to the accounting provider'),
-        action('link', 'Email', () => emailInvoice(inv.id)),
+        action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
+          'Download the archived invoice PDF'),
+        action('link', 'Email', () => emailInvoice(inv.id),
+          'Send this invoice (PDF attached) to the customer billing email'),
       );
     }
     tbody.appendChild(
@@ -1537,9 +1561,31 @@ async function issueInvoice(id) {
 async function emailInvoice(id) {
   try {
     const res = await api.post(`/invoices/${id}/email`);
-    announce(`Invoice emailed to ${res.sent_to}.`);
+    announce(`Invoice emailed to ${res.sent_to} (PDF attached).`);
   } catch (err) {
     announce(`Email failed: ${err.message}`);
+  }
+}
+
+// Download the archived invoice PDF (#113). Fetch the binary as a blob (so
+// the session cookie is sent and errors are surfaced), then hand it to a
+// transient <a download>. Announcement goes through aria-live via announce().
+async function downloadInvoicePdf(id, number) {
+  announce('Preparing PDF…');
+  try {
+    const blob = await api.getBlob(`/invoices/${id}/pdf`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${number}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Some browsers cancel a download if the URL is revoked synchronously.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    announce(`Invoice PDF downloaded (${blob.size} bytes).`);
+  } catch (err) {
+    announce(`Download failed: ${err.message}`);
   }
 }
 
