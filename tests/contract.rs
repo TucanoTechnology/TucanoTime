@@ -148,6 +148,9 @@ impl Client {
                     accounting,
                     sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
                     oauth_flows: Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
+                    cfg: Arc::new(std::sync::Mutex::new(Arc::new(
+                        tucano_time::appconfig::AppConfig::empty(),
+                    ))),
                 }
             }
             None => AppState::with_session(store, session)
@@ -2123,6 +2126,9 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
         oauth_flows: std::sync::Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
+        cfg: std::sync::Arc::new(std::sync::Mutex::new(std::sync::Arc::new(
+            tucano_time::appconfig::AppConfig::empty(),
+        ))),
     };
     let router = tucano_time::build_router(state);
     // bootstrap admin
@@ -2269,6 +2275,9 @@ async fn calendar_events_from_configured_feed() {
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
         sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
         oauth_flows: std::sync::Arc::new(tucano_time::calendar_oauth::OAuthFlows::new()),
+        cfg: std::sync::Arc::new(std::sync::Mutex::new(std::sync::Arc::new(
+            tucano_time::appconfig::AppConfig::empty(),
+        ))),
     };
     let router = tucano_time::build_router(state);
     raw(
@@ -2920,4 +2929,98 @@ async fn calendar_oauth_start_and_callback_plumbing() {
     )
     .await;
     assert_eq!(s4, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn admin_config_roundtrip_precedence_and_guards() {
+    let (app, d) = app().await;
+    // Effective view: everything starts at its default source.
+    let (s1, body) = json_req(&app, "GET", "/admin/config", None).await;
+    assert_eq!(s1, StatusCode::OK, "{body}");
+    let days = body["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "reminder_days")
+        .unwrap();
+    assert_eq!(days["value"], 7);
+    assert_eq!(days["source"], "default");
+    assert!(days["description"].as_str().unwrap().contains("reminder"));
+
+    // PUT persists to <data>/config.json and flips the source to "file".
+    let (s3, body3) = json_req(
+        &app,
+        "PUT",
+        "/admin/config",
+        Some(json!({"reminder_days": 15, "sso_admin_group": "tt-admins"})),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::OK);
+    assert_eq!(body3["ok"], true);
+    let cfg_file = d.path().join("data").join("config.json");
+    let persisted = std::fs::read_to_string(&cfg_file).unwrap();
+    assert!(persisted.contains("reminder_days"), "{persisted}");
+    let (_s4, eff) = json_req(&app, "GET", "/admin/config", None).await;
+    let days2 = eff["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "reminder_days")
+        .unwrap();
+    assert_eq!(days2["value"], 15);
+    assert_eq!(days2["source"], "file");
+
+    // Secret-shaped / unknown keys cannot be persisted through the API (#94 guard).
+    let (s5, b5) = json_req(
+        &app,
+        "PUT",
+        "/admin/config",
+        Some(json!({"smtp.password": "hunter2"})),
+    )
+    .await;
+    assert_eq!(s5, StatusCode::UNPROCESSABLE_ENTITY, "{b5}");
+    let (s6, _) = json_req(&app, "PUT", "/admin/config", Some(json!({"max_docs": 2}))).await;
+    assert_eq!(s6, StatusCode::UNPROCESSABLE_ENTITY, "out of range refused");
+
+    // Members cannot see or edit configuration (admin tier).
+    json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(json!({"name":"N","email":"cfgmember@t.local","password":"memberpass1","role":"member"})),
+    )
+    .await;
+    let member = login_cookie(&app.router, "cfgmember@t.local", "memberpass1").await;
+    let (sm, _, _) = raw(&app.router, "GET", "/admin/config", None, Some(&member)).await;
+    assert_eq!(sm, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn config_file_changes_request_time_behaviour_without_restart() {
+    // #94: request-time knobs (SSO admin group) read the live config.
+    let (app, _d) = app().await;
+    let (_s, eff) = json_req(&app, "GET", "/admin/config", None).await;
+    let grp = eff["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "sso_admin_group")
+        .unwrap();
+    assert_eq!(grp["value"], "");
+    json_req(
+        &app,
+        "PUT",
+        "/admin/config",
+        Some(json!({"sso_admin_group": "finance-admins"})),
+    )
+    .await;
+    let (_s2, eff2) = json_req(&app, "GET", "/admin/config", None).await;
+    let grp2 = eff2["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == "sso_admin_group")
+        .unwrap();
+    assert_eq!(grp2["value"], "finance-admins");
+    assert_eq!(grp2["source"], "file");
 }

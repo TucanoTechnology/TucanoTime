@@ -31,4 +31,9 @@ ENV TUCANO_PORT=8080
 EXPOSE 8080
 VOLUME ["/data"]
 
+# Container liveness (#94): the same binary probes its own /healthz, so the
+# runtime image needs no curl/wget.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/tucano-time", "--health"]
+
 ENTRYPOINT ["/usr/local/bin/tucano-time"]

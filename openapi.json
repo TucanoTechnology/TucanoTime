@@ -1416,6 +1416,28 @@
         }
       }
     },
+    "/admin/config": {
+      "get": {
+        "operationId": "adminConfig",
+        "tags": ["admin"],
+        "summary": "Effective externalised configuration: whitelist of non-secret knobs with value, source (env/file/default) and default (#94)",
+        "responses": {
+          "200": { "description": "Effective config.", "content": { "application/json": { "schema": { "type": "object", "required": ["config", "path", "vault_enabled"], "properties": { "config": { "type": "array", "items": { "type": "object", "required": ["key", "value", "source", "default", "description"], "properties": { "key": { "type": "string" }, "value": {}, "source": { "type": "string", "enum": ["env", "file", "default"] }, "default": {}, "description": { "type": "string" } }, "additionalProperties": false } }, "path": { "type": "string" }, "vault_enabled": { "type": "boolean" } }, "additionalProperties": false } } } },
+          "403": { "description": "Admin role required." }
+        }
+      },
+      "put": {
+        "operationId": "updateAdminConfig",
+        "tags": ["admin"],
+        "summary": "Patch whitelisted keys into <data>/config.json; unknown or secret-shaped keys are refused (#94)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": {
+          "200": { "description": "Persisted.", "content": { "application/json": { "schema": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } }, "additionalProperties": false } } } },
+          "403": { "description": "Admin role required." },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
     "/admin/secrets": {
       "get": {
         "operationId": "listSecrets",

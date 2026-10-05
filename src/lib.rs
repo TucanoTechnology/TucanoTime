@@ -11,8 +11,10 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 pub mod accounting;
 pub mod api;
+pub mod appconfig;
 pub mod audit;
 pub mod auth;
+pub mod backup;
 pub mod budgets;
 pub mod calendar;
 pub mod calendar_oauth;
@@ -193,6 +195,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/claims/{id}/decision",
             axum::routing::post(api::decide_claim),
+        )
+        .route(
+            "/admin/config",
+            get(api::admin_config).put(api::update_config),
         )
         .route("/admin/secrets", get(api::list_secrets))
         .route(

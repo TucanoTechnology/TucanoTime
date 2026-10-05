@@ -78,18 +78,25 @@ impl AccountingRegistry {
     }
 }
 
-/// Builds the registry from vault/env: a provider is enabled when its OAuth
-/// token exists (`qbo.token` / `xero.token`, or `TUCANO_QBO_TOKEN` /
-/// `TUCANO_XERO_TOKEN`); base URLs default to the providers' public APIs.
-pub fn registry_from_vault(vault: Option<&crate::vault::SecretVault>) -> Arc<AccountingRegistry> {
+/// Builds the registry from vault/env/config (#94 precedence): a provider is
+/// enabled when its OAuth token exists (`qbo.token` / `xero.token`, or
+/// `TUCANO_QBO_TOKEN` / `TUCANO_XERO_TOKEN`); base URLs resolve as
+/// env > config.json > the providers' public APIs.
+pub fn registry_from_vault(
+    vault: Option<&crate::vault::SecretVault>,
+    cfg: &crate::appconfig::AppConfig,
+) -> Arc<AccountingRegistry> {
     let get = |key: &str, env: &str| -> Option<String> {
         vault
             .and_then(|v| v.get(key))
             .or_else(|| std::env::var(env).ok())
     };
+    let env_fn = crate::appconfig::process_env;
     let mut providers: Vec<Arc<dyn AccountingSync>> = Vec::new();
     if let Some(token) = get("qbo.token", "TUCANO_QBO_TOKEN") {
-        let base = get("qbo.base_url", "TUCANO_QBO_BASE_URL")
+        let base = cfg
+            .get_optional_str("qbo_base_url", &env_fn)
+            .or_else(|| get("qbo.base_url", "TUCANO_QBO_BASE_URL"))
             .unwrap_or_else(|| "https://quickbooks.api.intuit.com/v3/company/default".into());
         providers.push(Arc::new(QboProvider::new(Arc::new(HttpTransport {
             base_url: base,
@@ -97,7 +104,9 @@ pub fn registry_from_vault(vault: Option<&crate::vault::SecretVault>) -> Arc<Acc
         }))));
     }
     if let Some(token) = get("xero.token", "TUCANO_XERO_TOKEN") {
-        let base = get("xero.base_url", "TUCANO_XERO_BASE_URL")
+        let base = cfg
+            .get_optional_str("xero_base_url", &env_fn)
+            .or_else(|| get("xero.base_url", "TUCANO_XERO_BASE_URL"))
             .unwrap_or_else(|| "https://api.xero.com/api.xro/4.0".into());
         providers.push(Arc::new(XeroProvider::new(Arc::new(HttpTransport {
             base_url: base,

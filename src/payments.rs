@@ -94,11 +94,14 @@ impl StripeProvider {
         }
     }
 
-    pub fn from_sources(vault: Option<&crate::vault::SecretVault>) -> Option<Self> {
+    pub fn from_sources(
+        vault: Option<&crate::vault::SecretVault>,
+        cfg: &crate::appconfig::AppConfig,
+    ) -> Option<Self> {
         let secret = vault
             .and_then(|v| v.get("stripe.webhook_secret"))
             .or_else(|| std::env::var("TUCANO_STRIPE_WEBHOOK_SECRET").ok());
-        let fake = std::env::var("TUCANO_STRIPE_FAKE").is_ok();
+        let fake = cfg.get_bool_flag("stripe_demo", &crate::appconfig::process_env);
         if fake || secret.is_some() {
             Some(Self {
                 signing_secret: secret,
@@ -111,11 +114,14 @@ impl StripeProvider {
 }
 
 impl PayPalProvider {
-    pub fn from_sources(vault: Option<&crate::vault::SecretVault>) -> Option<Self> {
+    pub fn from_sources(
+        vault: Option<&crate::vault::SecretVault>,
+        cfg: &crate::appconfig::AppConfig,
+    ) -> Option<Self> {
         let secret = vault
             .and_then(|v| v.get("paypal.webhook_secret"))
             .or_else(|| std::env::var("TUCANO_PAYPAL_WEBHOOK_SECRET").ok());
-        let fake = std::env::var("TUCANO_PAYPAL_FAKE").is_ok();
+        let fake = cfg.get_bool_flag("paypal_demo", &crate::appconfig::process_env);
         if fake || secret.is_some() {
             Some(Self {
                 signing_secret: secret,
@@ -129,12 +135,15 @@ impl PayPalProvider {
 
 /// Builds the registry from vault/env: a provider is enabled only when its
 /// webhook secret (or explicit fake flag) is present.
-pub fn registry_from_vault(vault: Option<&crate::vault::SecretVault>) -> Arc<PaymentRegistry> {
+pub fn registry_from_vault(
+    vault: Option<&crate::vault::SecretVault>,
+    cfg: &crate::appconfig::AppConfig,
+) -> Arc<PaymentRegistry> {
     let mut providers: Vec<Arc<dyn PaymentProvider>> = Vec::new();
-    if let Some(p) = StripeProvider::from_sources(vault) {
+    if let Some(p) = StripeProvider::from_sources(vault, cfg) {
         providers.push(Arc::new(p));
     }
-    if let Some(p) = PayPalProvider::from_sources(vault) {
+    if let Some(p) = PayPalProvider::from_sources(vault, cfg) {
         providers.push(Arc::new(p));
     }
     Arc::new(PaymentRegistry::new(providers))

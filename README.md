@@ -26,6 +26,56 @@ docker run -d -p 8080:8080 -v tucanotime-data:/data --name tucanotime tucanotime
 Open <http://localhost:8080/> — the API docs are at <http://localhost:8080/docs>.
 All data lives in the mounted volume; back it up like any document folder.
 
+## Persistence & upgrades (#94)
+
+**Everything an installation knows lives in one place: the data dir**
+(`TUCANO_DATA_DIR`, `/data` in the image). Containers are disposable; the
+volume is the installation:
+
+| What | Where | Survives `up -d` / image update |
+|---|---|---|
+| Users, entries, invoices, expenses, notifications… | `<data>/…` JSON documents | ✅ (volume) |
+| Integration credentials (Settings tab) | `<data>/secrets.bin`, AES-256-GCM | ✅ — **requires** the same `TUCANO_SECRET_KEY[_FILE]` |
+| Runtime settings (reminder cadence, SSO group/domains, OAuth redirect, provider base URLs, demo flags…) | `<data>/config.json`, env > file > default | ✅ (volume; no env needed) |
+| Session signing key | `<data>/session.key`, auto-created 0600 on first boot | ✅ — restarts no longer log everyone out |
+| Scheduler last-run state, revocations, audit log | `<data>/…` | ✅ |
+
+Precedence everywhere is **explicit env → `config.json` → built-in
+default**, so you can pin values with env at the OS layer or persist them on
+the volume via `PUT /admin/config` / `GET /admin/config` (masked to the
+non-secret whitelist by construction).
+
+Secret files (bind-mount / Docker secrets) work for both keys:
+`TUCANO_SESSION_SECRET_FILE` and `TUCANO_SECRET_KEY_FILE`. If the vault store
+exists on disk but the key is missing or wrong, the app **refuses to start**
+with a clear message — a silently disabled Settings tab has historically
+looked like lost data, and we'd rather stop than mislead.
+
+### Upgrading an image
+
+```sh
+docker compose pull && docker compose up -d   # nothing to reconfigure
+```
+
+### Backup / restore
+
+```sh
+docker compose run --rm tucanotime-cli --backup /backups/monday.tar.gz
+# restore (stop the server first; refuses non-empty dirs without --force):
+docker compose stop tucanotime
+docker compose run --rm tucanotime-cli --restore /backups/monday.tar.gz
+docker compose up -d tucanotime
+```
+
+Archives are plain `tar.gz` with a `manifest.json` (version + sha256 per
+file); restores verify checksums before writing, and warn if the archive
+carries a vault store while no key is configured.
+
+### Bind mounts
+
+The container runs as uid **10001**; bind-mounted host dirs need to be
+writable by it (`chown -R 10001:10001 ./data`), or just use a named volume.
+
 ## Authentication
 
 TucanoTime is single- or multi-user with **session-cookie auth** (argon2-hashed

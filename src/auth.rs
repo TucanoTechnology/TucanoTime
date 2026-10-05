@@ -183,6 +183,79 @@ pub fn token_from_cookie_header(header: &str) -> Option<&str> {
 /// Build the session signer from config. In production a strong secret is
 /// required (#44): missing or shorter than 32 bytes fails fast rather than
 /// silently using an ephemeral key that logs everyone out on restart.
+/// Resolve the session signing secret (#94). Precedence:
+/// `TUCANO_SESSION_SECRET` > `TUCANO_SESSION_SECRET_FILE` (mount-friendly) >
+/// `<root>/session.key` — which is **auto-created** with fresh randomness on
+/// first boot so a plain container restart/update no longer logs everyone
+/// out. Returns `(secret, ephemeral)`; `secret` is `None` only when the file
+/// could not be created (read-only volume), in which case the caller keeps
+/// the old ephemeral behaviour.
+pub fn resolve_session_secret(
+    root: &std::path::Path,
+    env_secret: Option<String>,
+    env_secret_file: Option<String>,
+    production: bool,
+) -> (Option<String>, bool) {
+    if let Some(s) = env_secret.filter(|x| !x.is_empty()) {
+        return (Some(s), false);
+    }
+    if let Some(path) = env_secret_file.filter(|x| !x.is_empty()) {
+        match std::fs::read_to_string(&path) {
+            Ok(v) => {
+                let v = v.trim().to_owned();
+                if v.len() >= 32 || !production {
+                    return (Some(v), false);
+                }
+                tracing::warn!(
+                    "{path} contains a session secret shorter than 32 bytes; ignoring in production"
+                );
+            }
+            Err(e) => tracing::warn!("cannot read TUCANO_SESSION_SECRET_FILE {path}: {e}"),
+        }
+    }
+    let key_path = root.join("session.key");
+    if let Ok(existing) = std::fs::read_to_string(&key_path) {
+        let existing = existing.trim().to_owned();
+        if existing.len() >= 32 {
+            return (Some(existing), false);
+        }
+        tracing::warn!("{} is too short; regenerating", key_path.display());
+    }
+    // Generate a fresh key and persist it on the data volume.
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    let secret = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    match write_private_file(&key_path, secret.as_bytes()) {
+        Ok(()) => (Some(secret), false),
+        Err(e) => {
+            tracing::warn!(
+                "could not persist {} ({e}); sessions stay ephemeral — restart logs users out",
+                key_path.display()
+            );
+            (None, true)
+        }
+    }
+}
+
+/// Write a file with `0600` permissions (owner read/write only), atomically.
+pub fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let tmp = path.with_extension("tmp");
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)
+        .map_err(|e| e.to_string())?;
+    f.write_all(bytes).map_err(|e| e.to_string())?;
+    drop(f);
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn make_session(secret: Option<String>, production: bool) -> Result<Session, String> {
     match secret.filter(|s| !s.is_empty()) {
         Some(s) if s.len() >= 32 => Ok(Session::new(s.into_bytes(), 60 * 60 * 24, production)),
@@ -291,5 +364,69 @@ mod tests {
         // Dev with no secret -> ephemeral, non-secure.
         let d = make_session(None, false).unwrap();
         assert!(!d.secure());
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn user(email: &str) -> User {
+        User {
+            id: uuid::Uuid::new_v4(),
+            name: "A".into(),
+            email: email.into(),
+            role: Role::Member,
+            active: true,
+            default_rate_minor: 0,
+            cost_rate_minor: 0,
+            password_hash: String::new(),
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn session_secret_precedence_and_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // env wins and nothing is written
+        let (s, _) = resolve_session_secret(root, Some("x".repeat(40)), None, false);
+        assert_eq!(s.as_deref(), Some("x".repeat(40).as_str()));
+        assert!(!root.join("session.key").exists());
+        // no env anywhere -> auto-create on the volume
+        let (s1, _) = resolve_session_secret(root, None, None, false);
+        let s1 = s1.expect("generated");
+        assert!(root.join("session.key").exists());
+        // second "boot" reads the same key: sessions survive restart (#94)
+        let (s2, _) = resolve_session_secret(root, None, None, false);
+        let s2 = s2.expect("persisted");
+        assert_eq!(s1, s2);
+        // a token issued before the restart verifies after it
+        let u1 = user("a@b.co");
+        let session1 = make_session(Some(s1.clone()), false).unwrap();
+        let token = session1.issue(&u1, Utc.timestamp_opt(1_730_000_000, 0).unwrap());
+        let session2 = make_session(Some(s2), false).unwrap();
+        let claims = session2
+            .verify(&token, Utc.timestamp_opt(1_730_000_100, 0).unwrap())
+            .expect("cross-boot token still valid");
+        assert_eq!(claims.uid, u1.id);
+        // *_FILE variant is honoured
+        let keyfile = root.join("mounted.key");
+        std::fs::write(&keyfile, format!("{}\n", "k".repeat(32))).unwrap();
+        let (s3, _) =
+            resolve_session_secret(root, None, Some(keyfile.display().to_string()), false);
+        assert_eq!(s3.as_deref(), Some("k".repeat(32).as_str()));
+    }
+
+    #[test]
+    fn persisted_session_key_is_private() {
+        let dir = tempfile::tempdir().unwrap();
+        resolve_session_secret(dir.path(), None, None, false)
+            .0
+            .unwrap();
+        let md = std::fs::metadata(dir.path().join("session.key")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(md.permissions().mode() & 0o777, 0o600);
     }
 }

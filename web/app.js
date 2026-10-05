@@ -1654,6 +1654,91 @@ async function refreshSettings() {
       announce(err.message);
     }
   }
+  await refreshConfig();
+}
+
+/// Effective runtime configuration card (#94). Admin surface; members get a
+/// silent hide. Values resolve env > config.json > default; applying an edit
+/// persists it to config.json on the data volume so restarts keep it.
+let configRows = [];
+
+function configValueForInput(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'boolean') return String(v);
+  if (typeof v === 'number') return String(v);
+  return v;
+}
+
+async function refreshConfig() {
+  let data;
+  try {
+    data = await api.get('/admin/config');
+  } catch {
+    $('config-table').hidden = true;
+    $('config-form').hidden = true;
+    return;
+  }
+  configRows = data.config || [];
+  const tbody = $('config-table').querySelector('tbody');
+  tbody.textContent = '';
+  const sel = $('config-key');
+  sel.textContent = '';
+  for (const row of configRows) {
+    const tr = document.createElement('tr');
+    const key = document.createElement('th');
+    key.scope = 'row';
+    key.textContent = row.key;
+    key.title = row.description;
+    const val = document.createElement('td');
+    val.className = 'num';
+    val.textContent = configValueForInput(row.value);
+    const src = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = row.source === 'default' ? 'badge' : 'badge on';
+    badge.textContent = row.source;
+    src.appendChild(badge);
+    tr.append(key, val, src);
+    tbody.appendChild(tr);
+    const opt = document.createElement('option');
+    opt.value = row.key;
+    opt.textContent = row.key;
+    sel.appendChild(opt);
+  }
+  // Pre-fill the value box when the key changes.
+  sel.onchange = () => {
+    const row = configRows.find((c) => c.key === sel.value);
+    $('config-value').value = row ? configValueForInput(row.value) : '';
+  };
+  sel.onchange();
+}
+
+async function saveConfig(evt) {
+  evt.preventDefault();
+  clearFormError($('config-error'));
+  const key = $('config-key').value;
+  const raw = $('config-value').value;
+  const row = configRows.find((c) => c.key === key) || {};
+  let value = raw;
+  if (typeof row.value === 'number') {
+    if (!/^-?\d+$/.test(raw)) {
+      showFormError($('config-error'), { message: 'Enter a whole number.' });
+      return;
+    }
+    value = Number(raw);
+  } else if (typeof row.value === 'boolean') {
+    if (raw !== 'true' && raw !== 'false') {
+      showFormError($('config-error'), { message: 'Enter true or false.' });
+      return;
+    }
+    value = raw === 'true';
+  }
+  try {
+    await api.request('PUT', '/admin/config', { [key]: value });
+    announce(`Saved ${key}.`);
+    await refreshConfig();
+  } catch (err) {
+    showFormError($('config-error'), err);
+  }
 }
 
 async function addSecret(evt) {
@@ -1941,6 +2026,7 @@ async function startApp() {
   $('expense-form').addEventListener('submit', addExpense);
   $('submission-form').addEventListener('submit', submitWeek);
   $('secret-form').addEventListener('submit', addSecret);
+  $('config-form').addEventListener('submit', saveConfig);
   $('timer-start').addEventListener('click', startTimer);
   $('notif-read').addEventListener('click', markNotificationsRead);
   $('timer-stop').addEventListener('click', stopTimer);

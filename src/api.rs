@@ -111,6 +111,9 @@ pub struct AppState {
     pub sso: Arc<crate::sso::SsoRegistry>,
     /// Pending OAuth calendar consent flows (#36).
     pub oauth_flows: Arc<crate::calendar_oauth::OAuthFlows>,
+    /// Externalised runtime configuration (#94): env > config.json > default.
+    /// A `Mutex` swap so `PUT /admin/config` can hot-update request-time knobs.
+    pub cfg: Arc<std::sync::Mutex<Arc<crate::appconfig::AppConfig>>>,
 }
 
 impl AppState {
@@ -121,6 +124,33 @@ impl AppState {
     }
 
     pub fn with_session(store: Store, session: Arc<Session>) -> Self {
+        // Lenient path for tests/dev: resolve config + vault from env, ignoring
+        // errors (main() uses `boot`, which arrives with hard-checked values).
+        let cfg = Arc::new(
+            crate::appconfig::AppConfig::load(store.root()).unwrap_or_else(|e| {
+                tracing::error!("config.json unusable ({e}); starting with defaults");
+                crate::appconfig::AppConfig::empty()
+            }),
+        );
+        let vault = crate::vault::open_for_boot(
+            store.root(),
+            std::env::var("TUCANO_SECRET_KEY").ok(),
+            std::env::var("TUCANO_SECRET_KEY_FILE").ok(),
+        )
+        .ok()
+        .flatten();
+        Self::boot(store, session, vault, cfg)
+    }
+
+    /// The canonical constructor (#94): main() resolves config + vault with
+    /// fail-fast policy and hands them over already validated.
+    #[must_use]
+    pub fn boot(
+        store: Store,
+        session: Arc<Session>,
+        vault: Option<Arc<crate::vault::SecretVault>>,
+        cfg: Arc<crate::appconfig::AppConfig>,
+    ) -> Self {
         let store = Arc::new(store);
         let locks = Arc::new(crate::lock::CombinedLocks::new(vec![
             Box::new(crate::lock::InvoiceLock::new(store.clone())),
@@ -128,13 +158,6 @@ impl AppState {
         ]));
         let audit = Arc::new(crate::audit::AuditLog::new(store.root()));
         let revocations = Arc::new(crate::revoke::Revocations::new(store.root()));
-        let vault = crate::vault::SecretVault::open(
-            store.root(),
-            std::env::var("TUCANO_SECRET_KEY").ok().as_deref(),
-        )
-        .ok()
-        .flatten()
-        .map(Arc::new);
         // Email adapter (#35): SMTP if configured (vault or env), else disabled.
         let email: Arc<dyn crate::email::EmailSender> =
             match crate::email::SmtpConfig::from_sources(vault.as_deref()) {
@@ -142,11 +165,11 @@ impl AppState {
                 None => Arc::new(crate::email::DisabledEmailSender),
             };
         // Payment providers (#34): enabled when their webhook secrets exist.
-        let payments = crate::payments::registry_from_vault(vault.as_deref());
+        let payments = crate::payments::registry_from_vault(vault.as_deref(), &cfg);
         // Accounting providers (#33): enabled when an OAuth token exists.
-        let accounting = crate::accounting::registry_from_vault(vault.as_deref());
+        let accounting = crate::accounting::registry_from_vault(vault.as_deref(), &cfg);
         // SSO identity providers (#32): enabled when OIDC/SAML config exists.
-        let sso = Arc::new(crate::sso::registry_from_vault(vault.as_deref()));
+        let sso = Arc::new(crate::sso::registry_from_vault(vault.as_deref(), &cfg));
         Self {
             clock: Arc::new(crate::clock::SystemClock),
             locks,
@@ -164,7 +187,25 @@ impl AppState {
             accounting,
             sso,
             oauth_flows: Arc::new(crate::calendar_oauth::OAuthFlows::new()),
+            cfg: Arc::new(std::sync::Mutex::new(cfg)),
             store,
+        }
+    }
+
+    /// Snapshot of the live configuration (#94).
+    #[must_use]
+    pub fn cfg(&self) -> Arc<crate::appconfig::AppConfig> {
+        match self.cfg.lock() {
+            Ok(g) => g.clone(),
+            Err(p) => p.into_inner().clone(),
+        }
+    }
+
+    /// Hot-swaps the configuration after a `PUT /admin/config` (#94).
+    pub fn reload_config(&self, cfg: Arc<crate::appconfig::AppConfig>) {
+        match self.cfg.lock() {
+            Ok(mut g) => *g = cfg,
+            Err(p) => *p.into_inner() = cfg,
         }
     }
 
@@ -472,7 +513,9 @@ pub async fn sso_assertion(
         None => {
             // Just-in-time provisioning (#19): the IdP is the password store,
             // so local login gets an unsusable random password.
-            let admin_group = std::env::var("TUCANO_SSO_ADMIN_GROUP").unwrap_or_default();
+            let admin_group = app
+                .cfg()
+                .get_str("sso_admin_group", &crate::appconfig::process_env);
             let role = crate::sso::map_role(&identity.groups, &admin_group);
             let temp_password = Uuid::new_v4().to_string();
             new_user(
@@ -509,6 +552,39 @@ pub async fn audit_log(State(app): State<AppState>) -> ApiResult {
 }
 
 // ------------------------------------------------------------- secret vault --
+
+/// `GET /admin/config` (#94): the effective externalised configuration —
+/// every whitelisted non-secret knob with its resolved value, the source it
+/// came from (env / config.json / default) and its default. The whitelist has
+/// no secret material by construction, so nothing needs masking; anything
+/// shaped like a secret cannot even be persisted (whitelist enforced on write).
+pub async fn admin_config(State(app): State<AppState>) -> ApiResult {
+    let env_fn = crate::appconfig::process_env;
+    let effective = app.cfg().effective(&env_fn);
+    Ok(Json(serde_json::json!({
+        "config": effective,
+        "path": app.store.root().join("config.json").display().to_string(),
+        "vault_enabled": app.vault.is_some(),
+    }))
+    .into_response())
+}
+
+/// `PUT /admin/config` (#94): patch whitelisted keys into `<data>/config.json`.
+/// Unknown or secret-shaped keys are refused. Takes effect on the next boot
+/// for boot-time knobs (session/vault resolution) and immediately for
+/// request-time ones (SSO domains/admin group, OAuth redirect).
+pub async fn update_config(
+    State(app): State<AppState>,
+    ValidJson(patch): ValidJson<serde_json::Map<String, serde_json::Value>>,
+) -> ApiResult {
+    let mut cfg =
+        crate::appconfig::AppConfig::load(app.store.root()).map_err(ApiError::internal)?;
+    cfg.update(patch)
+        .map_err(|e| ApiError::validation(vec![FieldError::new("config", e)]))?;
+    // Reflect the change for request-time readers.
+    app.reload_config(Arc::new(cfg));
+    Ok(Json(serde_json::json!({ "ok": true })).into_response())
+}
 
 fn valid_secret_key(key: &str) -> bool {
     !key.is_empty()
@@ -1770,19 +1846,29 @@ pub async fn calendar_oauth_start(
             .and_then(|v| v.get(key))
             .or_else(|| std::env::var(env).ok())
     };
-    let client_id = get(
-        &format!("calendar.{provider}.client_id"),
-        &provider_env(&provider, "CLIENT_ID"),
-    )
-    .filter(|s| !s.is_empty())
-    .ok_or_else(|| {
-        ApiError::validation(vec![crate::domain::FieldError::new(
-            "client_id",
-            "the provider's OAuth client id is not configured in the vault",
-        )])
-    })?;
-    let redirect = get("calendar.oauth_redirect", "TUCANO_CALENDAR_OAUTH_REDIRECT")
-        .unwrap_or_else(|| "/calendar/oauth/callback".into());
+    let cfg_key = match provider.as_str() {
+        "google" => "google_calendar_client_id",
+        _ => "ms_calendar_client_id",
+    };
+    let client_id = app
+        .cfg()
+        .get_optional_str(cfg_key, &crate::appconfig::process_env)
+        .or_else(|| {
+            get(
+                &format!("calendar.{provider}.client_id"),
+                &provider_env(&provider, "CLIENT_ID"),
+            )
+        })
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            ApiError::validation(vec![crate::domain::FieldError::new(
+                "client_id",
+                "the provider's OAuth client id is not configured in the vault",
+            )])
+        })?;
+    let redirect = app
+        .cfg()
+        .get_str("calendar_oauth_redirect", &crate::appconfig::process_env);
     let state = app
         .oauth_flows
         .start(&provider, app.clock.now().timestamp());
@@ -1813,9 +1899,9 @@ pub async fn calendar_oauth_callback(
     let get = |key: &str| -> Option<String> { app.vault.as_ref().and_then(|v| v.get(key)) };
     let client_id = get(&format!("calendar.{provider}.client_id")).unwrap_or_default();
     let client_secret = get(&format!("calendar.{provider}.client_secret")).unwrap_or_default();
-    let redirect = get("calendar.oauth_redirect")
-        .or_else(|| std::env::var("TUCANO_CALENDAR_OAUTH_REDIRECT").ok())
-        .unwrap_or_else(|| "/calendar/oauth/callback".into());
+    let redirect = app
+        .cfg()
+        .get_str("calendar_oauth_redirect", &crate::appconfig::process_env);
     let vault = app.vault.as_ref().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,

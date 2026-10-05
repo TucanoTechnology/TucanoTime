@@ -37,6 +37,48 @@ pub struct SecretVault {
     data: Mutex<BTreeMap<String, String>>,
 }
 
+/// Boot-time vault resolution (#94). Precedence `TUCANO_SECRET_KEY` >
+/// `TUCANO_SECRET_KEY_FILE`. Policy:
+///
+/// - store (`secrets.bin`) present + usable key → vault enabled;
+/// - store present + missing/incorrect/corrupt key → **hard startup error**.
+///   Silently starting with a disabled vault makes an unreadable Settings tab
+///   look like lost data, and invites admins to re-enter everything; refusing
+///   to start points them at the key instead;
+/// - no store + no key → feature disabled (fine: nothing to protect yet);
+/// - no store + configured-but-invalid key → hard error too (misconfiguration
+///   should never be swallowed once it will bite later).
+///
+/// The returned error strings are operator-facing, not API-facing.
+pub fn open_for_boot(
+    root: &Path,
+    env_key: Option<String>,
+    env_key_file: Option<String>,
+) -> Result<Option<std::sync::Arc<SecretVault>>, String> {
+    let key = env_key.filter(|s| !s.is_empty()).or_else(|| {
+        env_key_file.filter(|p| !p.is_empty()).and_then(|p| {
+            std::fs::read_to_string(&p)
+                .ok()
+                .map(|v| v.trim().to_owned())
+        })
+    });
+    let has_store = root.join("secrets.bin").exists();
+    match SecretVault::open(root, key.as_deref()) {
+        Ok(Some(v)) => Ok(Some(std::sync::Arc::new(v))),
+        Ok(None) if has_store => Err(
+            "vault store found on disk (secrets.bin) but TUCANO_SECRET_KEY(_FILE) is missing \
+             — supply the key that protected it (or restore it from backup) before starting; \
+             refusing to run with a disabled Settings tab"
+                .to_string(),
+        ),
+        Ok(None) => Ok(None),
+        Err(e) if has_store => Err(format!(
+            "vault store exists but could not be opened: {e} — check TUCANO_SECRET_KEY(_FILE);              the app will not start with an unreadable Settings tab"
+        )),
+        Err(e) => Err(format!("TUCANO_SECRET_KEY is configured but invalid: {e}")),
+    }
+}
+
 impl SecretVault {
     /// Open (or create) the vault. `master_key` should come from
     /// `TUCANO_SECRET_KEY` (exactly 32 bytes). Returns `Ok(None)` when no key
@@ -203,5 +245,57 @@ mod tests {
             SecretVault::open(dir.path(), Some("wrong-vault-key-0000000000000000")),
             Err(VaultError::Decrypt)
         ));
+    }
+}
+
+#[cfg(test)]
+mod boot_tests {
+    use super::*;
+
+    #[test]
+    fn boot_policy_store_vs_key() {
+        let dir = tempfile::tempdir().unwrap();
+        // no store + no key -> disabled is fine
+        assert!(open_for_boot(dir.path(), None, None).unwrap().is_none());
+        // store created with a key: same key boots, missing key FAILS loudly
+        let key = "abcdefghijklmnopqrstuvwxyz012345".to_string(); // exactly 32 bytes
+        {
+            let v = open_for_boot(dir.path(), Some(key.clone()), None)
+                .unwrap()
+                .unwrap();
+            v.put("smtp.host", "relay.local").unwrap();
+        }
+        assert!(
+            open_for_boot(dir.path(), Some(key.clone()), None)
+                .unwrap()
+                .is_some()
+        );
+        let missing = open_for_boot(dir.path(), None, None);
+        assert!(
+            missing.is_err(),
+            "secrets.bin without its key must refuse to start"
+        );
+        assert!(missing.err().unwrap().contains("secrets.bin"));
+        let wrong = open_for_boot(
+            dir.path(),
+            Some("9999999999999999999999999999999999".to_string()),
+            None,
+        );
+        assert!(
+            wrong.is_err(),
+            "wrong key must not silently disable the vault"
+        );
+    }
+
+    #[test]
+    fn key_file_variant() {
+        let dir = tempfile::tempdir().unwrap();
+        let kf = dir.path().join("vault.key");
+        std::fs::write(&kf, "abcdefghijklmnopqrstuvwxyz012345\n").unwrap();
+        let v = open_for_boot(dir.path(), None, Some(kf.display().to_string()))
+            .unwrap()
+            .expect("key file opens the vault");
+        v.put("a", "b").unwrap();
+        assert_eq!(v.get("a").as_deref(), Some("b"));
     }
 }
