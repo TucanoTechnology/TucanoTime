@@ -9,6 +9,7 @@ use axum::{Json, Router};
 use rust_embed::RustEmbed;
 use tower_http::limit::RequestBodyLimitLayer;
 
+pub mod accounting;
 pub mod api;
 pub mod audit;
 pub mod auth;
@@ -173,6 +174,11 @@ pub fn build_router(state: AppState) -> Router {
             "/invoices/{id}/checkout",
             axum::routing::post(api::create_checkout),
         )
+        .route(
+            "/invoices/{id}/sync",
+            axum::routing::post(api::sync_invoice),
+        )
+        .route("/sync/accounting", get(api::sync_status))
         .route("/invoices/summary", get(api::invoice_summary))
         .route("/invoices/report", get(api::invoice_report_handler))
         .route("/invoices/export.csv", get(api::invoice_export_csv))

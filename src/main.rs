@@ -51,6 +51,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or(7),
             std::path::Path::new(&data_dir),
         )),
+        Arc::new(tucano_time::accounting::AccountingRetryJob::new(
+            state.store.clone(),
+            state.accounting.clone(),
+        )),
     ];
     let scheduler = Arc::new(tucano_time::scheduler::Scheduler::new(
         std::path::Path::new(&data_dir),

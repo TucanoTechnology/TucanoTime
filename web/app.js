@@ -1296,20 +1296,32 @@ async function refreshInvoices() {
       checkout.textContent = 'Pay link';
       checkout.title = 'Create a hosted checkout link (Stripe) for this invoice';
       checkout.addEventListener('click', () => createCheckoutLink(inv.id, 'stripe'));
+      const sync = document.createElement('button');
+      sync.className = 'link';
+      sync.type = 'button';
+      sync.textContent = 'Sync';
+      sync.title = 'Copy this invoice to the accounting provider (QBO/Xero)';
+      sync.addEventListener('click', () => syncInvoice(inv.id));
       const email = document.createElement('button');
       email.className = 'link';
       email.type = 'button';
       email.textContent = 'Email';
       email.title = 'Send this invoice to the customer billing email';
       email.addEventListener('click', () => emailInvoice(inv.id));
-      act.append(pay, checkout, email);
+      act.append(pay, checkout, sync, email);
     } else if (inv.status === 'paid') {
+      const sync = document.createElement('button');
+      sync.className = 'link';
+      sync.type = 'button';
+      sync.textContent = 'Sync';
+      sync.title = 'Copy this invoice (and payment) to the accounting provider';
+      sync.addEventListener('click', () => syncInvoice(inv.id));
       const email = document.createElement('button');
       email.className = 'link';
       email.type = 'button';
       email.textContent = 'Email';
       email.addEventListener('click', () => emailInvoice(inv.id));
-      act.append(email);
+      act.append(sync, email);
     }
     tr.append(num, cust, period, total, status, act);
     tbody.appendChild(tr);
@@ -1383,6 +1395,24 @@ async function createCheckoutLink(id, provider) {
     window.prompt('Payment link (copy to send to the customer):', res.url);
   } catch (err) {
     announce(`Checkout failed: ${err.message}`);
+  }
+}
+
+/// Copies the invoice to the first enabled accounting provider (#33).
+async function syncInvoice(id) {
+  try {
+    const st = await api.get('/sync/accounting');
+    const providers = st.providers || [];
+    if (providers.length === 0) {
+      announce('No accounting provider configured (set qbo.token or xero.token in Settings).');
+      return;
+    }
+    const res = await api.post(`/invoices/${id}/sync`, { provider: providers[0] });
+    if (res.noop) announce('Invoice already synced.');
+    else if (res.failed) announce(`Sync failed (recorded, will retry): ${res.record.error}`);
+    else announce(`Synced to ${res.record.provider} as ${res.record.remote_id}.`);
+  } catch (err) {
+    announce(`Sync failed: ${err.message}`);
   }
 }
 

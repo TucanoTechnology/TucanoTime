@@ -328,6 +328,20 @@ if (payBtn) {
   check('webhook marks the invoice paid', whRes.status === 200 && whJson.status === 'paid');
   const afterInv = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.find((i) => i.id === acmeInv.id);
   check('invoice now paid with a provider reference', afterInv.status === 'paid' && /stripe:/.test(afterInv.payment_reference));
+
+  // ---- ACCOUNTING SYNC (#33): status endpoint + Sync button on the paid row ----
+  const stRes = await fetch(BASE + '/sync/accounting', { headers: { Cookie: SESSION_COOKIE } });
+  const stJson = await stRes.json();
+  check('accounting status endpoint responds', stRes.status === 200 && Array.isArray(stJson.records));
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  const syncBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Sync');
+  check('paid invoice renders a Sync button', !!syncBtn);
+  if (syncBtn) {
+    syncBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(300);
+    check('Sync without a configured provider explains itself', /no accounting provider configured/i.test(window.document.getElementById('live-region').textContent));
+  }
 }
 
 // ---- EXPENSES (#23): add a category + an expense via the forms ----
