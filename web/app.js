@@ -362,12 +362,15 @@ function dayDate() {
   return $('day-date').value;
 }
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 function setDayLabel() {
   const d = dayDate();
   const [y, m, day] = d.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, day));
-  const label = dt.toUTCString().slice(0, 16); // "Tue, 11 Nov 2026"
-  $('day-label').textContent = label;
+  // Mockup format (#108): "Monday, 28 Sep".
+  $('day-label').textContent = `${DAY_NAMES[dt.getUTCDay()]}, ${day} ${MONTH_NAMES[m - 1]}`;
 }
 
 // The week strip: totals per day for the week containing the selected day.
@@ -406,6 +409,7 @@ async function refreshWeekStrip() {
             text: `${new Date(Date.UTC(y, m - 1, dd)).toUTCString().slice(0, 3)} ${dd}`,
           }),
           el('span', { cls: 'ws-total num', text: fmtHM(totals[date] || 0) }),
+          el('span', { cls: 'ws-clock', text: '◷', attrs: { 'aria-hidden': 'true' } }),
         ],
       ),
     );
@@ -431,12 +435,30 @@ async function refreshDay() {
   setDayLabel();
   const data = await api.get(`/entries?date=${encodeURIComponent(date)}`);
   const rows = data.entries || [];
+  // #108: rows carry a lock indicator when the entry sits on an issued
+  // invoice or a submitted/approved week (same lookup the grid uses, cached).
+  const locked = await weekLockIds();
   const tbody = $('day-table').querySelector('tbody');
   tbody.textContent = '';
   let total = 0;
   for (const e of rows) {
     total += Math.round(e.hours * 100);
     const projName = (state.projectsByCustomer[e.customer_id] || []).find((p) => p.code === e.project_code);
+    const custLine =
+      customerName(e.customer_id) + (e.task_code ? ` · ${e.task_code}` : '');
+    const hoursCell = el('td', { cls: 'num entry-hours' }, [
+      el('span', { text: fmtHM(Math.round(e.hours * 100)) }),
+      locked.has(e.id)
+        ? el('span', {
+            cls: 'lock',
+            text: '🔒',
+            attrs: {
+              'aria-label': 'locked',
+              title: 'On an issued invoice or submitted week — editing is blocked',
+            },
+          })
+        : null,
+    ]);
     const tr = el(
       'tr',
       { data: { entryId: e.id } }, // C7: target the exact row on jump-to-entry
@@ -449,7 +471,7 @@ async function refreshDay() {
               cls: 'entry-project',
               text: projName ? `${e.project_code} — ${projName.name}` : e.project_code,
             }),
-            el('div', { cls: 'entry-customer', text: customerName(e.customer_id) }),
+            el('div', { cls: 'entry-customer', text: custLine }),
             // The non-billable badge sits after the note text, as before.
             el(
               'div',
@@ -458,7 +480,7 @@ async function refreshDay() {
             ),
           ],
         ),
-        el('td', { cls: 'num entry-hours', text: e.hours.toFixed(2) }),
+        hoursCell,
         el('td', { cls: 'actions-col' }, [
           el('button', {
             cls: 'pill',
@@ -477,7 +499,7 @@ async function refreshDay() {
     );
     tbody.appendChild(tr);
   }
-  $('day-total').textContent = (total / 100).toFixed(2);
+  $('day-total').textContent = fmtHM(total);
   $('day-table').hidden = rows.length === 0;
   $('day-empty').hidden = rows.length !== 0;
   $('entry-date').value = date;
@@ -486,11 +508,12 @@ async function refreshDay() {
   await Promise.all([refreshWeekStrip(), refreshCalendar(date)]);
 }
 
-/// Copy-forward (#12): pending rows for the previous day's projects, saved
-/// only when the user fills in hours (hours must be >= 0.01 to persist).
-async function copyPreviousDay() {
+/// Copy-forward (#12, restyled #108): pending rows for the projects worked
+/// `ago` days before the current one, saved only when the user fills in hours
+/// (hours must be >= 0.01 to persist).
+async function copyPreviousDay(ago = 1) {
   const target = dayDate();
-  const prev = addDays(target, -1);
+  const prev = addDays(target, -ago);
   const list = $('copy-rows');
   list.textContent = '';
   let rows = [];
@@ -502,7 +525,7 @@ async function copyPreviousDay() {
     return;
   }
   if (rows.length === 0) {
-    announce('No entries on the previous day to copy.');
+    announce(`No entries on ${prev} to copy.`);
     return;
   }
   const seen = new Set();
@@ -686,6 +709,13 @@ async function weekLockIds() {
   } catch { /* members cannot list invoices */ }
   weekLockCache = { at: Date.now(), ids: locked };
   return locked;
+}
+
+/// #108: the day view now shares this cache, so a mutation that changes lock
+/// state (submit/decide/issue/pay) must drop it — otherwise a refresh within
+/// the TTL renders stale locks.
+function invalidateLockCache() {
+  weekLockCache = { at: 0, ids: null };
 }
 
 function weekShort(dateStr) {
@@ -1446,6 +1476,7 @@ async function markInvoicePaid(id) {
   const reference = (await askPrompt('Payment reference (optional):')) || '';
   try {
     await api.post(`/invoices/${id}/pay`, { reference });
+    invalidateLockCache(); // paying releases the invoice's entry locks
     announce('Invoice marked paid.');
     await refreshInvoices();
   } catch (err) {
@@ -1473,6 +1504,7 @@ async function issueInvoice(id) {
   if (!(await askConfirm('Issue this invoice? Its entries will be locked from editing.'))) return;
   try {
     await api.post(`/invoices/${id}/issue`);
+    invalidateLockCache(); // issuing locks its entries
     announce('Invoice issued.');
     await refreshInvoices();
   } catch (err) {
@@ -1690,6 +1722,7 @@ async function submitWeek(evt) {
   clearFormError($('submission-error'));
   try {
     await api.post('/submissions', { week_start: $('submission-week').value });
+    invalidateLockCache(); // the submitted week now locks its entries
     announce('Timesheet submitted.');
     await refreshSubmissions();
     await refreshDay();
@@ -1701,6 +1734,7 @@ async function submitWeek(evt) {
 async function decideSubmission(id, decision) {
   try {
     await api.post(`/submissions/${id}/decision`, { decision, comment: '' });
+    invalidateLockCache(); // approve keeps the lock, reject releases it
     announce(`Timesheet ${decision === 'approve' ? 'approved' : 'rejected'}.`);
     await refreshSubmissions();
   } catch (err) {
@@ -2052,7 +2086,20 @@ async function startApp() {
   });
   $('day-prev').addEventListener('click', () => navigateDay(-1));
   $('day-next').addEventListener('click', () => navigateDay(1));
-  $('copy-prev').addEventListener('click', copyPreviousDay);
+  $('day-today').addEventListener('click', () => selectDay(isoDate(new Date())));
+  $('day-add-bottom').addEventListener('click', () => $('day-add').click());
+  // Copy-from-N-days dropdown (#108): choosing an offset runs the copy.
+  fillSelect(
+    $('copy-days'),
+    [1, 2, 3, 4, 5, 6, 7].map((n) => ({
+      value: String(n),
+      text: `Copy from ${n === 1 ? '1 day' : `${n} days`} ago (projects only)`,
+      selected: n === 3,
+    })),
+  );
+  $('copy-days').addEventListener('change', () =>
+    copyPreviousDay(Number($('copy-days').value) || 1),
+  );
   $('entry-form').addEventListener('submit', saveEntry);
   $('entry-cancel').addEventListener('click', () => {
     resetEntryForm();
