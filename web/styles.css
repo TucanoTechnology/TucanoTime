@@ -219,11 +219,12 @@ td.cell.locked .cell-input { opacity: .6; }
   .sidebar { width: auto; flex: none; border-right: none; border-bottom: 1px solid var(--line); }
   .tabs { flex-direction: row; flex-wrap: wrap; }
   .tabs [role="tab"] { width: auto; border-left: none; border-bottom: 3px solid transparent; border-radius: var(--radius); }
+  #tabs #wizard-open { width: auto; border-left: none; border-bottom: 3px solid transparent; border-radius: var(--radius); }
   .tabs [role="tab"][aria-selected="true"] { border-bottom-color: var(--accent); }
 }
 
 /* ------------------------------------------- inline dialog (#102) ------- */
-#app-dialog {
+#app-dialog, #wizard-dialog {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.1rem 1.2rem 1rem;
@@ -233,8 +234,8 @@ td.cell.locked .cell-input { opacity: .6; }
   color: var(--text);
   box-shadow: 0 10px 30px rgba(44, 0, 30, 0.35);
 }
-#app-dialog::backdrop { background: rgba(44, 0, 30, 0.55); } /* dark aubergine */
-#app-dialog h2 { margin: 0 0 .4rem; font-size: 1.05rem; }
+#app-dialog::backdrop, #wizard-dialog::backdrop { background: rgba(44, 0, 30, 0.55); } /* dark aubergine */
+#app-dialog h2, #wizard-dialog h2 { margin: 0 0 .4rem; font-size: 1.05rem; }
 #dlg-message { margin: 0 0 .8rem; white-space: pre-line; }
 #dlg-input-wrap { display: block; margin: 0 0 .9rem; }
 #dlg-input-wrap[hidden] { display: none; }
@@ -284,3 +285,17 @@ td.cell.locked .cell-input { opacity: .6; }
 #week-table .row-band { border-left: 3px solid var(--accent); }
 #week-table .row-total { white-space: nowrap; }
 .week-controls select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
+
+/* First-run setup wizard (#111). */
+#wizard-dialog { max-width: 30rem; }
+#wizard-dialog .field { margin: 0 0 .7rem; }
+#wizard-dialog .wz-step p:first-child { margin-top: 0; }
+#wz-status { min-height: 1.2em; margin: .2rem 0 .4rem; }
+/* The wizard entry sits among the tabs but is an action, not a tab (#111):
+   same chrome as .tabs [role="tab"], minus the selected state. */
+#tabs #wizard-open {
+  font: inherit; text-align: left; cursor: pointer; width: 100%;
+  padding: .55rem .7rem; border: none; border-left: 3px solid transparent;
+  background: transparent; color: var(--fg); border-radius: 0 var(--radius) var(--radius) 0;
+}
+#tabs #wizard-open:hover, #tabs #wizard-open:focus-visible { background: var(--row-alt); }

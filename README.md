@@ -7,6 +7,7 @@ suite — file-based (no database), one container, browser GUI.
 
 ## Features
 
+- **First-run wizard** — new users land on a guided modal that creates the first customer and project and drops them straight into a ready entry form; the 🚀 sidebar entry reopens it any time (#111).
 - **Day view** — add, edit and delete line items for a single date.
 - **Week grid** — Mon–Sun overview per customer/project; click a cell to add or adjust.
 - **Customers & project codes** — first-class entities; a customer sets the default currency/rate and each project carries its own currency and rate.

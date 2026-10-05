@@ -53,11 +53,9 @@ const postJson = (path, body) =>
 await postJson(BASE + '/auth/bootstrap', { name: 'Admin', email: 'admin@test.local', password: 'supersecret1' });
 const loginRes = await postJson(BASE + '/auth/login', { email: 'admin@test.local', password: 'supersecret1' });
 SESSION_COOKIE = (loginRes.headers.get('set-cookie') || '').split(';')[0];
-// Seed a customer + project (authenticated via the wrapper).
-const cust = await (
-  await postJson('/customers', { name: 'ACME', currency: 'EUR', default_rate_minor: 6000 })
-).json();
-await postJson(`/customers/${cust.id}/projects`, { code: 'P-9', name: 'Portal', currency: 'EUR', rate_minor: 6000 });
+// NOTE: no API seeding of customers/projects here — the first-run setup
+// wizard (#111) creates ACME + P-9 through the real UI below, exercising the
+// trigger, the steps and the prefill rule end-to-end.
 
 function tick(ms = 60) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -72,7 +70,80 @@ function check(name, cond) {
   if (!cond) failures++;
 }
 
-// ---- boot rendered the customer picker with the seeded ACME ----
+// ---- FIRST-RUN WIZARD (#111): auto-open on zero customers ----
+const wzDlg = window.document.getElementById('wizard-dialog');
+const wzOpen = () => wzDlg.open === true || wzDlg.hasAttribute('open');
+check('wizard auto-opens as a modal on first login with no customers', wzOpen());
+check('wizard starts on the welcome step', !window.document.getElementById('wz-step-0').hidden);
+window.document.getElementById('wz-later').dispatchEvent(new window.Event('click', { bubbles: true }));
+check('"Set up later" dismisses the wizard cleanly', !wzOpen());
+// The sidebar icon sits directly under "Customers & projects" and reopens it.
+const wzOrder = [...window.document.querySelectorAll('#tabs button')].map((b) => b.id);
+check('wizard entry is directly under Customers & projects', wzOrder.indexOf('wizard-open') === wzOrder.indexOf('tab-customers') + 1);
+window.document.getElementById('wizard-open').dispatchEvent(new window.Event('click', { bubbles: true }));
+check('the icon reopens the wizard fresh', wzOpen() && !window.document.getElementById('wz-step-0').hidden);
+window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(80);
+check('Next advances to the customer step', !window.document.getElementById('wz-step-1').hidden && window.document.getElementById('wz-step-0').hidden);
+window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(80);
+check('empty customer name shows an inline error (no silent partial save)',
+  !window.document.getElementById('wz-error').hidden);
+window.document.getElementById('wz-cust-name').value = 'ACME';
+window.document.getElementById('wz-cust-currency').value = 'eur';
+window.document.getElementById('wz-cust-rate').value = '60.00';
+window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(400);
+check('wizard advanced to the project step', !window.document.getElementById('wz-step-2').hidden);
+check('project currency/rate prefilled from the customer default (#11)',
+  window.document.getElementById('wz-project-currency').value === 'EUR'
+  && window.document.getElementById('wz-project-rate').value === '60.00');
+window.document.getElementById('wz-project-code').value = 'p-9';
+window.document.getElementById('wz-project-name').value = 'Portal';
+window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(400);
+const custs111 = (await (await fetch(BASE + '/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
+const acme111 = custs111.find((c) => c.name === 'ACME');
+const projs111 = acme111
+  ? (await (await fetch(`${BASE}/customers/${acme111.id}/projects`, { headers: { Cookie: SESSION_COOKIE } })).json()).projects
+  : [];
+check('wizard created customer + project through the real routes',
+  !!acme111 && acme111.default_rate_minor === 6000
+  && projs111.some((p) => p.code === 'P-9' && p.currency === 'EUR' && p.rate_minor === 6000));
+check('done step names what was set up',
+  !window.document.getElementById('wz-step-3').hidden
+  && window.document.getElementById('wz-done-text').textContent.includes('ACME'));
+// Finish: dialog closes, Day view with the pair preselected.
+window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(500);
+check('wizard closed on finish', !wzOpen());
+check('lands on the Timesheets (Day) view',
+  window.document.getElementById('tab-timesheet').getAttribute('aria-selected') === 'true');
+check('new customer + project preselected in the entry form',
+  window.document.getElementById('entry-customer').value === acme111.id
+  && window.document.getElementById('entry-project').value === 'P-9');
+// Reopen with customers present jumps straight to the project step.
+window.document.getElementById('wizard-open').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(120);
+check('reopen with existing customers skips straight to the project step',
+  wzOpen() && !window.document.getElementById('wz-step-2').hidden && window.document.getElementById('wz-step-0').hidden);
+window.document.getElementById('wz-later').dispatchEvent(new window.Event('click', { bubbles: true }));
+// Never auto-opens again once a customer exists: boot a second app instance
+// against the same (now non-empty) server.
+const dom2 = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: BASE + '/', virtualConsole: vc });
+dom2.window.fetch = window.fetch;
+if (!dom2.window.Element.prototype.scrollIntoView) dom2.window.Element.prototype.scrollIntoView = () => {};
+dom2.window.URL.createObjectURL = () => 'blob:jsdom-stub';
+dom2.window.URL.revokeObjectURL = () => {};
+dom2.window.eval(appJs);
+dom2.window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
+await tick(600);
+check('wizard never auto-opens again once a customer exists',
+  !(dom2.window.document.getElementById('wizard-dialog').open === true
+    || dom2.window.document.getElementById('wizard-dialog').hasAttribute('open')));
+dom2.window.close();
+
+// ---- picker shows the ACME the wizard just created ----
 const customerSelect = window.document.getElementById('entry-customer');
 check('customer picker populated', [...customerSelect.options].some((o) => o.textContent.includes('ACME')));
 
