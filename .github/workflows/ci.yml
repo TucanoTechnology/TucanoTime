@@ -73,16 +73,14 @@ jobs:
       - name: Serve on :8099 (fresh data dir)
         run: |
           docker rm -f tt-gui-server 2>/dev/null || true
-          DATA="$(mktemp -d)"
-          echo "$DATA" > /tmp/tt-gui-data
           docker run -d --name tt-gui-server --network host \
-            -v "$PWD:/repo:ro" -v "$DATA:/data" \
+            -v "$PWD:/repo:ro" -v /data \
             -e TUCANO_DATA_DIR=/data -e TUCANO_PORT=8099 -e TUCANO_STRIPE_FAKE=1 \
             rust:1.98.0-slim-trixie /repo/target/release/tucano-time
 
       - name: Wait for health
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl -sf http://localhost:8099/healthz >/dev/null; then exit 0; fi
             sleep 1
           done
@@ -99,10 +97,7 @@ jobs:
 
       - name: Stop server
         if: always()
-        run: |
-          docker rm -f tt-gui-server 2>/dev/null || true
-          DATA="$(cat /tmp/tt-gui-data 2>/dev/null || true)"
-          if [ -n "$DATA" ]; then rm -rf "$DATA"; fi
+        run: docker rm -f tt-gui-server
 
   # Secret scanning (#49): full git history via the pinned gitleaks image. The
   # digest is pinned (matching the sibling project's supply-chain discipline)
