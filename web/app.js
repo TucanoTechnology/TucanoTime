@@ -503,6 +503,7 @@ async function saveEntry(evt) {
 const weekState = {
   extraRows: [], // [{customer_id, project_code}]
   days: [],
+  seq: 0, // render guard: only the newest fetch may touch the DOM
 };
 
 // Entry ids locked by submitted weeks or issued invoices. Fetched fresh on
@@ -535,19 +536,21 @@ function weekShort(dateStr) {
 async function refreshWeek() {
   const anchor = $('week-date').value;
   if (!anchor) return;
+  const seq = ++weekState.seq;
   const start = mondayOf(anchor);
   $('week-date').value = start;
   const days = [];
   for (let i = 0; i < 7; i += 1) days.push(addDays(start, i));
   weekState.days = days;
   const end = days[6];
+  const thisWeek = start === mondayOf(isoDate(new Date()));
   const today = isoDate(new Date());
-  const thisWeek = start === mondayOf(today);
   $('week-label').textContent = `${thisWeek ? 'This week ' : ''}${weekShort(start)} – ${weekShort(end)} ${end.slice(0, 4)}`;
 
   const data = await api.get(`/entries?from=${start}&to=${end}`);
   const entries = data.entries || [];
   const locked = await weekLockIds();
+  if (seq !== weekState.seq) return; // a newer render superseded this one
 
   const keyFor = (e) => `${e.customer_id}::${e.project_code}`;
   const byKey = new Map();
@@ -1287,13 +1290,19 @@ async function refreshInvoices() {
       pay.type = 'button';
       pay.textContent = 'Mark paid';
       pay.addEventListener('click', () => markInvoicePaid(inv.id));
+      const checkout = document.createElement('button');
+      checkout.className = 'link';
+      checkout.type = 'button';
+      checkout.textContent = 'Pay link';
+      checkout.title = 'Create a hosted checkout link (Stripe) for this invoice';
+      checkout.addEventListener('click', () => createCheckoutLink(inv.id, 'stripe'));
       const email = document.createElement('button');
       email.className = 'link';
       email.type = 'button';
       email.textContent = 'Email';
       email.title = 'Send this invoice to the customer billing email';
       email.addEventListener('click', () => emailInvoice(inv.id));
-      act.append(pay, email);
+      act.append(pay, checkout, email);
     } else if (inv.status === 'paid') {
       const email = document.createElement('button');
       email.className = 'link';
@@ -1363,6 +1372,17 @@ async function emailInvoice(id) {
     announce(`Invoice emailed to ${res.sent_to}.`);
   } catch (err) {
     announce(`Email failed: ${err.message}`);
+  }
+}
+
+/// Creates a hosted checkout link (#34) and shows it for the admin to send.
+async function createCheckoutLink(id, provider) {
+  try {
+    const res = await api.post(`/invoices/${id}/checkout`, { provider });
+    announce(`Checkout link: ${res.url}`);
+    window.prompt('Payment link (copy to send to the customer):', res.url);
+  } catch (err) {
+    announce(`Checkout failed: ${err.message}`);
   }
 }
 

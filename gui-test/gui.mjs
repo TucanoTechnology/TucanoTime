@@ -35,6 +35,7 @@ window.fetch = (input, init = {}) => {
 };
 window.confirm = () => true;
 window.alert = () => {};
+window.prompt = () => '';
 if (!window.Element.prototype.scrollIntoView) window.Element.prototype.scrollIntoView = () => {};
 
 // --- authenticate + seed against the live server (fresh data dir) ---
@@ -309,6 +310,24 @@ if (emailBtn) {
   emailBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(300);
   check('Email button announces the send', /emailed to billing@acme.test/i.test(window.document.getElementById('live-region').textContent));
+}
+
+// ---- PAYMENTS (#34): checkout link via the Pay link button + webhook pays it ----
+const payBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Pay link');
+check('issued invoice renders a Pay link button', !!payBtn);
+if (payBtn) {
+  payBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  const liveTxt = window.document.getElementById('live-region').textContent;
+  check('Pay link announces a checkout URL', /checkout link: https:\/\//i.test(liveTxt));
+  // A signed webhook (fake-mode Stripe, signature ignored) marks the invoice paid.
+  const chk = await (await fetch(`${BASE}/invoices/${acmeInv.id}/checkout`, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ provider: 'stripe' }) })).json();
+  const whBody = JSON.stringify({ type: 'checkout.session.completed', payment_status: 'paid', client_reference_id: chk.reference, metadata: { invoice_number: acmeInv.number } });
+  const whRes = await fetch(`${BASE}/payments/webhook/stripe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: whBody });
+  const whJson = await whRes.json();
+  check('webhook marks the invoice paid', whRes.status === 200 && whJson.status === 'paid');
+  const afterInv = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.find((i) => i.id === acmeInv.id);
+  check('invoice now paid with a provider reference', afterInv.status === 'paid' && /stripe:/.test(afterInv.payment_reference));
 }
 
 // ---- EXPENSES (#23): add a category + an expense via the forms ----

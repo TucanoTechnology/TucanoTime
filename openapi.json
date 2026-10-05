@@ -1199,6 +1199,37 @@
         }
       }
     },
+    "/invoices/{id}/checkout": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "post": {
+        "operationId": "createCheckout",
+        "tags": ["invoices"],
+        "summary": "Create a hosted checkout link for an issued invoice (#34)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["provider"], "properties": { "provider": { "type": "string", "enum": ["stripe", "paypal"] } }, "additionalProperties": false } } } },
+        "responses": {
+          "201": { "description": "Checkout session.", "content": { "application/json": { "schema": { "type": "object", "required": ["invoice_id", "provider", "reference", "url"], "properties": { "invoice_id": { "type": "string", "format": "uuid" }, "provider": { "type": "string" }, "reference": { "type": "string" }, "url": { "type": "string" } }, "additionalProperties": false } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "description": "Admin role required." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/payments/webhook/{provider}": {
+      "parameters": [ { "name": "provider", "in": "path", "required": true, "schema": { "type": "string", "enum": ["stripe", "paypal"] } } ],
+      "post": {
+        "operationId": "paymentWebhook",
+        "tags": ["invoices"],
+        "summary": "Provider webhook (public; authenticated by HMAC signature) — marks the invoice paid (#34)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": {
+          "200": { "description": "Processed (paid / already_paid / ignored).", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "description": "Webhook signature verification failed." },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
     "/invoices/summary": {
       "get": {
         "operationId": "invoiceSummary",

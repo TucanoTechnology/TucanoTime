@@ -21,6 +21,7 @@ pub mod email_reminders;
 pub mod error;
 pub mod lock;
 pub mod notify;
+pub mod payments;
 pub mod ratelimit;
 pub mod recurring;
 pub mod reminders;
@@ -49,7 +50,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/login", axum::routing::post(api::login))
         .route("/auth/logout", axum::routing::post(api::logout))
         .route("/auth/status", get(api::auth_status))
-        .route("/auth/me", get(api::me));
+        .route("/auth/me", get(api::me))
+        // Provider webhooks: authenticated by signature, not session (#34).
+        .route(
+            "/payments/webhook/{provider}",
+            axum::routing::post(api::payment_webhook),
+        );
 
     // Authenticated: all timesheet data.
     let protected = Router::new()
@@ -163,6 +169,10 @@ pub fn build_router(state: AppState) -> Router {
             "/invoices/{id}/email",
             axum::routing::post(api::send_invoice_email),
         )
+        .route(
+            "/invoices/{id}/checkout",
+            axum::routing::post(api::create_checkout),
+        )
         .route("/invoices/summary", get(api::invoice_summary))
         .route("/invoices/report", get(api::invoice_report_handler))
         .route("/invoices/export.csv", get(api::invoice_export_csv))
@@ -238,7 +248,11 @@ async fn csrf_guard(
         method,
         axum::http::Method::POST | axum::http::Method::PUT | axum::http::Method::DELETE
     );
-    let exempt = path == "/auth/login" || path == "/auth/bootstrap";
+    // Login/bootstrap are pre-session; payment webhooks are authenticated by
+    // provider signature instead of the cookie+CSRF pair (#34).
+    let exempt = path == "/auth/login"
+        || path == "/auth/bootstrap"
+        || path.starts_with("/payments/webhook/");
     if mutating && !exempt {
         let ok = req
             .headers()
