@@ -1482,14 +1482,22 @@ async function refreshInvoices() {
     });
   for (const inv of invoices) {
     const actions = [];
+    // Balance semantics (#114): legacy paid docs without a ledger count as
+    // fully settled; a written-off balance is forgiven, not outstanding.
+    const paidMinor = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
+    const balance = inv.status === 'paid' || inv.status === 'written_off'
+      ? 0
+      : Math.max(inv.total_minor - paidMinor, 0);
+    const open = inv.status === 'issued' || inv.status === 'partly_paid';
     if (inv.status === 'draft') {
       actions.push(
         action('link', 'Issue', () => issueInvoice(inv)),
         action('danger', 'Delete', () => removeInvoice(inv.id)),
       );
-    } else if (inv.status === 'issued') {
+    } else if (open) {
       actions.push(
-        action('link', 'Mark paid', () => markInvoicePaid(inv.id)),
+        action('link', 'Record payment', () => recordPayment(inv, balance),
+          'Record a full or partial payment (partly paid keeps the rest open)'),
         action('link', 'Pay link', () => createCheckoutLink(inv.id, 'stripe'),
           'Create a hosted checkout link (Stripe) for this invoice'),
         action('link', 'Sync', () => syncInvoice(inv.id),
@@ -1500,6 +1508,8 @@ async function refreshInvoices() {
           'Send this invoice (PDF attached) to the customer billing email'),
         action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
           'Send a PDF copy to another address, e.g. the accountant'),
+        action('danger', 'Write off', () => writeOffInvoice(inv, balance),
+          'Forgive the remaining balance (final; excluded from outstanding)'),
       );
     } else if (inv.status === 'paid') {
       actions.push(
@@ -1519,8 +1529,9 @@ async function refreshInvoices() {
         el('td', { text: customerName(inv.customer_id) }),
         el('td', { text: `${inv.period_from} → ${inv.period_to}` }),
         el('td', { cls: 'num', text: `${inv.currency} ${formatMoney(inv.total_minor)}` }),
+        el('td', { cls: 'num', text: open ? `${inv.currency} ${formatMoney(balance)}` : '\u2014' }),
         el('td', {}, [
-          el('span', { cls: inv.status === 'issued' ? 'badge on' : 'badge', text: inv.status }),
+          el('span', { cls: open ? 'badge on' : 'badge', text: inv.status.replace('_', ' ') }),
         ]),
         el('td', { cls: 'actions-col' }, actions),
       ]),
@@ -1536,16 +1547,65 @@ async function refreshInvoiceSummary() {
     .map(([cur, minor]) => `${cur} ${formatMoney(minor)}`)
     .join(', ');
   $('invoice-summary').textContent =
-    `Draft ${s.draft} · Issued ${s.issued}${s.overdue ? ` (${s.overdue} overdue)` : ''} · Paid ${s.paid}` +
+    `Draft ${s.draft} · Issued ${s.issued}${s.overdue ? ` (${s.overdue} overdue)` : ''}` +
+    (s.partly_paid ? ` · Partly paid ${s.partly_paid}` : '') +
+    ` · Paid ${s.paid}` +
+    (s.written_off ? ` · Written off ${s.written_off}` : '') +
     (outstanding ? ` · Outstanding: ${outstanding}` : '');
 }
 
-async function markInvoicePaid(id) {
+/// Record a full or partial payment (#114). The amount is prefilled with the
+/// outstanding balance; paying the exact balance settles the invoice.
+async function recordPayment(inv, balance) {
+  const amount = await askPrompt(
+    `Amount to record (${inv.currency} ${formatMoney(balance)} outstanding):`,
+    formatMoney(balance),
+  );
+  if (amount === null) return; // dialog dismissed
+  const trimmed = String(amount).trim();
+  if (!trimmed) {
+    announce('Record payment cancelled.');
+    return;
+  }
+  const minor = Math.round(Number(trimmed) * 100);
+  if (!Number.isFinite(minor) || minor <= 0) {
+    announce('Enter a positive amount, e.g. 150.00.');
+    return;
+  }
   const reference = (await askPrompt('Payment reference (optional):')) || '';
   try {
-    await api.post(`/invoices/${id}/pay`, { reference });
-    invalidateLockCache(); // paying releases the invoice's entry locks
-    announce('Invoice marked paid.');
+    const paid = await api.post(`/invoices/${inv.id}/pay`, { reference, amount_minor: minor });
+    invalidateLockCache(); // full settlement releases the invoice's entry locks
+    if (paid.status === 'paid') {
+      announce('Invoice marked paid.');
+    } else {
+      const rest = Math.max(
+        paid.total_minor - (paid.payments || []).reduce((a, p) => a + p.amount_minor, 0),
+        0,
+      );
+      announce(`Payment recorded. ${paid.currency} ${formatMoney(rest)} still outstanding.`);
+    }
+    await refreshInvoices();
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
+/// Forgive the remaining balance (#114): the reason is required and the
+/// state is final, so a prompt + confirm gate the action.
+async function writeOffInvoice(inv, balance) {
+  const reason = await askPrompt(
+    `Write off ${inv.currency} ${formatMoney(balance)} of ${inv.number} — reason (required):`,
+  );
+  const r = String(reason ?? '').trim();
+  if (!r) {
+    announce('Write off cancelled.');
+    return;
+  }
+  if (!(await askConfirm(`Write off ${inv.number}? The balance stops counting as outstanding.`))) return;
+  try {
+    await api.post(`/invoices/${inv.id}/write-off`, { reason: r });
+    announce(`${inv.number} written off.`);
     await refreshInvoices();
   } catch (err) {
     announce(err.message);

@@ -6,7 +6,9 @@
 import { JSDOM, VirtualConsole } from 'jsdom';
 import fs from 'node:fs';
 
-const BASE = 'http://localhost:8099';
+// CI serves on :8099; local runs can point elsewhere (TT_GUI_BASE) so a
+// dev's harness server can never shadow the runner's own container.
+const BASE = process.env.TT_GUI_BASE || 'http://localhost:8099';
 
 const html = fs.readFileSync('../web/index.html', 'utf8');
 const appJs = fs.readFileSync('../web/app.js', 'utf8');
@@ -612,6 +614,59 @@ check('template preview card shows the rendered subject', !prev.hidden
   && window.document.getElementById('template-preview-subject').textContent.includes('Invoice '));
 check('preview body is plain text (textContent-only rule)', window.document.getElementById('template-preview-body').children.length === 0
   && window.document.getElementById('template-preview-body').textContent.includes('consulting work'));
+
+// ---- PARTIAL PAYMENTS & WRITE-OFF (#114): record payment + write off via GUI ----
+const paid2028 = await (await fetch(BASE + '/entries', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
+  body: JSON.stringify({ date: '2028-02-02', customer_id: acmeOpt.value, project_code: 'MKT-2', hours: 4 }),
+})).json();
+const inv114 = await (await fetch(BASE + '/invoices', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
+  body: JSON.stringify({ customer_id: acmeOpt.value, from: '2028-02-01', to: '2028-02-29' }),
+})).json();
+await fetch(`${BASE}/invoices/${inv114.id}/issue`, { method: 'POST', headers: { Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' } });
+window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(300);
+const balCells = [...window.document.querySelectorAll('#invoice-table tbody tr')]
+  .filter((r) => r.textContent.includes(inv114.number))
+  .map((r) => r.children[4].textContent.trim());
+check('open invoice shows the outstanding Balance', balCells.length === 1 && balCells[0].includes('380.00'), `cells=${balCells}`);
+const recBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Record payment'
+  && b.closest('tr').textContent.includes(inv114.number));
+check('issued invoice renders Record payment (replacing Mark paid)', !!recBtn);
+if (recBtn) {
+  recBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(200);
+  const dlgIn = window.document.getElementById('dlg-input');
+  check('record-payment dialog prefills the balance', /^\d+\.\d\d$/.test(dlgIn.value));
+  const owed = dlgIn.value;
+  dlgIn.value = '10.00';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(200);
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true })); // reference step: empty ok
+  await tick(400);
+  const after = await (await fetch(`${BASE}/invoices/${inv114.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
+  check('partial payment recorded as partly_paid with a ledger line', after.status === 'partly_paid' && after.payments.length === 1 && after.payments[0].amount_minor === 1000);
+  check('record payment announces remaining balance', /still outstanding/i.test(window.document.getElementById('live-region').textContent));
+  // Write off the rest.
+  const woBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Write off'
+    && b.closest('tr').textContent.includes(inv114.number));
+  check('partly_paid invoice offers Write off', !!woBtn);
+  if (woBtn) {
+    woBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(200);
+    window.document.getElementById('dlg-input').value = 'goodwill waiver';
+    window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(200);
+    window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true })); // confirm step
+    await tick(400);
+    const wo = await (await fetch(`${BASE}/invoices/${inv114.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
+    check('write-off finalizes with the reason', wo.status === 'written_off' && wo.write_off_reason === 'goodwill waiver');
+    check('write-off announced', /written off/i.test(window.document.getElementById('live-region').textContent));
+  }
+}
 
 console.log(`\n${failures === 0 ? 'ALL GUI CHECKS PASSED' : failures + ' GUI CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

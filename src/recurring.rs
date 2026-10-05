@@ -68,6 +68,9 @@ impl RecurringJob {
                     paid_at: None,
                     payment_reference: String::new(),
                     pdf: None,
+                    payments: vec![],
+                    write_off_reason: String::new(),
+                    written_off_at: None,
                 }))
             }
             RecurMode::Time => {

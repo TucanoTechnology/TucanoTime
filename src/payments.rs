@@ -44,6 +44,11 @@ pub struct CheckoutSession {
 pub struct WebhookPayment {
     pub provider: String,
     pub reference: String,
+    /// The provider's own event id, when it sends one. Ledger entries key on
+    /// this so two different events sharing a `client_reference_id` (e.g. a
+    /// deposit then a final payment on one session) are distinct, while a
+    /// replay of the SAME event is idempotent (#114).
+    pub event_id: String,
     pub invoice_number: String,
     /// What the provider actually collected, in minor units — the handler
     /// refuses to settle when it disagrees with the invoice (review A11).
@@ -269,9 +274,15 @@ fn decode(
         .filter(|c| (3..=10).contains(&c.len()))
         .ok_or(PaymentError::BadPayload)?
         .to_ascii_uppercase();
+    let event_id = v
+        .get("id")
+        .and_then(|i| i.as_str())
+        .unwrap_or_default()
+        .to_string();
     Ok(Some(WebhookPayment {
         provider: provider.into(),
         reference,
+        event_id,
         invoice_number,
         amount_minor,
         currency,
@@ -356,6 +367,7 @@ mod tests {
             Some(WebhookPayment {
                 provider: "stripe".into(),
                 reference: "stripe_42".into(),
+                event_id: String::new(),
                 invoice_number: "INV-0042".into(),
                 amount_minor: 15000,
                 currency: "EUR".into(),

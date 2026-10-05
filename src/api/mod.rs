@@ -474,7 +474,7 @@ pub use self::invoicing::{
     delete_invoice, get_invoice_handler, invoice_document, invoice_export_csv, invoice_pdf,
     invoice_report_handler, invoice_summary, invoice_template_get, invoice_template_put,
     issue_invoice, list_invoices, money_for_email, pay_invoice, payment_webhook,
-    send_invoice_email, send_invoice_email_copy, sync_invoice, sync_status,
+    send_invoice_email, send_invoice_email_copy, sync_invoice, sync_status, write_off_invoice,
 };
 pub use self::people::{
     UserInput, create_customer, create_project, create_task, create_user, delete_customer,

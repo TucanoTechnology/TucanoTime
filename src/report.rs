@@ -257,6 +257,11 @@ pub struct InvoiceReportRow {
     pub currency: String,
     pub revenue_minor: u64,
     pub invoices: usize,
+    /// Collected ledger total across the window (#114).
+    pub paid_minor: u64,
+    /// Still-collectable balance; written-off amounts are forgiven, not
+    /// outstanding (#114).
+    pub balance_minor: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -267,6 +272,9 @@ pub struct InvoiceReport {
     pub paid: usize,
     pub overdue: usize,
     pub total_revenue_minor: u64,
+    /// #114 additions: the two open/late lifecycle states.
+    pub partly_paid: usize,
+    pub written_off: usize,
 }
 
 /// Revenue by customer from non-draft invoices overlapping `[from, to]`, plus
@@ -294,6 +302,8 @@ pub fn invoice_report(
             currency: c.currency.0.clone(),
             revenue_minor: mine.iter().map(|i| i.total_minor).sum(),
             invoices: mine.len(),
+            paid_minor: mine.iter().map(|i| i.paid_minor()).sum(),
+            balance_minor: mine.iter().map(|i| i.balance_minor()).sum(),
         });
     }
     rows.sort_by_key(|r| std::cmp::Reverse(r.revenue_minor));
@@ -313,13 +323,23 @@ pub fn invoice_report(
             .count(),
         overdue: invoices
             .iter()
-            .filter(|i| i.status == InvoiceStatus::Issued && i.due_date.is_some_and(|d| d < to))
+            .filter(|i| {
+                i.status.is_open() && i.balance_minor() > 0 && i.due_date.is_some_and(|d| d < to)
+            })
             .count(),
         total_revenue_minor: invoices
             .iter()
             .filter(|i| i.status != InvoiceStatus::Draft)
             .map(|i| i.total_minor)
             .sum(),
+        partly_paid: invoices
+            .iter()
+            .filter(|i| i.status == InvoiceStatus::PartlyPaid)
+            .count(),
+        written_off: invoices
+            .iter()
+            .filter(|i| i.status == InvoiceStatus::WrittenOff)
+            .count(),
     }
 }
 
@@ -332,8 +352,10 @@ pub fn invoice_csv(invoices: &[crate::domain::Invoice], customers: &[Customer]) 
             .map(|c| c.name.clone())
             .unwrap_or_default()
     };
+    // #114: paid/balance columns appended (existing positions stable for
+    // consumers that parse by index).
     let mut out = String::from(
-        "number,customer,period_from,period_to,currency,total_minor,status,issued_at,due_date,paid_at,payment_reference\n",
+        "number,customer,period_from,period_to,currency,total_minor,status,issued_at,due_date,paid_at,payment_reference,paid_minor,balance_minor,write_off_reason\n",
     );
     for i in invoices {
         let fields = [
@@ -350,6 +372,9 @@ pub fn invoice_csv(invoices: &[crate::domain::Invoice], customers: &[Customer]) 
                 .unwrap_or_default(),
             i.paid_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
             i.payment_reference.clone(),
+            i.paid_minor().to_string(),
+            i.balance_minor().to_string(),
+            i.write_off_reason.clone(),
         ];
         let joined = fields
             .iter()

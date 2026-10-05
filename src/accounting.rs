@@ -136,6 +136,11 @@ pub struct SyncRecord {
     pub error: String,
     pub attempts: u32,
     pub updated_at: DateTime<Utc>,
+    /// Sub-key for `kind == "payment"` records: the ledger payment id
+    /// (#114), so each recorded payment syncs with its real amount. Empty
+    /// for invoice records and for the single legacy payment.
+    #[serde(default)]
+    pub detail: String,
 }
 
 // -------------------------------------------------------------- providers --
@@ -304,6 +309,8 @@ pub struct SyncAttempt<'a> {
     pub status: SyncStatus,
     pub error: String,
     pub now: DateTime<Utc>,
+    /// See `SyncRecord::detail` (#114).
+    pub detail: String,
 }
 
 /// Records a sync attempt (success or failure) idempotently keyed by
@@ -320,15 +327,19 @@ pub fn record_sync(
         status,
         error,
         now,
+        detail,
     } = attempt;
     // Whole read-modify-write under one store lock (review B4/D3): two
     // concurrent syncs must never clobber each other's records.
     let mut outcome: Option<SyncRecord> = None;
     store.update_json_rel::<Vec<SyncRecord>, _>("sync/accounting.json", |current| {
         let mut records = current.unwrap_or_default();
-        let existing = records
-            .iter()
-            .position(|r| r.provider == provider && r.kind == kind && r.invoice_id == invoice.id);
+        let existing = records.iter().position(|r| {
+            r.provider == provider
+                && r.kind == kind
+                && r.invoice_id == invoice.id
+                && r.detail == detail
+        });
         let attempts = existing.map_or(1, |i| records[i].attempts + 1);
         let rec = SyncRecord {
             provider: provider.to_string(),
@@ -340,6 +351,7 @@ pub fn record_sync(
             error: error.clone(),
             attempts,
             updated_at: now,
+            detail: detail.clone(),
         };
         match existing {
             Some(i) => records[i] = rec.clone(),
@@ -417,12 +429,27 @@ impl crate::scheduler::Job for AccountingRetryJob {
                 else {
                     continue;
                 };
-                let paid_at = invoice.paid_at.unwrap_or(now);
+                // #114: re-push THAT payment with its real amount; the
+                // empty-detail legacy record keeps the total/payment_date.
+                let (amount, reference, paid_at) = match (
+                    rec.detail.parse::<uuid::Uuid>().ok(),
+                    invoice
+                        .payments
+                        .iter()
+                        .find(|p| p.id.to_string() == rec.detail),
+                ) {
+                    (Some(_), Some(p)) => (p.amount_minor, p.reference.clone(), p.received_at),
+                    _ => (
+                        invoice.paid_minor(),
+                        invoice.payment_reference.clone(),
+                        invoice.paid_at.unwrap_or(now),
+                    ),
+                };
                 match provider.push_payment(
                     &invoice_rec.remote_id,
-                    invoice.total_minor,
+                    amount,
                     &invoice.currency.0,
-                    &invoice.payment_reference,
+                    &reference,
                     paid_at,
                 ) {
                     Ok(remote) => {
@@ -436,6 +463,7 @@ impl crate::scheduler::Job for AccountingRetryJob {
                                 status: SyncStatus::Synced,
                                 error: String::new(),
                                 now,
+                                detail: rec.detail.clone(),
                             },
                         );
                     }
@@ -450,6 +478,7 @@ impl crate::scheduler::Job for AccountingRetryJob {
                                 status: SyncStatus::Failed,
                                 error: e.to_string(),
                                 now,
+                                detail: rec.detail.clone(),
                             },
                         );
                     }
@@ -474,6 +503,7 @@ impl crate::scheduler::Job for AccountingRetryJob {
                             status: SyncStatus::Synced,
                             error: String::new(),
                             now,
+                            detail: String::new(),
                         },
                     );
                 }
@@ -488,6 +518,7 @@ impl crate::scheduler::Job for AccountingRetryJob {
                             status: SyncStatus::Failed,
                             error: e.to_string(),
                             now,
+                            detail: String::new(),
                         },
                     );
                 }
@@ -576,6 +607,9 @@ mod tests {
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
+            payments: vec![],
+            write_off_reason: String::new(),
+            written_off_at: None,
         };
         (inv, customer)
     }

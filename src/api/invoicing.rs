@@ -204,6 +204,17 @@ fn sanitize_number(number: &str) -> String {
 pub struct PayInput {
     #[serde(default)]
     pub reference: String,
+    /// Minor units; absent = the full remaining balance (today's behaviour,
+    /// #114). Zero and over-balance are rejected without persisting.
+    #[serde(default)]
+    pub amount_minor: Option<u64>,
+}
+
+/// Body for `POST /invoices/{id}/write-off` (#114).
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WriteOffInput {
+    pub reason: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -212,17 +223,78 @@ pub struct CheckoutInput {
     pub provider: String,
 }
 
-/// Mark an issued invoice as paid (#27).
+/// Record a payment on an issued invoice (#27, #114): full balance by
+/// default, or a partial amount. A zero amount is a 422 (bad shape), an
+/// over-payment a 409 (bad state arithmetic) — both without persistence.
 pub async fn pay_invoice(
     State(app): State<AppState>,
+    actor: AuthUser,
     Path(id): Path<Uuid>,
     ValidJson(input): ValidJson<PayInput>,
 ) -> ApiResult {
     // State check + transition under one lock (review B4).
     get_invoice_or_404(&app, id)?;
+    if input.amount_minor == Some(0) {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "amount_minor",
+            "must be greater than zero",
+        )]));
+    }
+    let invoice = match app.store.record_payment(
+        id,
+        input.amount_minor,
+        input.reference,
+        "manual".into(),
+        app.clock.now(),
+    ) {
+        Ok(inv) => inv,
+        // Over-balance is arithmetic on stored state: 409, message safe.
+        Err(crate::store::StoreError::Conflict(m)) if m.starts_with("payment of ") => {
+            return Err(ApiError::conflict(m));
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let paid = invoice.payments.last().expect("just recorded");
+    app.audit.record(
+        "invoice_payment",
+        &format!(
+            "{}:{}:{}:{}",
+            id, paid.amount_minor, actor.0.id, paid.method
+        ),
+        app.clock.now(),
+    );
+    Ok(Json(invoice).into_response())
+}
+
+/// Forgive the remaining balance of an open invoice (#114). Requires a
+/// non-empty reason; 409 on draft/paid/written-off states.
+pub async fn write_off_invoice(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<WriteOffInput>,
+) -> ApiResult {
+    get_invoice_or_404(&app, id)?;
+    if input.reason.trim().is_empty() {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "reason",
+            "a write-off reason is required",
+        )]));
+    }
+    if input.reason.chars().count() > 500 {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "reason",
+            "reason too long (max 500 characters)",
+        )]));
+    }
     let invoice = app
         .store
-        .pay_invoice(id, app.clock.now(), input.reference)?;
+        .write_off_invoice(id, input.reason, app.clock.now())?;
+    app.audit.record(
+        "invoice_write_off",
+        &format!("{}:{}", id, actor.0.id),
+        app.clock.now(),
+    );
     Ok(Json(invoice).into_response())
 }
 
@@ -444,16 +516,19 @@ pub async fn create_checkout(
         crate::domain::InvoiceStatus::Paid => {
             return Err(ApiError::conflict("this invoice is already paid"));
         }
-        crate::domain::InvoiceStatus::Issued => {}
+        crate::domain::InvoiceStatus::WrittenOff => {
+            return Err(ApiError::conflict("this invoice is written off"));
+        }
+        crate::domain::InvoiceStatus::Issued | crate::domain::InvoiceStatus::PartlyPaid => {}
+    }
+    // A partly-paid checkout charges the BALANCE, never the total (#114).
+    let amount = invoice.balance_minor();
+    if amount == 0 {
+        return Err(ApiError::conflict("this invoice has no balance to collect"));
     }
     let provider = provider_or_400(app.payments.get(&input.provider), "payment")?;
     let session = provider
-        .create_checkout(
-            invoice.id,
-            &invoice.number,
-            invoice.total_minor,
-            &invoice.currency.0,
-        )
+        .create_checkout(invoice.id, &invoice.number, amount, &invoice.currency.0)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
     app.audit.record(
         "checkout_created",
@@ -499,12 +574,25 @@ pub async fn payment_webhook(
     let Some(invoice) = app.store.find_invoice_by_number(&event.invoice_number)? else {
         return Err(ApiError::not_found("invoice"));
     };
-    if invoice.status == crate::domain::InvoiceStatus::Paid {
-        // Replay-safe: the provider can deliver the same event more than once.
-        return Ok(Json(serde_json::json!({ "status": "already_paid" })).into_response());
+    match invoice.status {
+        crate::domain::InvoiceStatus::Paid => {
+            // Replay-safe: the provider can deliver the same event more than once.
+            return Ok(Json(serde_json::json!({ "status": "already_paid" })).into_response());
+        }
+        crate::domain::InvoiceStatus::WrittenOff => {
+            // Unexpected money on a forgiven invoice: accepted so providers
+            // stop retrying, but it never reopens the document (#114).
+            app.audit
+                .record("payment_on_written_off", &invoice.number, app.clock.now());
+            return Ok(Json(serde_json::json!({ "ignored": "written_off" })).into_response());
+        }
+        crate::domain::InvoiceStatus::Draft => {
+            return Err(ApiError::conflict("invoice is not issued"));
+        }
+        crate::domain::InvoiceStatus::Issued | crate::domain::InvoiceStatus::PartlyPaid => {}
     }
     // Review A11: a signed event must carry what was ACTUALLY collected and
-    // match the invoice, or a partial/refund event could settle in full.
+    // match the invoice, so a refund/other-currency event never settles it.
     if event.currency != invoice.currency.0.to_ascii_uppercase() {
         app.audit.record(
             "payment_currency_mismatch",
@@ -513,35 +601,62 @@ pub async fn payment_webhook(
         );
         return Err(ApiError::conflict("payment currency mismatch"));
     }
-    if event.amount_minor < invoice.total_minor {
+    // #114: the event records a LEDGER PAYMENT of its real amount. A partial
+    // lands on partly_paid; over-collection is refused (never a silent
+    // overpayment), and a replay of the same provider event is idempotent.
+    let reference = if event.event_id.is_empty() {
+        format!("{}:{}", event.provider, event.reference)
+    } else {
+        format!("{}:evt-{}", event.provider, event.event_id)
+    };
+    if invoice.payments.iter().any(|p| p.reference == reference) {
+        return Ok(Json(
+            serde_json::json!({ "status": "already_processed", "invoice": invoice.number }),
+        )
+        .into_response());
+    }
+    let balance = invoice.balance_minor();
+    if event.amount_minor > balance {
         app.audit.record(
-            "payment_underpaid",
+            "payment_over_balance",
             &format!("{}:{}", invoice.number, event.amount_minor),
             app.clock.now(),
         );
-        return Err(ApiError::conflict("payment amount is below invoice total"));
+        return Err(ApiError::conflict(
+            "payment amount exceeds the remaining invoice balance",
+        ));
     }
-    let reference = format!("{}:{}", event.provider, event.reference);
-    match app
-        .store
-        .pay_invoice(invoice.id, app.clock.now(), reference)
-    {
-        Ok(paid) => {
+    match app.store.record_payment(
+        invoice.id,
+        Some(event.amount_minor),
+        reference,
+        event.provider.clone(),
+        app.clock.now(),
+    ) {
+        Ok(settled) => {
             app.audit
-                .record("payment_received", &paid.number, app.clock.now());
+                .record("payment_received", &settled.number, app.clock.now());
+            let status = if settled.status == crate::domain::InvoiceStatus::Paid {
+                "paid"
+            } else {
+                "partly_paid"
+            };
             Ok(
-                Json(serde_json::json!({ "status": "paid", "invoice": paid.number }))
+                Json(serde_json::json!({ "status": status, "invoice": settled.number }))
                     .into_response(),
             )
         }
-        // Draft or concurrently settled: re-read tells the provider which.
+        // Concurrently settled or raced: re-read tells the provider which.
         Err(crate::store::StoreError::Conflict(_)) => {
             let fresh = app.store.get_invoice(invoice.id)?;
             match fresh.map(|i| i.status) {
                 Some(crate::domain::InvoiceStatus::Paid) => {
                     Ok(Json(serde_json::json!({ "status": "already_paid" })).into_response())
                 }
-                _ => Err(ApiError::conflict("invoice is not issued")),
+                Some(_) => {
+                    Ok(Json(serde_json::json!({ "status": "already_processed" })).into_response())
+                }
+                None => Err(ApiError::conflict("invoice is not issued")),
             }
         }
         Err(other) => Err(other.into()),
@@ -570,6 +685,44 @@ pub async fn sync_invoice(
     let provider = provider_or_400(app.accounting.get(&input.provider), "accounting")?;
     let customer = get_customer(&app.store, invoice.customer_id)?;
     let records = crate::accounting::list_records(&app.store)?;
+    // A legacy `Paid` invoice predating the ledger (#114) is represented as
+    // one payment of the total under the empty detail.
+    let detail_of = |p: &crate::domain::InvoicePayment| p.id.to_string();
+    let pending: Vec<(String, u64, String, chrono::DateTime<chrono::Utc>)> =
+        if invoice.payments.is_empty() {
+            if invoice.paid_minor() > 0 {
+                vec![(
+                    String::new(),
+                    invoice.paid_minor(),
+                    invoice.payment_reference.clone(),
+                    invoice.paid_at.unwrap_or_else(|| app.clock.now()),
+                )]
+            } else {
+                Vec::new()
+            }
+        } else {
+            invoice
+                .payments
+                .iter()
+                .filter(|p| {
+                    !records.iter().any(|r| {
+                        r.provider == provider.name()
+                            && r.kind == "payment"
+                            && r.invoice_id == invoice.id
+                            && r.detail == detail_of(p)
+                            && r.status == crate::accounting::SyncStatus::Synced
+                    })
+                })
+                .map(|p| {
+                    (
+                        detail_of(p),
+                        p.amount_minor,
+                        p.reference.clone(),
+                        p.received_at,
+                    )
+                })
+                .collect()
+        };
     if let Some(prev) = records
         .iter()
         .find(|r| {
@@ -578,58 +731,61 @@ pub async fn sync_invoice(
         .cloned()
         .filter(|r| r.status == crate::accounting::SyncStatus::Synced)
     {
-        // Invoice already synced. If it has since been paid and no payment
-        // record exists yet, push the payment against the remote invoice (#33).
-        let has_payment = records.iter().any(|r| {
-            r.provider == prev.provider && r.kind == "payment" && r.invoice_id == invoice.id
-        });
-        if invoice.status != crate::domain::InvoiceStatus::Paid || has_payment {
+        // Invoice already synced: push every collected-but-unsynced payment
+        // against the remote invoice (#33, #114), else a plain no-op.
+        if pending.is_empty() {
             return Ok(Json(serde_json::json!({ "record": prev, "noop": true })).into_response());
         }
-        let paid_at = invoice.paid_at.unwrap_or_else(|| app.clock.now());
-        return match provider.push_payment(
-            &prev.remote_id,
-            invoice.total_minor,
-            &invoice.currency.0,
-            &invoice.payment_reference,
-            paid_at,
-        ) {
-            Ok(remote) => {
-                let rec = crate::accounting::record_sync(
-                    &app.store,
-                    crate::accounting::SyncAttempt {
-                        provider: provider.name(),
-                        kind: "payment",
-                        invoice: &invoice,
-                        remote_id: remote,
-                        status: crate::accounting::SyncStatus::Synced,
-                        error: String::new(),
-                        now: app.clock.now(),
-                    },
-                )?;
-                app.audit
-                    .record("accounting_payment_sync", &invoice.number, app.clock.now());
-                Ok(
-                    Json(serde_json::json!({ "record": rec, "invoice_synced": prev.remote_id }))
-                        .into_response(),
-                )
-            }
-            Err(e) => {
-                let rec = crate::accounting::record_sync(
-                    &app.store,
-                    crate::accounting::SyncAttempt {
-                        provider: provider.name(),
-                        kind: "payment",
-                        invoice: &invoice,
-                        remote_id: String::new(),
-                        status: crate::accounting::SyncStatus::Failed,
-                        error: e.to_string(),
-                        now: app.clock.now(),
-                    },
-                )?;
-                Ok(Json(serde_json::json!({ "record": rec, "failed": true })).into_response())
-            }
-        };
+        let mut last: Option<crate::accounting::SyncRecord> = None;
+        for (detail, amount, reference, paid_at) in &pending {
+            last = Some(
+                match provider.push_payment(
+                    &prev.remote_id,
+                    *amount,
+                    &invoice.currency.0,
+                    reference,
+                    *paid_at,
+                ) {
+                    Ok(remote) => {
+                        app.audit.record(
+                            "accounting_payment_sync",
+                            &invoice.number,
+                            app.clock.now(),
+                        );
+                        crate::accounting::record_sync(
+                            &app.store,
+                            crate::accounting::SyncAttempt {
+                                provider: provider.name(),
+                                kind: "payment",
+                                invoice: &invoice,
+                                remote_id: remote,
+                                status: crate::accounting::SyncStatus::Synced,
+                                error: String::new(),
+                                now: app.clock.now(),
+                                detail: detail.clone(),
+                            },
+                        )?
+                    }
+                    Err(e) => crate::accounting::record_sync(
+                        &app.store,
+                        crate::accounting::SyncAttempt {
+                            provider: provider.name(),
+                            kind: "payment",
+                            invoice: &invoice,
+                            remote_id: String::new(),
+                            status: crate::accounting::SyncStatus::Failed,
+                            error: e.to_string(),
+                            now: app.clock.now(),
+                            detail: detail.clone(),
+                        },
+                    )?,
+                },
+            );
+        }
+        return Ok(Json(
+            serde_json::json!({ "record": last, "invoice_synced": prev.remote_id, "payments": pending.len() }),
+        )
+        .into_response());
     }
     let key = crate::accounting::invoice_key(provider.name(), &invoice.number);
     let doc = crate::accounting::InvoiceDoc {
@@ -638,32 +794,44 @@ pub async fn sync_invoice(
     };
     match provider.push_invoice(&doc, &key) {
         Ok(remote) => {
-            if invoice.status == crate::domain::InvoiceStatus::Paid
-                && let Err(e) = provider.push_payment(
+            // Synced invoices also carry their ledger, in real amounts.
+            for (detail, amount, reference, paid_at) in &pending {
+                if let Err(e) = provider.push_payment(
                     &remote,
-                    invoice.total_minor,
+                    *amount,
                     &invoice.currency.0,
-                    &invoice.payment_reference,
-                    invoice.paid_at.unwrap_or_else(|| app.clock.now()),
-                )
-            {
-                let prec = crate::accounting::record_sync(
-                    &app.store,
-                    crate::accounting::SyncAttempt {
-                        provider: provider.name(),
-                        kind: "payment",
-                        invoice: &invoice,
-                        remote_id: String::new(),
-                        status: crate::accounting::SyncStatus::Failed,
-                        error: e.to_string(),
-                        now: app.clock.now(),
-                    },
-                )?;
-                tracing::warn!(error = %e, "payment sync failed (invoice synced anyway)");
-                return Ok(
-                    Json(serde_json::json!({ "record": prec, "invoice_synced": remote }))
-                        .into_response(),
-                );
+                    reference,
+                    *paid_at,
+                ) {
+                    crate::accounting::record_sync(
+                        &app.store,
+                        crate::accounting::SyncAttempt {
+                            provider: provider.name(),
+                            kind: "payment",
+                            invoice: &invoice,
+                            remote_id: String::new(),
+                            status: crate::accounting::SyncStatus::Failed,
+                            error: e.to_string(),
+                            now: app.clock.now(),
+                            detail: detail.clone(),
+                        },
+                    )?;
+                    tracing::warn!(error = %e, "payment sync failed (invoice synced anyway)");
+                } else {
+                    crate::accounting::record_sync(
+                        &app.store,
+                        crate::accounting::SyncAttempt {
+                            provider: provider.name(),
+                            kind: "payment",
+                            invoice: &invoice,
+                            remote_id: String::new(),
+                            status: crate::accounting::SyncStatus::Synced,
+                            error: String::new(),
+                            now: app.clock.now(),
+                            detail: detail.clone(),
+                        },
+                    )?;
+                }
             }
             let rec = crate::accounting::record_sync(
                 &app.store,
@@ -675,6 +843,7 @@ pub async fn sync_invoice(
                     status: crate::accounting::SyncStatus::Synced,
                     error: String::new(),
                     now: app.clock.now(),
+                    detail: String::new(),
                 },
             )?;
             app.audit
@@ -692,6 +861,7 @@ pub async fn sync_invoice(
                     status: crate::accounting::SyncStatus::Failed,
                     error: e.to_string(),
                     now: app.clock.now(),
+                    detail: String::new(),
                 },
             )?;
             Ok(Json(serde_json::json!({ "record": rec, "failed": true })).into_response())
@@ -863,6 +1033,9 @@ pub async fn invoice_template_put(
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
+            payments: vec![],
+            write_off_reason: String::new(),
+            written_off_at: None,
         };
         let vars = crate::template::vars_for(&sample, "Sample Customer", None);
         // interpolate/parse cannot fail by design; the call is the assertion

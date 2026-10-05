@@ -1158,27 +1158,124 @@ impl Store {
         }
     }
 
-    /// Mark paid atomically with the issued-state check.
+    /// Mark paid atomically with the issued-state check: records the full
+    /// remaining balance (#114 default; keeps the pre-ledger behaviour for
+    /// callers that do not pass an amount).
     pub fn pay_invoice(
         &self,
         id: Uuid,
         now: DateTime<Utc>,
         reference: String,
     ) -> Result<Invoice, StoreError> {
+        self.record_payment(id, None, reference, "manual".into(), now)
+    }
+
+    /// Record a payment on the invoice ledger (#114), state check + write
+    /// under one lock. `amount` defaults to the full balance; rejection is
+    /// all-or-nothing (zero, over-balance, closed states) with no partial
+    /// persistence. Settling the last cent flips to `Paid`; anything less
+    /// parks at `PartlyPaid`.
+    pub fn record_payment(
+        &self,
+        id: Uuid,
+        amount: Option<u64>,
+        reference: String,
+        method: String,
+        now: DateTime<Utc>,
+    ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
-        let Some(mut invoice) = read_json::<Invoice>(&self.doc_path::<Invoice>(&id.to_string()))?
-        else {
+        self.record_payment_locked(id, amount, reference, method, now)
+    }
+
+    fn record_payment_locked(
+        &self,
+        id: Uuid,
+        amount: Option<u64>,
+        reference: String,
+        method: String,
+        now: DateTime<Utc>,
+    ) -> Result<Invoice, StoreError> {
+        let path = self.doc_path::<Invoice>(&id.to_string());
+        let Some(mut invoice) = read_json::<Invoice>(&path)? else {
             return Err(StoreError::NotFound);
         };
-        if invoice.status != InvoiceStatus::Issued {
+        match invoice.status {
+            InvoiceStatus::Issued | InvoiceStatus::PartlyPaid => {}
+            InvoiceStatus::Draft => {
+                return Err(StoreError::Conflict(
+                    "only an issued invoice can be paid".into(),
+                ));
+            }
+            InvoiceStatus::Paid => {
+                return Err(StoreError::Conflict("this invoice is already paid".into()));
+            }
+            InvoiceStatus::WrittenOff => {
+                return Err(StoreError::Conflict("this invoice is written off".into()));
+            }
+        }
+        let balance = invoice.balance_minor();
+        if balance == 0 {
             return Err(StoreError::Conflict(
-                "only an issued invoice can be marked paid".into(),
+                "this invoice has no balance to collect".into(),
             ));
         }
-        invoice.status = InvoiceStatus::Paid;
-        invoice.paid_at = Some(now);
+        let amt = amount.unwrap_or(balance);
+        if amt == 0 {
+            return Err(StoreError::Conflict(
+                "payment amount must be positive".into(),
+            ));
+        }
+        if amt > balance {
+            return Err(StoreError::Conflict(format!(
+                "payment of {amt} exceeds the balance of {balance}"
+            )));
+        }
+        invoice.payments.push(crate::domain::InvoicePayment {
+            id: uuid::Uuid::new_v4(),
+            amount_minor: amt,
+            received_at: now,
+            reference: reference.clone(),
+            method,
+        });
+        // The legacy mirror fields stay truthful for pre-#114 readers.
         invoice.payment_reference = reference;
-        write_json(&self.doc_path::<Invoice>(&id.to_string()), &invoice)?;
+        if amt == balance {
+            invoice.status = InvoiceStatus::Paid;
+            invoice.paid_at = Some(now);
+        } else {
+            invoice.status = InvoiceStatus::PartlyPaid;
+        }
+        write_json(&path, &invoice)?;
+        Ok(invoice)
+    }
+
+    /// Forgive the remaining balance (#114): final for the open states;
+    /// `paid_minor` and the ledger stay untouched.
+    pub fn write_off_invoice(
+        &self,
+        id: Uuid,
+        reason: String,
+        now: DateTime<Utc>,
+    ) -> Result<Invoice, StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.doc_path::<Invoice>(&id.to_string());
+        let Some(mut invoice) = read_json::<Invoice>(&path)? else {
+            return Err(StoreError::NotFound);
+        };
+        if !invoice.status.is_open() {
+            return Err(StoreError::Conflict(
+                "only an issued or partly-paid invoice can be written off".into(),
+            ));
+        }
+        if reason.trim().is_empty() {
+            return Err(StoreError::Conflict(
+                "a write-off reason is required".into(),
+            ));
+        }
+        invoice.status = InvoiceStatus::WrittenOff;
+        invoice.write_off_reason = reason.trim().to_string();
+        invoice.written_off_at = Some(now);
+        write_json(&path, &invoice)?;
         Ok(invoice)
     }
 
@@ -1415,6 +1512,9 @@ mod invoice_seq_tests {
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
+            payments: vec![],
+            write_off_reason: String::new(),
+            written_off_at: None,
         }
     }
 
@@ -1471,6 +1571,9 @@ mod txn_tests {
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
+            payments: vec![],
+            write_off_reason: String::new(),
+            written_off_at: None,
         }
     }
 
@@ -1590,6 +1693,107 @@ mod txn_tests {
     }
 
     #[test]
+    fn partial_payments_walk_the_ledger_to_paid() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let mut inv = invoice();
+        inv.total_minor = 30_000;
+        let inv = store.create_invoice(inv).unwrap();
+        store
+            .issue_invoice(
+                inv.id,
+                Utc::now(),
+                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                b"%PDF x",
+            )
+            .unwrap();
+        let p1 = store
+            .record_payment(
+                inv.id,
+                Some(10_000),
+                "a:1".into(),
+                "manual".into(),
+                Utc::now(),
+            )
+            .unwrap();
+        assert_eq!(p1.status, InvoiceStatus::PartlyPaid);
+        assert_eq!(p1.balance_minor(), 20_000);
+        // Zero is refused without persisting; over-balance too.
+        assert!(
+            store
+                .record_payment(inv.id, Some(0), "x".into(), "manual".into(), Utc::now())
+                .is_err()
+        );
+        assert!(
+            store
+                .record_payment(
+                    inv.id,
+                    Some(20_001),
+                    "x".into(),
+                    "manual".into(),
+                    Utc::now()
+                )
+                .is_err()
+        );
+        assert_eq!(
+            store.get_invoice(inv.id).unwrap().unwrap().payments.len(),
+            1
+        );
+        let p2 = store
+            .record_payment(inv.id, None, "a:2".into(), "bank".into(), Utc::now())
+            .unwrap();
+        assert_eq!(p2.status, InvoiceStatus::Paid);
+        assert_eq!(p2.balance_minor(), 0);
+        assert_eq!(p2.payments.len(), 2);
+        assert!(p2.paid_at.is_some(), "final settlement stamps paid_at");
+    }
+
+    #[test]
+    fn write_off_is_final_and_keeps_the_ledger() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let mut inv = invoice();
+        inv.total_minor = 5_000;
+        let inv = store.create_invoice(inv).unwrap();
+        store
+            .issue_invoice(
+                inv.id,
+                Utc::now(),
+                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                b"%PDF x",
+            )
+            .unwrap();
+        store
+            .record_payment(
+                inv.id,
+                Some(2_000),
+                "a:1".into(),
+                "manual".into(),
+                Utc::now(),
+            )
+            .unwrap();
+        let wo = store
+            .write_off_invoice(inv.id, "forgiven".into(), Utc::now())
+            .unwrap();
+        assert_eq!(wo.status, InvoiceStatus::WrittenOff);
+        assert_eq!(wo.write_off_reason, "forgiven");
+        assert_eq!(wo.payments.len(), 2 - 1, "ledger untouched by write-off");
+        assert_eq!(wo.paid_minor(), 2_000);
+        assert_eq!(wo.balance_minor(), 0, "forgiven balance is not outstanding");
+        // Final: pay + re-write-off conflict.
+        assert!(
+            store
+                .record_payment(inv.id, Some(100), "x".into(), "manual".into(), Utc::now())
+                .is_err()
+        );
+        assert!(
+            store
+                .write_off_invoice(inv.id, "again".into(), Utc::now())
+                .is_err()
+        );
+    }
+
+    #[test]
     fn update_json_rel_is_locked_rmw() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path().join("data")).unwrap();
@@ -1649,6 +1853,9 @@ mod index_tests {
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
+            payments: vec![],
+            write_off_reason: String::new(),
+            written_off_at: None,
         }
     }
 
