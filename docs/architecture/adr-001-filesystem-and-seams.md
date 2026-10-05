@@ -24,9 +24,14 @@ but first priority to design for**.
   customers/<id>/projects/<CODE>/tasks/<TASK>.json   (Phase 1, #38)
   entries/<YYYY-MM-DD>/<id>.json
   invoices/<id>.json                                  (M2, #8)
+  invoices/<id>.pdf                                   (#113, archived at issue)
   ```
   The on-disk tree mirrors the conceptual ownership (a project lives inside its
-  customer; a task inside its project; entries in a per-day folder).
+  customer; a task inside its project; entries in a per-day folder). An issued
+  invoice's PDF lives beside its JSON: rendered once, at issue, from the
+  immutable document, and never rewritten — a pure function of the invoice, so
+  `backup.rs` (which walks non-JSON files) archives it and its manifest
+  checksum proves the bytes survive a restore.
 - Writes are atomic (temp file + rename) and serialised by a single process-local
   lock. Path components are only ever built from validated ids/codes, so request
   input can never traverse the tree.

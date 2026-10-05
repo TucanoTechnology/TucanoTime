@@ -25,6 +25,7 @@ pub mod email_reminders;
 pub mod error;
 pub mod lock;
 pub mod payments;
+pub mod pdf;
 pub mod providers;
 pub mod ratelimit;
 pub mod recurring;
@@ -177,6 +178,7 @@ pub fn build_router(state: AppState) -> Router {
             "/invoices/{id}/issue",
             axum::routing::post(api::issue_invoice),
         )
+        .route("/invoices/{id}/pdf", get(api::invoice_pdf))
         .route("/invoices/{id}/pay", axum::routing::post(api::pay_invoice))
         .route(
             "/invoices/{id}/email",

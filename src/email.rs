@@ -296,8 +296,15 @@ pub fn build_mime(msg: &EmailMessage) -> String {
             if let Some((name, bytes)) = &msg.attachment {
                 use base64::Engine;
                 let enc = base64::engine::general_purpose::STANDARD.encode(bytes);
+                // #113: an invoice PDF must be labelled as such — clients key
+                // their preview/save behaviour off this type.
+                let ctype = if name.to_ascii_lowercase().ends_with(".pdf") {
+                    "application/pdf"
+                } else {
+                    "application/octet-stream"
+                };
                 h.push_str(&format!(
-                    "\r\n--tt\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+                    "\r\n--tt\r\nContent-Type: {ctype}\r\nContent-Disposition: attachment; filename=\"{name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n"
                 ));
                 for chunk in enc.as_bytes().chunks(76) {
                     h.push_str(&String::from_utf8_lossy(chunk));
@@ -318,23 +325,30 @@ pub fn invoice_subject(number: &str, org: &str) -> String {
 }
 
 /// Plain-text invoice cover email. `amount` is pre-formatted (e.g.
-/// "1,200.00 EUR") so this stays locale-agnostic.
+/// "1,200.00 EUR") so this stays locale-agnostic. `pdf_attached` tells the
+/// customer the document rides along (#113).
 pub fn render_invoice_email(
     customer: &str,
     number: &str,
     amount: &str,
     due: Option<&str>,
     org: &str,
+    pdf_attached: bool,
 ) -> String {
     let mut s = format!("Hi {customer},\n\nPlease find invoice {number} for {amount}");
     if let Some(due) = due {
         s.push_str(&format!(", due {due}"));
     }
-    s.push_str(&format!(".\n\nThank you,\n{org}\n"));
+    s.push('.');
+    if pdf_attached {
+        s.push_str(" The PDF document is attached.");
+    }
+    s.push_str(&format!("\n\nThank you,\n{org}\n"));
     s
 }
 
-/// Plain-text overdue-payment reminder for a single invoice.
+/// Plain-text overdue-payment reminder for a single invoice. `pdf_attached`
+/// names the archived document riding along (#113).
 pub fn render_reminder_email(
     customer: &str,
     number: &str,
@@ -342,11 +356,17 @@ pub fn render_reminder_email(
     due: &str,
     days_over: i64,
     org: &str,
+    pdf_attached: bool,
 ) -> String {
+    let document = if pdf_attached {
+        " A PDF copy of the invoice is attached."
+    } else {
+        ""
+    };
     format!(
         "Hi {customer},\n\nThis is a reminder that invoice {number} for {amount} was due {due} \
-         and is now {days_over} day(s) overdue.\n\nIf you have already paid, please disregard \
-         this notice.\n\nThank you,\n{org}\n"
+         and is now {days_over} day(s) overdue.{document}\n\nIf you have already paid, please \
+         disregard this notice.\n\nThank you,\n{org}\n"
     )
 }
 
@@ -410,13 +430,23 @@ mod tests {
             "1,200.00 EUR",
             Some("2026-10-19"),
             "Tucano",
+            true,
         );
         assert!(
             inv.contains("INV-1") && inv.contains("1,200.00 EUR") && inv.contains("2026-10-19")
         );
-        let rem =
-            render_reminder_email("ACME", "INV-1", "1,200.00 EUR", "2026-10-19", 12, "Tucano");
-        assert!(rem.contains("12 day(s) overdue") && rem.contains("INV-1"));
+        let rem = render_reminder_email(
+            "ACME",
+            "INV-1",
+            "1,200.00 EUR",
+            "2026-10-19",
+            12,
+            "Tucano",
+            true,
+        );
+        assert!(
+            rem.contains("12 day(s) overdue") && rem.contains("INV-1") && rem.contains("PDF copy")
+        );
     }
 
     #[test]
@@ -441,6 +471,20 @@ mod tests {
         let mime = build_mime(&m);
         assert!(mime.contains("multipart/mixed"));
         assert!(mime.contains("attachment; filename=\"inv.csv\""));
+        assert!(mime.contains("Content-Type: application/octet-stream"));
         assert!(mime.contains("aGk")); // base64("hi")
+    }
+
+    #[test]
+    fn pdf_attachments_are_labelled_as_pdf() {
+        let m = EmailMessage {
+            to: "x@y.co".into(),
+            subject: "S".into(),
+            text: "body".into(),
+            html: None,
+            attachment: Some(("INV-0001.PDF".into(), b"%PDF-1.4".to_vec())),
+        };
+        let mime = build_mime(&m);
+        assert!(mime.contains("Content-Type: application/pdf"), "{mime}");
     }
 }

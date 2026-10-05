@@ -21,12 +21,17 @@ use uuid::Uuid;
 use crate::auth::User;
 use crate::domain::{
     Category, Customer, Entry, Expense, ExpenseClaim, Invoice, InvoiceStatus, Notification,
-    Project, RecurringSchedule, Submission, Task, Timer,
+    PdfHint, Project, RecurringSchedule, Submission, Task, Timer,
 };
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
 /// over the whole tree. 400 days covers a year plus buffer.
 pub const MAX_RANGE_DAYS: i64 = 400;
+
+/// Hard bound on a PDF archive read (#50, #113): invoices render far below
+/// this; anything larger is corruption or a hostile data dir, and the read is
+/// refused rather than streamed into memory.
+pub const MAX_PDF_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Hard cap on documents in any single collection directory (#50). A personal
 /// timesheet is far below this; it bounds a pathological/corrupted tree so no
@@ -564,6 +569,12 @@ impl Store {
     pub fn delete_invoice(&self, id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         self.remove_doc_locked::<Invoice>(&id.to_string())?;
+        // #113: the invoice JSON is the record of authority — when it goes,
+        // its archived PDF goes in the same transactional write (#52 logs it).
+        let pdf = self.invoice_pdf_path(&id.to_string());
+        if pdf.exists() {
+            std::fs::remove_file(&pdf)?;
+        }
         self.unindex_invoice_locked(&id.to_string())
     }
 
@@ -1062,12 +1073,18 @@ impl Store {
 
 impl Store {
     /// Issue an invoice atomically: refuse unless the stored invoice is a
-    /// draft, then persist the transition — no issue-vs-pay race window.
+    /// draft, then persist the transition **and** the archived PDF in one
+    /// transaction (#113) — no issue-vs-pay race window, and the document is
+    /// on file exactly when the invoice is. The PDF is written only if absent
+    /// (the archive is never overwritten for an issued invoice); the invoice
+    /// JSON is the record of authority, so the write fails as a whole if the
+    /// archive cannot be persisted (no partial persistence).
     pub fn issue_invoice(
         &self,
         id: Uuid,
         now: DateTime<Utc>,
         due: NaiveDate,
+        pdf: &[u8],
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
         let Some(mut invoice) = read_json::<Invoice>(&self.doc_path::<Invoice>(&id.to_string()))?
@@ -1079,11 +1096,66 @@ impl Store {
                 "only a draft invoice can be issued".into(),
             ));
         }
+        let pdf_path = self.invoice_pdf_path(&id.to_string());
+        if !pdf_path.exists() {
+            std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
+            write_bytes_atomic(&pdf_path, pdf)?;
+        }
+        let archived = std::fs::read(&pdf_path)?;
         invoice.status = InvoiceStatus::Issued;
         invoice.issued_at = Some(now);
         invoice.due_date = Some(due);
+        invoice.pdf = Some(pdf_hint(&invoice.number, &archived, now));
         write_json(&self.doc_path::<Invoice>(&id.to_string()), &invoice)?;
         Ok(invoice)
+    }
+
+    /// Archive an already-rendered PDF for an issued invoice that has no
+    /// archive yet (the legacy-invoice path of #113: bytes are stable because
+    /// the invoice is snapshot-locked). Never overwrites an existing file;
+    /// (re-)writes only the hint, from the bytes actually on file.
+    pub fn attach_invoice_pdf(
+        &self,
+        id: Uuid,
+        pdf: &[u8],
+        now: DateTime<Utc>,
+    ) -> Result<Invoice, StoreError> {
+        let _guard = self.write_lock()?;
+        let Some(mut invoice) = read_json::<Invoice>(&self.doc_path::<Invoice>(&id.to_string()))?
+        else {
+            return Err(StoreError::NotFound);
+        };
+        if invoice.status == InvoiceStatus::Draft {
+            return Err(StoreError::Conflict("drafts have no PDF archive".into()));
+        }
+        let path = self.invoice_pdf_path(&id.to_string());
+        if invoice.pdf.is_some() && path.exists() {
+            // Already archived and hinted: the historical record stands.
+            return Ok(invoice);
+        }
+        if !path.exists() {
+            std::fs::create_dir_all(self.doc_dir::<Invoice>())?;
+            write_bytes_atomic(&path, pdf)?;
+        }
+        let archived = std::fs::read(&path)?;
+        invoice.pdf = Some(pdf_hint(&invoice.number, &archived, now));
+        write_json(&self.doc_path::<Invoice>(&id.to_string()), &invoice)?;
+        Ok(invoice)
+    }
+
+    fn invoice_pdf_path(&self, id: &str) -> PathBuf {
+        self.root.join("invoices").join(format!("{id}.pdf"))
+    }
+
+    /// Read the archived PDF (#50: size-capped; the path is built only from a
+    /// `Uuid`, never from request text). `Ok(None)` when nothing is archived.
+    pub fn invoice_pdf_bytes(&self, id: Uuid) -> Result<Option<Vec<u8>>, StoreError> {
+        match std::fs::read(self.invoice_pdf_path(&id.to_string())) {
+            Ok(bytes) if bytes.len() as u64 <= MAX_PDF_BYTES => Ok(Some(bytes)),
+            Ok(_) => Err(StoreError::Io("archived PDF exceeds the size cap".into())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Mark paid atomically with the issued-state check.
@@ -1252,6 +1324,43 @@ where
     Ok(())
 }
 
+/// Binary sibling of `write_json` (#113): same atomic tmp + rename discipline
+/// under the same writer lock; stranded `.tmp` files are pruned on open.
+fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    let tmp = path.with_extension("pdf.tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Filename sanitiser for derived download names: invoice numbers are
+/// minted by `create_invoice` (`INV-%04d`), but the hint never carries
+/// anything that could steer a path (#50).
+fn sanitize_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// The `pdf` hint persisted with the invoice (#113).
+fn pdf_hint(number: &str, archived: &[u8], now: DateTime<Utc>) -> PdfHint {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(archived);
+    PdfHint {
+        filename: format!("{}.pdf", sanitize_filename(number)),
+        bytes: archived.len() as u64,
+        sha256: h.finalize().iter().map(|b| format!("{b:02x}")).collect(),
+        archived_at: now,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1302,6 +1411,7 @@ mod invoice_seq_tests {
             due_date: None,
             paid_at: None,
             payment_reference: String::new(),
+            pdf: None,
         }
     }
 
@@ -1357,6 +1467,7 @@ mod txn_tests {
             due_date: None,
             paid_at: None,
             payment_reference: String::new(),
+            pdf: None,
         }
     }
 
@@ -1399,6 +1510,7 @@ mod txn_tests {
                 inv.id,
                 Utc::now(),
                 NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                b"%PDF-1.4 test",
             )
             .unwrap();
         let paid = store
@@ -1411,10 +1523,67 @@ mod txn_tests {
             store.issue_invoice(
                 inv.id,
                 Utc::now(),
-                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap()
+                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                b"%PDF-1.4 test"
             ),
             Err(StoreError::Conflict(_))
         ));
+    }
+
+    #[test]
+    fn pdf_archive_is_written_once_and_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        // A draft has no archive.
+        let inv = store.create_invoice(invoice()).unwrap();
+        assert!(store.invoice_pdf_bytes(inv.id).unwrap().is_none());
+        store
+            .issue_invoice(
+                inv.id,
+                Utc::now(),
+                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                b"%PDF-1.4 first",
+            )
+            .unwrap();
+        assert_eq!(
+            store.invoice_pdf_bytes(inv.id).unwrap().unwrap(),
+            b"%PDF-1.4 first"
+        );
+        // A later attach with different bytes must NOT rewrite history.
+        let again = store
+            .attach_invoice_pdf(inv.id, b"%PDF-1.4 second", Utc::now())
+            .unwrap();
+        assert_eq!(
+            store.invoice_pdf_bytes(inv.id).unwrap().unwrap(),
+            b"%PDF-1.4 first",
+            "the archive is immutable once issued"
+        );
+        assert_eq!(again.pdf.as_ref().unwrap().bytes, 14);
+        // Hint carries a sha256 of the archived bytes.
+        assert_eq!(again.pdf.as_ref().unwrap().sha256.len(), 64);
+    }
+
+    #[test]
+    fn attach_refuses_drafts_and_deletes_with_the_invoice() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let inv = store.create_invoice(invoice()).unwrap();
+        assert!(matches!(
+            store.attach_invoice_pdf(inv.id, b"x", Utc::now()),
+            Err(StoreError::Conflict(_))
+        ));
+        store
+            .issue_invoice(
+                inv.id,
+                Utc::now(),
+                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+                b"%PDF-1.4 doc",
+            )
+            .unwrap();
+        // Drafts-only delete guard lives in the API; the store removes the
+        // PDF together with the document (same transaction).
+        store.delete_invoice(inv.id).unwrap();
+        assert!(store.invoice_pdf_bytes(inv.id).unwrap().is_none());
     }
 
     #[test]
@@ -1476,6 +1645,7 @@ mod index_tests {
             due_date: None,
             paid_at: None,
             payment_reference: String::new(),
+            pdf: None,
         }
     }
 

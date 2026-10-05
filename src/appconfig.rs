@@ -64,6 +64,14 @@ pub const KEYS: &[KeyDef] = &[
         description: "Days between overdue-invoice email reminders (#35)",
     },
     KeyDef {
+        name: "org_name",
+        env: "TUCANO_ORG_NAME",
+        kind: Kind::Str {
+            default: "TucanoTime",
+        },
+        description: "Issuing organisation shown on invoice emails and PDFs (#113)",
+    },
+    KeyDef {
         name: "sso_admin_group",
         env: "TUCANO_SSO_ADMIN_GROUP",
         kind: Kind::Str { default: "" },
