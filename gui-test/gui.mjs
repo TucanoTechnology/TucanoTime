@@ -166,23 +166,51 @@ tabDay.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bu
 await tick(50);
 check('arrow key switches tab', window.document.getElementById('tab-week').getAttribute('aria-selected') === 'true');
 
-// ---- WEEK GRID VIEW ----
+// ---- WEEK GRID VIEW (#13): inline editable cells ----
 const tabWeek = window.document.getElementById('tab-week');
 tabWeek.dispatchEvent(new window.Event('click', { bubbles: true }));
 window.document.getElementById('week-date').value = '2026-11-11';
-window.document.getElementById('week-picker').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(250);
+window.document.getElementById('week-date').dispatchEvent(new window.Event('change', { bubbles: true }));
+await tick(300);
 const wkRows = window.document.querySelectorAll('#week-table tbody tr');
 const wkRowText = wkRows[0] ? wkRows[0].textContent : '';
 check('week grid renders the ACME / P-9 row', wkRowText.includes('ACME') && wkRowText.includes('P-9'));
-const filled = [...window.document.querySelectorAll('#week-table td.cell.has')];
-check('week grid marks the 2026-11-11 cell with hours', filled.some((c) => c.textContent.trim() === '4.25'));
-check('week row total is 4.25', wkRowText.trim().endsWith('4.25'));
+const cellOf = (date) => window.document.querySelector(`#week-table input.cell-input[data-date="${date}"]`);
+const filledCell = cellOf('2026-11-11');
+check('filled cell is an editable input holding 4.25', filledCell && filledCell.value === '4.25');
+check('week row total is 4.25', wkRows[0].querySelector('.row-total').textContent.trim() === '4.25');
+const dayTotals = [...window.document.querySelectorAll('#week-table tfoot .day-total')];
+check('day totals row sums the week', dayTotals.length === 7 && dayTotals.reduce((a, t) => a + Number(t.textContent), 0) === 4.25);
 
-// Click the filled cell -> jumps to Day tab with the entry loaded for edit.
-filled[0].querySelector('button').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(300);
-check('cell click opens the entry for editing', window.document.getElementById('entry-id').value !== '');
+// Inline save: type into the empty 2026-11-09 cell and blur -> POST.
+const emptyCell = cellOf('2026-11-09');
+emptyCell.value = '2.5';
+emptyCell.dispatchEvent(new window.Event('focusout', { bubbles: true }));
+await tick(400);
+const sep9 = await (await fetch(BASE + '/entries?date=2026-11-09')).json();
+check('inline cell save created an entry via POST', sep9.entries.some((e) => e.hours === 2.5 && e.project_code === 'P-9'));
+check('row total updated to 6.75 after inline save', window.document.querySelector('#week-table tbody tr .row-total').textContent.trim() === '6.75');
+
+// Clear-to-delete: blank the same cell and blur -> confirm + DELETE.
+const savedCell = cellOf('2026-11-09');
+check('cleared cell re-rendered with the saved value', savedCell && savedCell.value === '2.50');
+savedCell.value = '';
+savedCell.dispatchEvent(new window.Event('focusout', { bubbles: true }));
+await tick(400);
+const sep9b = await (await fetch(BASE + '/entries?date=2026-11-09')).json();
+check('clearing the cell deleted the entry', sep9b.entries.every((e) => e.hours !== 2.5));
+
+// Note indicator on the cell carrying 'gui-test entry' -> opens the Day editor.
+const flag = window.document.querySelector('#week-table .note-flag');
+check('note indicator shown for cells with notes', !!flag);
+flag.dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(400);
+check('note indicator opens the entry for editing', window.document.getElementById('entry-id').value !== '');
+window.document.getElementById('tab-week').dispatchEvent(new window.Event('click', { bubbles: true }));
+
+// Add row + copy-last-week controls exist.
+check('add-row control present', !!window.document.getElementById('week-add-row'));
+check('copy-last-week control present', !!window.document.getElementById('week-copy-last'));
 
 // ---- PROJECT FORM: prefill from customer + required currency/rate (#11) ----
 const tabCust = window.document.getElementById('tab-customers');
@@ -294,6 +322,44 @@ const jan = subs.find((x) => x.week_start === '2027-01-04');
 check('submission created via GUI', jan && jan.state === 'submitted' && jan.entry_ids.includes(fresh.id));
 const lockRes = await fetch(`${BASE}/entries/${fresh.id}`, { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ date: '2027-01-05', customer_id: acmeOpt.value, project_code: 'P-9', hours: 3 }) });
 check('submitted week locks its entries (edit -> 409)', lockRes.status === 409);
+
+// ---- WEEK GRID (#13): add row, copy last week, lock column ----
+window.document.getElementById('tab-week').dispatchEvent(new window.Event('click', { bubbles: true }));
+const weekDateEl = window.document.getElementById('week-date');
+weekDateEl.value = '2026-12-07';
+weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+await tick(300);
+
+// Copy last week's project rows into an empty week (MKT-2 has 2026-12-01).
+window.document.getElementById('week-copy-last').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(400);
+const wkBody = window.document.querySelector('#week-table tbody');
+const copiedRow = [...wkBody.querySelectorAll('tr')].find((r) => r.textContent.includes('MKT-2'));
+check('copy-from-last-week added the MKT-2 row', !!copiedRow);
+check('copied row starts empty', !!copiedRow && [...copiedRow.querySelectorAll('input.cell-input')].every((i) => i.value === ''));
+check('copied row total is 0.00', copiedRow && copiedRow.querySelector('.row-total').textContent.trim() === '0.00');
+
+// Add row control reveals the project picker and appends a new row.
+window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
+const addSel = window.document.getElementById('week-add-project');
+check('add-row picker lists active projects', !addSel.hidden && [...addSel.options].some((o) => o.textContent.includes('P-9')));
+addSel.value = `${acmeOpt.value}|P-9`;
+window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(400);
+check('add-row appended the P-9 row', [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('P-9')));
+
+// Lock column: the submitted 2027-01 week renders its cell disabled.
+weekDateEl.value = '2027-01-05';
+weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+await tick(300);
+const janRow = [...window.document.querySelectorAll('#week-table tbody tr')].find(
+  (r) => r.textContent.includes('P-9') && r.textContent.includes('ACME'),
+);
+const lockedCell = janRow && janRow.querySelector('input.cell-input[data-date="2027-01-05"]');
+check('submitted-week cell holds the hours', !!lockedCell && lockedCell.value === '2.00');
+check('submitted-week cell renders locked (disabled input)', !!lockedCell && lockedCell.disabled === true && lockedCell.closest('td').classList.contains('locked'));
+check('locked row marked for the lock column', !!lockedCell && lockedCell.closest('tr').classList.contains('has-lock'));
 
 console.log(`\n${failures === 0 ? 'ALL GUI CHECKS PASSED' : failures + ' GUI CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

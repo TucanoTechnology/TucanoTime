@@ -144,17 +144,27 @@
 
     <!-- WEEK -->
     <section id="panel-week" role="tabpanel" aria-labelledby="tab-week" tabindex="0" hidden>
-      <form id="week-picker" class="bar">
-        <label for="week-date">Any day of the week</label>
-        <input type="date" id="week-date" name="date" required>
-        <button type="submit" class="secondary">Show week</button>
-      </form>
-      <h2>Week <span id="week-label"></span></h2>
-      <p class="hint">Totals per project by day. Click a cell to add or edit that day's entry for the project.</p>
-      <div class="table-scroll">
-        <table id="week-table"></table>
+      <input type="date" id="week-date" hidden>
+      <div class="day-bar">
+        <button type="button" id="week-track" class="primary">+ Track time</button>
+        <nav class="day-nav" aria-label="Change week">
+          <button type="button" id="week-prev" aria-label="Previous week">‹</button>
+          <span id="week-label" class="day-label"></span>
+          <button type="button" id="week-next" aria-label="Next week">›</button>
+        </nav>
       </div>
-      <p id="week-empty" hidden>No entries this week.</p>
+      <p class="hint">Type hours into a cell and press Enter or click away to save. Clearing a cell deletes that entry.</p>
+      <div class="table-scroll">
+        <table id="week-table" class="grid"></table>
+      </div>
+      <p id="week-empty" hidden>No entries this week. Use “+ Add row” to start a project row, or “Copy last week”.</p>
+      <div class="week-controls">
+        <button type="button" id="week-add-row" class="secondary">+ Add row</button>
+        <button type="button" id="week-copy-last" class="secondary">Copy from last week (projects only)</button>
+        <select id="week-add-project" hidden aria-label="Project to add"></select>
+        <button type="button" id="week-add-confirm" hidden>Add</button>
+        <button type="button" id="week-add-cancel" class="link" hidden>Cancel</button>
+      </div>
     </section>
 
     <!-- CUSTOMERS -->

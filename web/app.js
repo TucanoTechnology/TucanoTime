@@ -492,31 +492,74 @@ async function saveEntry(evt) {
 }
 
 // ---------------------------------------------------------------- week ---
+// Spreadsheet-style grid (#13): one row per customer+project, Mon–Sun cells
+// are editable hour inputs. Blur/Enter saves through the API; clearing a
+// cell deletes the entry after confirm. Extra rows (add-row / copy-last-week)
+// live client-side until their cells get hours.
+
+const weekState = {
+  extraRows: [], // [{customer_id, project_code}]
+  days: [],
+};
+
+// Entry ids locked by submitted weeks or issued invoices. Fetched fresh on
+// every grid render — locks can appear while the grid is open (#8/#16).
+async function weekLockIds() {
+  const locked = new Set();
+  try {
+    const subs = await api.get('/submissions');
+    for (const s of subs.submissions || []) {
+      if (s.state === 'submitted' || s.state === 'approved') {
+        for (const id of s.entry_ids || []) locked.add(id);
+      }
+    }
+  } catch { /* ignore */ }
+  try {
+    const invs = await api.get('/invoices'); // admin-only; members skip silently
+    for (const i of invs.invoices || []) {
+      if (i.status === 'issued') for (const l of i.lines || []) if (l.entry_id) locked.add(l.entry_id);
+    }
+  } catch { /* members cannot list invoices */ }
+  return locked;
+}
+
+function weekShort(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return `${String(d).padStart(2, '0')} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]}`;
+}
 
 async function refreshWeek() {
   const anchor = $('week-date').value;
   if (!anchor) return;
   const start = mondayOf(anchor);
+  $('week-date').value = start;
   const days = [];
   for (let i = 0; i < 7; i += 1) days.push(addDays(start, i));
+  weekState.days = days;
   const end = days[6];
-  $('week-label').textContent = `${start} → ${end}`;
+  const today = isoDate(new Date());
+  const thisWeek = start === mondayOf(today);
+  $('week-label').textContent = `${thisWeek ? 'This week ' : ''}${weekShort(start)} – ${weekShort(end)} ${end.slice(0, 4)}`;
 
   const data = await api.get(`/entries?from=${start}&to=${end}`);
   const entries = data.entries || [];
+  const locked = await weekLockIds();
 
   const keyFor = (e) => `${e.customer_id}::${e.project_code}`;
   const byKey = new Map();
+  const rowFor = (customerId, projectCode) => {
+    const k = `${customerId}::${projectCode}`;
+    if (!byKey.has(k)) byKey.set(k, { customer_id: customerId, project_code: projectCode, cells: {}, ids: {}, notes: {} });
+    return byKey.get(k);
+  };
   for (const e of entries) {
-    const k = keyFor(e);
-    if (!byKey.has(k)) {
-      byKey.set(k, { customer_id: e.customer_id, project_code: e.project_code, cells: {} });
-    }
-    const row = byKey.get(k);
+    const row = rowFor(e.customer_id, e.project_code);
     row.cells[e.date] = (row.cells[e.date] || 0) + Math.round(e.hours * 100);
-    if (!row.ids) row.ids = {};
-    row.ids[e.date] = e.id;
+    (row.ids[e.date] = row.ids[e.date] || []).push(e.id);
+    if (e.note) row.notes[e.date] = e.note;
   }
+  for (const r of weekState.extraRows) rowFor(r.customer_id, r.project_code);
 
   const table = $('week-table');
   table.textContent = '';
@@ -530,8 +573,10 @@ async function refreshWeek() {
   for (const d of days) {
     const th = document.createElement('th');
     th.scope = 'col';
-    th.className = 'num';
-    th.textContent = d.slice(5);
+    th.dataset.date = d;
+    if (d === today) th.classList.add('today');
+    const name = new Date(d).toUTCString().slice(0, 3);
+    th.textContent = `◷ ${name} ${d.slice(8)}`;
     htr.appendChild(th);
   }
   const totHead = document.createElement('th');
@@ -548,46 +593,237 @@ async function refreshWeek() {
       customerName(a.customer_id).localeCompare(customerName(b.customer_id)) ||
       a.project_code.localeCompare(b.project_code),
   );
+  const dayTotals = days.map(() => 0);
   for (const row of sorted) {
     const tr = document.createElement('tr');
     const label = document.createElement('th');
     label.scope = 'row';
-    label.textContent = `${customerName(row.customer_id)} / ${row.project_code}`;
+    label.className = 'row-band';
+    const pl = document.createElement('div');
+    pl.className = 'entry-project';
+    pl.textContent = row.project_code;
+    const cl = document.createElement('div');
+    cl.className = 'entry-customer';
+    cl.textContent = customerName(row.customer_id);
+    label.append(pl, cl);
     tr.appendChild(label);
     let weekTotal = 0;
-    for (const d of days) {
+    let anyLocked = false;
+    for (let i = 0; i < days.length; i += 1) {
+      const d = days[i];
       const td = document.createElement('td');
-      td.className = 'num cell';
+      td.className = 'cell';
       const hundredths = row.cells[d];
+      const ids = row.ids[d] || [];
       if (hundredths) {
-        weekTotal += hundredths;
         td.classList.add('has');
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.textContent = (hundredths / 100).toFixed(2);
-        btn.setAttribute(
-          'aria-label',
-          `${row.project_code} on ${d}: ${(hundredths / 100).toFixed(2)} hours. Adjust.`,
-        );
-        btn.addEventListener('click', () => jumpToEntry(row.ids[d]));
-        td.appendChild(btn);
-      } else {
-        td.textContent = '';
-        td.dataset.add = `${row.customer_id}|${row.project_code}|${d}`;
-        td.addEventListener('click', () => prefillFromCell(row.customer_id, row.project_code, d));
+        weekTotal += hundredths;
+        dayTotals[i] += hundredths;
+      }
+      const isLocked = ids.some((id) => locked.has(id));
+      if (isLocked) {
+        td.classList.add('locked');
+        anyLocked = true;
+      }
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.className = 'cell-input';
+      input.min = '0.01';
+      input.max = '24';
+      input.step = '0.01';
+      input.inputMode = 'decimal';
+      if (hundredths) input.value = (hundredths / 100).toFixed(2);
+      input.dataset.customer = row.customer_id;
+      input.dataset.project = row.project_code;
+      input.dataset.date = d;
+      input.dataset.ids = ids.join(',');
+      input.dataset.was = input.value;
+      input.setAttribute(
+        'aria-label',
+        `${row.project_code}, ${customerName(row.customer_id)}, ${d}: hours`,
+      );
+      if (isLocked) input.disabled = true;
+      td.appendChild(input);
+      if (row.notes[d]) {
+        const note = document.createElement('button');
+        note.type = 'button';
+        note.className = 'note-flag';
+        note.textContent = '¶';
+        note.title = row.notes[d];
+        note.setAttribute('aria-label', `Note: ${row.notes[d]}. Open to edit.`);
+        note.addEventListener('click', () => jumpToEntry(ids[0]));
+        td.appendChild(note);
       }
       tr.appendChild(td);
     }
+    if (anyLocked) tr.classList.add('has-lock');
     const tw = document.createElement('td');
-    tw.className = 'num';
+    tw.className = 'num row-total';
     tw.textContent = (weekTotal / 100).toFixed(2);
     tr.appendChild(tw);
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
 
+  const tfoot = document.createElement('tfoot');
+  const ftr = document.createElement('tr');
+  const ft = document.createElement('th');
+  ft.scope = 'row';
+  ft.textContent = 'Day totals';
+  ftr.appendChild(ft);
+  let grand = 0;
+  for (const t of dayTotals) {
+    grand += t;
+    const td = document.createElement('td');
+    td.className = 'num day-total';
+    td.textContent = t ? (t / 100).toFixed(2) : '0';
+    ftr.appendChild(td);
+  }
+  const gt = document.createElement('td');
+  gt.className = 'num week-total';
+  gt.textContent = (grand / 100).toFixed(2);
+  ftr.appendChild(gt);
+  tfoot.appendChild(ftr);
+  table.appendChild(tfoot);
+
   $('week-table').hidden = sorted.length === 0;
   $('week-empty').hidden = sorted.length !== 0;
+}
+
+/// Inline cell save (#13): blur or Enter commits the typed hours.
+async function commitCell(input) {
+  const raw = input.value.trim();
+  const was = input.dataset.was || '';
+  if (raw === was) return;
+  const customerId = input.dataset.customer;
+  const projectCode = input.dataset.project;
+  const date = input.dataset.date;
+  const ids = (input.dataset.ids || '').split(',').filter(Boolean);
+  try {
+    if (raw === '') {
+      if (ids.length === 0) return;
+      const label = `${was}h on ${projectCode}, ${date}`;
+      if (!window.confirm(`Delete this entry (${label})?`)) {
+        input.value = was;
+        return;
+      }
+      for (const id of ids) await api.del(`/entries/${id}`);
+      announce(`Deleted ${label}.`);
+    } else if (ids.length === 1) {
+      const existing = await api.get(`/entries/${ids[0]}`);
+      await api.put(`/entries/${ids[0]}`, {
+        date,
+        customer_id: customerId,
+        project_code: projectCode,
+        task_code: existing.task_code || null,
+        hours: Number(raw),
+        note: existing.note || '',
+        billable: existing.billable !== false,
+      });
+      announce(`Saved ${raw}h — ${projectCode}, ${date}.`);
+    } else if (ids.length > 1) {
+      const merge = window.confirm(
+        `This cell combines ${ids.length} entries for ${projectCode} on ${date}. Saving sets the first to ${raw}h and removes the others.`,
+      );
+      if (!merge) {
+        input.value = was;
+        return;
+      }
+      const existing = await api.get(`/entries/${ids[0]}`);
+      await api.put(`/entries/${ids[0]}`, {
+        date,
+        customer_id: customerId,
+        project_code: projectCode,
+        task_code: existing.task_code || null,
+        hours: Number(raw),
+        note: existing.note || '',
+        billable: existing.billable !== false,
+      });
+      for (const id of ids.slice(1)) await api.del(`/entries/${id}`);
+      announce(`Merged ${projectCode} on ${date} to ${raw}h.`);
+    } else {
+      await api.post('/entries', {
+        date,
+        customer_id: customerId,
+        project_code: projectCode,
+        hours: Number(raw),
+        note: '',
+        billable: true,
+      });
+      announce(`Added ${raw}h — ${projectCode}, ${date}.`);
+    }
+    await refreshWeek();
+  } catch (err) {
+    // Keep the typed value visible; surface the error without losing work.
+    announce(`Save failed: ${err.message}`);
+    input.focus();
+    try {
+      await refreshWeek();
+      const again = document.querySelector(
+        `#week-table input.cell-input[data-customer="${customerId}"][data-project="${projectCode}"][data-date="${date}"]`,
+      );
+      if (again) {
+        again.value = raw;
+        again.focus();
+      }
+    } catch { /* grid refresh failure is secondary */ }
+  }
+}
+
+function navigateWeek(delta) {
+  $('week-date').value = addDays($('week-date').value, delta * 7);
+  refreshWeek();
+}
+
+function toggleWeekAddRow(show) {
+  $('week-add-project').hidden = !show;
+  $('week-add-confirm').hidden = !show;
+  $('week-add-cancel').hidden = !show;
+  if (show) $('week-add-project').focus();
+}
+
+async function fillWeekProjectSelect() {
+  const sel = $('week-add-project');
+  sel.textContent = '';
+  for (const c of state.customers) {
+    if (!c.active) continue;
+    const projects = await loadProjects(c.id);
+    for (const p of projects) {
+      if (!p.active) continue;
+      const opt = document.createElement('option');
+      opt.value = `${c.id}|${p.code}`;
+      opt.textContent = `${c.name} / ${p.code} — ${p.name}`;
+      sel.appendChild(opt);
+    }
+  }
+}
+
+function addWeekRow(customerId, projectCode) {
+  if (!weekState.extraRows.some((r) => r.customer_id === customerId && r.project_code === projectCode)) {
+    weekState.extraRows.push({ customer_id: customerId, project_code: projectCode });
+  }
+}
+
+async function copyLastWeek() {
+  const start = addDays($('week-date').value, -7);
+  const end = addDays(start, 6);
+  try {
+    const data = await api.get(`/entries?from=${start}&to=${end}`);
+    const seen = new Set();
+    let added = 0;
+    for (const e of data.entries || []) {
+      const k = `${e.customer_id}|${e.project_code}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const before = weekState.extraRows.length;
+      addWeekRow(e.customer_id, e.project_code);
+      added += weekState.extraRows.length - before;
+    }
+    await refreshWeek();
+    announce(`Copied ${seen.size} project row(s) from last week — enter hours to save.`);
+  } catch (err) {
+    announce(`Copy failed: ${err.message}`);
+  }
 }
 
 async function jumpToEntry(entryId) {
@@ -598,18 +834,6 @@ async function jumpToEntry(entryId) {
   const target = $('day-table').querySelector('tbody tr');
   startEdit(e);
   if (target) target.scrollIntoView({ behavior: 'smooth' });
-}
-
-async function prefillFromCell(customerId, projectCode, date) {
-  switchTab('tab-day');
-  $('day-date').value = date;
-  await refreshDay();
-  showEntryForm(true);
-  resetEntryForm();
-  $('entry-date').value = date;
-  $('entry-customer').value = customerId;
-  await fillProjectSelect($('entry-project'), customerId, projectCode);
-  $('entry-hours').focus();
 }
 
 // ---------------------------------------------------------- customers ---
@@ -1575,7 +1799,42 @@ async function startApp() {
     await fillTaskSelect($('entry-task'), $('entry-customer').value, e.target.value, null);
   });
 
-  $('week-picker').addEventListener('submit', (e) => { e.preventDefault(); refreshWeek(); });
+  // Week grid (#13): inline cell editing via delegated events.
+  const wt = $('week-table');
+  wt.addEventListener('focusout', (e) => {
+    if (e.target.classList && e.target.classList.contains('cell-input')) commitCell(e.target);
+  });
+  wt.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('cell-input')) {
+      e.preventDefault();
+      commitCell(e.target);
+    }
+  });
+  $('week-date').addEventListener('change', () => refreshWeek());
+  $('week-prev').addEventListener('click', () => navigateWeek(-1));
+  $('week-next').addEventListener('click', () => navigateWeek(1));
+  $('week-track').addEventListener('click', async () => {
+    const today = isoDate(new Date());
+    const days = weekState.days.length === 7 ? weekState.days : [today];
+    $('day-date').value = days.includes(today) ? today : days[0];
+    switchTab('tab-day');
+    await refreshDay();
+    $('day-add').click();
+  });
+  $('week-add-row').addEventListener('click', async () => {
+    await fillWeekProjectSelect();
+    toggleWeekAddRow(true);
+  });
+  $('week-add-cancel').addEventListener('click', () => toggleWeekAddRow(false));
+  $('week-add-confirm').addEventListener('click', async () => {
+    const [cid, code] = $('week-add-project').value.split('|');
+    if (!cid || !code) return;
+    addWeekRow(cid, code);
+    toggleWeekAddRow(false);
+    await refreshWeek();
+    announce(`Row added for ${code} — type hours to save.`);
+  });
+  $('week-copy-last').addEventListener('click', copyLastWeek);
 
   $('customer-form').addEventListener('submit', saveCustomer);
   $('customer-cancel').addEventListener('click', cancelCustomerEdit);
@@ -1611,6 +1870,7 @@ async function startApp() {
   await refreshCustomerPickers();
   await fillProjectSelect($('entry-project'), '', null);
   await refreshDay();
+  await refreshWeek();
   fillCustomerSelect($('invoice-customer'), '', true);
   await refreshInvoices();
   fillCustomerSelect($('expense-customer'), '', true);
