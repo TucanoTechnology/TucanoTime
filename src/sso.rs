@@ -296,13 +296,16 @@ impl SsoRegistry {
 /// Builds the registry from vault/env. Entra/Okta share the OIDC-style
 /// secret key; the SAML adapter needs a pinned certificate fingerprint.
 #[must_use]
-pub fn registry_from_vault(vault: Option<&crate::vault::SecretVault>) -> SsoRegistry {
+pub fn registry_from_vault(
+    vault: Option<&crate::vault::SecretVault>,
+    cfg: &crate::appconfig::AppConfig,
+) -> SsoRegistry {
     let get = |key: &str, env: &str| -> Option<String> {
         vault
             .and_then(|v| v.get(key))
             .or_else(|| std::env::var(env).ok())
     };
-    let domains = |s: Option<String>| -> Vec<String> {
+    let domains_from = |s: Option<String>| -> Vec<String> {
         s.map(|d| {
             d.split(',')
                 .map(str::trim)
@@ -312,22 +315,27 @@ pub fn registry_from_vault(vault: Option<&crate::vault::SecretVault>) -> SsoRegi
         })
         .unwrap_or_default()
     };
+    // #94: allowed domains resolve env > config.json > vault > none.
+    let domains = || {
+        let c = cfg.get_csv("sso_allowed_domains", &crate::appconfig::process_env);
+        if c.is_empty() {
+            domains_from(get("sso.allowed_domains", "TUCANO_SSO_ALLOWED_DOMAINS"))
+        } else {
+            c
+        }
+    };
     let mut providers: Vec<std::sync::Arc<dyn IdentityProvider>> = Vec::new();
     if let Some(secret) = get("oidc.client_secret", "TUCANO_OIDC_CLIENT_SECRET") {
         let issuer = get("oidc.issuer", "TUCANO_OIDC_ISSUER").unwrap_or_else(|| "oidc".to_string());
         providers.push(std::sync::Arc::new(SignedTokenIdp::new(
             issuer,
             secret,
-            domains(get("oidc.allowed_domains", "TUCANO_SSO_ALLOWED_DOMAINS")),
+            domains(),
         )));
     }
     if let Some(fp) = get("saml.cert_fingerprint", "TUCANO_SAML_CERT_FINGERPRINT") {
         let issuer = get("saml.issuer", "TUCANO_SAML_ISSUER").unwrap_or_else(|| "saml".to_string());
-        providers.push(std::sync::Arc::new(SamlIdp::new(
-            issuer,
-            fp,
-            domains(get("saml.allowed_domains", "TUCANO_SSO_ALLOWED_DOMAINS")),
-        )));
+        providers.push(std::sync::Arc::new(SamlIdp::new(issuer, fp, domains())));
     }
     SsoRegistry::new(providers)
 }

@@ -1,0 +1,59 @@
+# TucanoTime — recreate-safe deployment (#94).
+#
+# Everything the app *stores* lives on the named volume: users, entries,
+# invoices, the encrypted vault (secrets.bin), config.json and scheduler
+# state. Restarting or upgrading (`docker compose pull && up -d`) loses
+# nothing, with **zero required environment setup**:
+#
+#   * sessions — the signing key is auto-generated on first boot and kept at
+#     <volume>/session.key (0600), so logins survive restarts. Override with
+#     TUCANO_SESSION_SECRET or a mounted TUCANO_SESSION_SECRET_FILE;
+#   * settings — resolved env > /data/config.json > default. Make runtime
+#     knobs survive recreation via `PUT /admin/config` (Settings tab in the
+#     GUI) or by editing config.json on the volume;
+#   * vault key — mount TUCANO_SECRET_KEY[_FILE] (examples below). If
+#     /data/secrets.bin exists but the key is missing or wrong, the app
+#     REFUSES to start (a loud operator error, never a silent downgrade).
+services:
+  tucanotime:
+    build: .
+    image: tucanotime:latest
+    restart: unless-stopped
+    ports:
+      - "${TUCANO_HOST_PORT:-8080}:8080"
+    volumes:
+      - tucanotime-data:/data
+    environment:
+      # All optional. Empty/unset means defaults (sessions auto-persist).
+      TUCANO_ENV: ${TUCANO_ENV:-production}
+      # Vault master key — pick ONE style; uncomment what you need:
+      # TUCANO_SECRET_KEY: ${TUCANO_SECRET_KEY:?set or remove this line}
+      # TUCANO_SESSION_SECRET_FILE: /secrets/session.key
+      # TUCANO_SECRET_KEY_FILE: /secrets/vault.key
+    # To use file-mounted secrets instead of env vars:
+    # secrets: [tucano_vault_key]
+    # labels are ignored by docker but document the backup recipe:
+    labels:
+      com.tucanotime.backup: >-
+        docker compose run --rm tucanotime-cli --backup /backups/manual.tar.gz
+
+  # One-shot CLI on the same image for backups/restores against the volume:
+  #   docker compose run --rm tucanotime-cli --backup /backups/today.tar.gz
+  #   docker compose stop tucanotime
+  #   docker compose run --rm tucanotime-cli --restore /backups/today.tar.gz
+  #   docker compose up -d tucanotime
+  # (--restore refuses a non-empty data dir unless you pass --force)
+  tucanotime-cli:
+    image: tucanotime:latest
+    profiles: ["cli"]
+    entrypoint: ["/usr/local/bin/tucano-time"]
+    volumes:
+      - tucanotime-data:/data
+      - ${TUCANO_BACKUP_DIR:-./backups}:/backups
+
+# secrets:
+#   tucano_vault_key:
+#     file: ./secrets/vault.key
+
+volumes:
+  tucanotime-data:

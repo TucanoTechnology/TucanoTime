@@ -424,6 +424,23 @@ check('submitted-week cell holds the hours', !!lockedCell && lockedCell.value ==
 check('submitted-week cell renders locked (disabled input)', !!lockedCell && lockedCell.disabled === true && lockedCell.closest('td').classList.contains('locked'));
 check('locked row marked for the lock column', !!lockedCell && lockedCell.closest('tr').classList.contains('has-lock'));
 
+// ---- CONFIG (#94): effective config renders + edit persists + source flips ----
+const cfgRows = [...window.document.querySelectorAll('#config-table tbody tr')];
+check('config table renders whitelisted rows', cfgRows.length >= 5);
+const daysRow = cfgRows.find((r) => r.cells[0].textContent === 'reminder_days');
+check('reminder_days row shows default source', !!daysRow && daysRow.cells[2].textContent === 'default');
+if (daysRow) {
+  window.document.getElementById('config-key').value = 'reminder_days';
+  window.document.getElementById('config-value').value = '12';
+  window.document.getElementById('config-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(300);
+  const after = [...window.document.querySelectorAll('#config-table tbody tr')].find((r) => r.cells[0].textContent === 'reminder_days');
+  check('edit persists to config.json and source becomes file', after.cells[1].textContent === '12' && after.cells[2].textContent === 'file');
+}
+// Non-whitelisted keys cannot be written even via the API.
+const badCfg = await fetch(BASE + '/admin/config', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: '{"smtp.password":"nope"}' });
+check('secret-shaped config keys are refused', badCfg.status === 422);
+
 console.log(`\n${failures === 0 ? 'ALL GUI CHECKS PASSED' : failures + ' GUI CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);
 

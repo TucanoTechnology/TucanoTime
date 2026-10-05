@@ -330,6 +330,20 @@
         <tbody></tbody>
       </table>
       <p id="secret-empty" hidden>No credentials stored yet.</p>
+
+      <h2>Runtime configuration <span class="beta">Beta</span></h2>
+      <p class="hint">Effective settings, resolved <strong>env &gt; config.json &gt; default</strong> and stored on the data volume — a restart or image update keeps them (#94).</p>
+      <table id="config-table">
+        <caption class="sr-only">Effective runtime configuration</caption>
+        <thead><tr><th scope="col">Setting</th><th scope="col">Value</th><th scope="col">Source</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <form id="config-form" class="card">
+        <div class="field"><label for="config-key">Setting</label><select id="config-key"></select></div>
+        <div class="field"><label for="config-value">New value</label><input id="config-value" maxlength="300"></div>
+        <p class="form-error" id="config-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="config-save">Apply to config.json</button></div>
+      </form>
     </section>
       </main>
 
