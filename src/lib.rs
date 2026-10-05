@@ -185,6 +185,10 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::post(api::send_invoice_email),
         )
         .route(
+            "/invoices/{id}/email-copy",
+            axum::routing::post(api::send_invoice_email_copy),
+        )
+        .route(
             "/invoices/{id}/checkout",
             axum::routing::post(api::create_checkout),
         )

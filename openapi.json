@@ -3763,6 +3763,88 @@
         }
       }
     },
+    "/invoices/{id}/email-copy": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "sendInvoiceEmailCopy",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Email a PDF copy of an issued invoice to a third party, e.g. the accountant (#112)",
+        "description": "Admin only. Drafts are not shared (409). The recipient is validated before anything is sent or persisted; the send is recorded in the audit log with the recipient address and the invoice id, never the document bytes. The cover note names the requesting user.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "to"
+                ],
+                "properties": {
+                  "to": {
+                    "type": "string",
+                    "description": "Recipient email address."
+                  },
+                  "note": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional note in the cover email (max 2000 characters)."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sent_to"
+                  ],
+                  "properties": {
+                    "sent_to": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "502": {
+            "description": "The email transport failed."
+          }
+        }
+      }
+    },
     "/invoices/{id}/pay": {
       "parameters": [
         {

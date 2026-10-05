@@ -1480,6 +1480,8 @@ async function refreshInvoices() {
           'Download the archived invoice PDF'),
         action('link', 'Email', () => emailInvoice(inv.id),
           'Send this invoice (PDF attached) to the customer billing email'),
+        action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
+          'Send a PDF copy to another address, e.g. the accountant'),
       );
     } else if (inv.status === 'paid') {
       actions.push(
@@ -1489,6 +1491,8 @@ async function refreshInvoices() {
           'Download the archived invoice PDF'),
         action('link', 'Email', () => emailInvoice(inv.id),
           'Send this invoice (PDF attached) to the customer billing email'),
+        action('link', 'Email copy', () => emailInvoiceCopy(inv.id),
+          'Send a PDF copy to another address, e.g. the accountant'),
       );
     }
     tbody.appendChild(
@@ -1564,6 +1568,23 @@ async function emailInvoice(id) {
     announce(`Invoice emailed to ${res.sent_to} (PDF attached).`);
   } catch (err) {
     announce(`Email failed: ${err.message}`);
+  }
+}
+
+/// Sends a PDF copy of the invoice to any address — e.g. the accountant
+/// (#112). Recipient via the inline dialog (#102); the server validates and
+/// refuses drafts/invalid shapes before sending anything.
+async function emailInvoiceCopy(id) {
+  const to = ((await askPrompt('Send a PDF copy to this email address:')) || '').trim();
+  if (!to) {
+    announce('Email copy cancelled.');
+    return;
+  }
+  try {
+    const res = await api.post(`/invoices/${id}/email-copy`, { to });
+    announce(`PDF copy sent to ${res.sent_to}.`);
+  } catch (err) {
+    announce(`Email copy failed: ${err.message}`);
   }
 }
 

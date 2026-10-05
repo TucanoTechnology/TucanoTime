@@ -335,6 +335,89 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
     Ok(Json(serde_json::json!({ "sent_to": sent_to })).into_response())
 }
 
+/// Body for `POST /invoices/{id}/email-copy` (#112).
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmailCopyInput {
+    pub to: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// Cap on the free-form note so an email body cannot be padded (#50).
+const COPY_NOTE_MAX_CHARS: usize = 2000;
+
+/// Sends a PDF copy of an (issued) invoice to an arbitrary recipient — the
+/// company accountant, a partner, whoever (#112). Admin tier, drafts are not
+/// shared, the recipient is validated before anything is sent or persisted,
+/// and the send lands in the audit log (#52) as recipient + invoice id —
+/// never the PDF bytes.
+pub async fn send_invoice_email_copy(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<EmailCopyInput>,
+) -> ApiResult {
+    let invoice = get_invoice_or_404(&app, id)?;
+    // Fail-loud validation before any side effect (no partial persistence):
+    let to = input.to.trim().to_string();
+    if !crate::email::valid_address(&to) {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "to",
+            "not a valid email address",
+        )]));
+    }
+    if input.note.chars().count() > COPY_NOTE_MAX_CHARS {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "note",
+            "note too long (max 2000 characters)",
+        )]));
+    }
+    if invoice.status == crate::domain::InvoiceStatus::Draft {
+        return Err(ApiError::conflict(
+            "issue the invoice before sharing a copy",
+        ));
+    }
+    let customer = get_customer(&app.store, invoice.customer_id)?;
+    let (filename, pdf) = invoice_pdf_for_delivery(&app, &invoice)?;
+    let org = org_for(&app);
+    let subject = format!("Copy of invoice {} for {}", invoice.number, customer.name);
+    let text = crate::email::render_copy_email(
+        &invoice.number,
+        &customer.name,
+        &actor.0.name,
+        Some(&input.note),
+        &org.name,
+    );
+    let msg = crate::email::EmailMessage {
+        to: to.clone(),
+        subject,
+        text,
+        html: None,
+        attachment: Some((filename, pdf)),
+    };
+    let sender = app.email.clone();
+    let result = blocking("email copy send", move || {
+        sender.send(&msg).map_err(|e| {
+            ApiError::new(
+                axum::http::StatusCode::BAD_GATEWAY,
+                "email_failed",
+                e.to_string(),
+            )
+        })
+    })
+    .await;
+    match result {
+        Ok(()) => {
+            // #52: recipient + invoice, never the document bytes.
+            app.audit
+                .record("invoice_email_copy", &format!("{id}:{to}"), app.clock.now());
+            Ok(Json(serde_json::json!({ "sent_to": to })).into_response())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 // ------------------------------------------------------------- payments #34 --
 
 /// Creates a hosted checkout link for an issued invoice (#34). The provider
