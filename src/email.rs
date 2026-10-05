@@ -347,6 +347,27 @@ pub fn render_invoice_email(
     s
 }
 
+/// Plain-text cover note for a PDF copy sent to a third party — e.g. the
+/// company accountant (#112). `requester` is the authenticated user who asked
+/// for the copy, named so the recipient knows who to bill it back to.
+pub fn render_copy_email(
+    number: &str,
+    customer: &str,
+    requester: &str,
+    note: Option<&str>,
+    org: &str,
+) -> String {
+    let mut s = format!(
+        "A copy of invoice {number} for {customer} is attached as a PDF, sent at the request \
+         of {requester}."
+    );
+    if let Some(note) = note.map(str::trim).filter(|n| !n.is_empty()) {
+        s.push_str(&format!("\n\nNote: {note}"));
+    }
+    s.push_str(&format!("\n\n{org}\n"));
+    s
+}
+
 /// Plain-text overdue-payment reminder for a single invoice. `pdf_attached`
 /// names the archived document riding along (#113).
 pub fn render_reminder_email(
@@ -420,6 +441,22 @@ mod tests {
         });
         assert!(matches!(bad, Err(EmailError::Recipient)));
         assert_eq!(s.messages().len(), 1);
+    }
+
+    #[test]
+    fn copy_email_names_requester_and_carries_note() {
+        let s = render_copy_email(
+            "INV-9",
+            "ACME",
+            "Pat Admin",
+            Some("for the books"),
+            "Tucano",
+        );
+        assert!(s.contains("INV-9") && s.contains("ACME") && s.contains("Pat Admin"));
+        assert!(s.contains("for the books"));
+        // Blank notes drop the section entirely.
+        let bare = render_copy_email("INV-9", "ACME", "Pat", Some("   "), "Tucano");
+        assert!(!bare.contains("Note:"));
     }
 
     #[test]

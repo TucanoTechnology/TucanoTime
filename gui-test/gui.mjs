@@ -400,6 +400,25 @@ if (pdfBtn) {
   window.document.createElement = origCreate;
   check('PDF button saves the numbered file', !!savedName && /^INV-\d+\.pdf$/.test(savedName));
   check('PDF download announces success', /Invoice PDF downloaded/i.test(window.document.getElementById('live-region').textContent));
+
+// ---- EMAIL COPY (#112): the GUI prompts for a recipient, then audited ----
+const copyBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Email copy');
+check('issued invoice renders an Email copy button', !!copyBtn);
+if (copyBtn) {
+  copyBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(200);
+  const dlg = window.document.getElementById('app-dialog');
+  check('Email copy prompts for a recipient address', dlg.open === true || dlg.hasAttribute('open'));
+  window.document.getElementById('dlg-input').value = 'accountant@gui.test';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  check('Email copy announces the send', /PDF copy sent to accountant@gui.test/i.test(window.document.getElementById('live-region').textContent));
+  const audit = await (await fetch(BASE + '/audit', { headers: { Cookie: SESSION_COOKIE } })).json();
+  check(
+    'Email copy lands in the audit log with the recipient',
+    audit.events.some((e) => e.event === 'invoice_email_copy' && e.subject.includes('accountant@gui.test')),
+  );
+}
 }
 
 // ---- PAYMENTS (#34): checkout link via the Pay link button + webhook pays it ----
