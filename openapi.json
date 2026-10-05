@@ -1028,6 +1028,22 @@
         }
       }
     },
+    "/notifications": {
+      "get": {
+        "operationId": "listNotifications",
+        "tags": ["entries"],
+        "summary": "The caller's notifications, newest first, with unread count (#22)",
+        "responses": { "200": { "description": "Notifications.", "content": { "application/json": { "schema": { "type": "object", "required": ["notifications", "unread"], "properties": { "notifications": { "type": "array", "items": { "type": "object", "required": ["id", "kind", "title", "body", "created_at", "read"], "properties": { "id": { "type": "string", "format": "uuid" }, "kind": { "type": "string" }, "title": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string", "format": "date-time" }, "read": { "type": "boolean" } }, "additionalProperties": false } }, "unread": { "type": "integer" } }, "additionalProperties": false } } } } }
+      }
+    },
+    "/notifications/read": {
+      "post": {
+        "operationId": "markNotificationsRead",
+        "tags": ["entries"],
+        "summary": "Mark the caller's notifications read",
+        "responses": { "204": { "description": "Marked." } }
+      }
+    },
     "/invoices": {
       "get": {
         "operationId": "listInvoices",

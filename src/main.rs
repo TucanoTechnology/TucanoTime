@@ -30,12 +30,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let state = AppState::with_session(store, Arc::new(session));
 
-    // Background scheduler (#61). Jobs register here as they land: reminders
-    // (#22), recurring invoices (#26), budget alerts (#30). None yet, so this
-    // is the wired-but-idle framework.
+    // Background scheduler (#61) with the reminder job (#22). Recurring
+    // invoices (#26) and budget alerts (#30) register here too.
+    let jobs: Vec<Arc<dyn tucano_time::scheduler::Job>> = vec![Arc::new(
+        tucano_time::reminders::ReminderJob::new(state.store.clone()),
+    )];
     let scheduler = Arc::new(tucano_time::scheduler::Scheduler::new(
         std::path::Path::new(&data_dir),
-        Vec::new(),
+        jobs,
     ));
     scheduler.spawn(60);
 

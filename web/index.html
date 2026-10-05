@@ -77,6 +77,10 @@
         <button type="submit" class="secondary">Show day</button>
       </form>
       <h2>Entries for <span id="day-label"></span></h2>
+      <div id="notif-section" hidden>
+        <div class="notif-head"><span>Notifications</span><button type="button" id="notif-read" class="link">Mark all read</button></div>
+        <ul id="notif-list" class="notifs"></ul>
+      </div>
       <table id="day-table">
         <caption class="sr-only">Time entries for the selected day</caption>
         <thead>
