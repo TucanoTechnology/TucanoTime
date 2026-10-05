@@ -283,12 +283,21 @@ and prune on open); reminders do 2N per-user lock round-trips inside one tick.
   `unwrap()`s in `email_reminders.rs` are in `#[cfg(test)]` (`:158-201`); production
   uses `match … else { return }`. No change needed.
 
-## Suggested sequencing
-1. **B1, A4, A5, A1, B3** — dead feature + privacy leak + broken default login +
-   CI supply chain + wrong-invoice-paid. Small, high-blast-radius.
-2. **B2 + B4 + B7** via one `Store::with_write_lock` transaction seam (fixes
-   double-billing, duplicate entries, torn backup reads together).
-3. **A2, A3, A6, A7, B5** — provider/webhook hardening + non-blocking scheduler.
-4. **C1, C2, C4** — the two big structural refactors (they make everything above
-   safer to change again), then **D1-D4** efficiency, then **C6/C7** GUI.
+## Disposition (as of 2026-10-05)
+
+- **PR #96** fixed A1, A3-A10, B1, B3, B9, B10 + D6 hygiene.
+- **PR #97** added the transactional store (`with_write_lock` primitives:
+  issue/pay/save_entry/finish_timer/put_user_if_none/create_invoice_and_advance,
+  `update_json_rel`), atomic state files, `spawn_blocking` scheduler,
+  post-run persistence, and the `.server.lock` single-instance guard —
+  covering B2, B4-B8 and A12's bootstrap TOCTOU.
+- **PR #98** shipped A2 (fail-closed SAML secret), A11 (webhook amount/
+  currency verification), A12 (SSO lockout, error sanitization) and D3-D5
+  (streaming backup/restore, billing indexes, hierarchy reuse).
+- **PR #99** shipped C7 + D1/D2 (GUI picker staleness, double refreshes,
+  parallel boot, lock-set TTL).
+- **Deferred to follow-up issues**: C1+C5 → **#100** (split api.rs + shared
+  handler helpers); C2+C3+C4 → **#101** (generic entity store + registry
+  dedupe); C6 + remaining D3/D6 → **#102** (GUI `el()` helpers, `<dialog>`,
+  side indexes, audit rotation, CI jsdom job).
 ```
