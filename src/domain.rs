@@ -338,7 +338,21 @@ pub enum Source {
 pub enum InvoiceStatus {
     Draft,
     Issued,
+    /// Some recorded payments, balance still open (#114).
+    #[serde(rename = "partly_paid")]
+    PartlyPaid,
     Paid,
+    /// Remaining balance forgiven: final, excluded from outstanding (#114).
+    #[serde(rename = "written_off")]
+    WrittenOff,
+}
+
+impl InvoiceStatus {
+    /// Issued and not yet closed out: locks its entries (#18) and counts as
+    /// receivable (#114).
+    pub fn is_open(&self) -> bool {
+        matches!(self, InvoiceStatus::Issued | InvoiceStatus::PartlyPaid)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -399,6 +413,27 @@ pub struct Invoice {
     /// download renders it from the snapshot-locked invoice).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pdf: Option<PdfHint>,
+    /// Recorded payments ledger (#114). Legacy documents default to empty;
+    /// a legacy `Paid` invoice without entries reports its full total as
+    /// paid (see `paid_minor`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub payments: Vec<InvoicePayment>,
+    /// Non-empty once written off: the reason for forgiving the balance (#114).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub write_off_reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_off_at: Option<DateTime<Utc>>,
+}
+
+/// One recorded payment against an invoice (#114). Amounts are minor units;
+/// `method` distinguishes manual/webhook/provider settlements.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InvoicePayment {
+    pub id: Uuid,
+    pub amount_minor: u64,
+    pub received_at: DateTime<Utc>,
+    pub reference: String,
+    pub method: String,
 }
 
 /// Metadata for a PDF archived next to the invoice document (#113). Lets the
@@ -418,14 +453,43 @@ pub struct PdfHint {
     pub archived_at: DateTime<Utc>,
 }
 
-/// Aggregate of invoice states for the dashboard (#27).
+impl Invoice {
+    /// Sum of the payment ledger (integer minor units). A legacy `Paid`
+    /// document predating #114 carries no ledger: its total counts as paid
+    /// so receivables are never overstated by the migration.
+    #[must_use]
+    pub fn paid_minor(&self) -> u64 {
+        let ledger = self.payments.iter().map(|p| p.amount_minor).sum::<u64>();
+        if ledger == 0 && self.status == InvoiceStatus::Paid {
+            self.total_minor
+        } else {
+            ledger
+        }
+    }
+
+    /// What remains collectable (#114). A written-off balance is forgiven:
+    /// it is not outstanding, so this returns 0 for that state.
+    #[must_use]
+    pub fn balance_minor(&self) -> u64 {
+        if self.status == InvoiceStatus::WrittenOff {
+            return 0;
+        }
+        self.total_minor.saturating_sub(self.paid_minor())
+    }
+}
+
+/// Aggregate of invoice states for the dashboard (#27, #114).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct InvoiceSummary {
     pub draft: usize,
     pub issued: usize,
     pub overdue: usize,
     pub paid: usize,
-    /// Outstanding (issued, unpaid) totals keyed by currency.
+    /// Issued with a partially settled balance (#114).
+    pub partly_paid: usize,
+    /// Forgiven invoices, excluded from outstanding (#114).
+    pub written_off: usize,
+    /// Outstanding balances (issued + partly paid) keyed by currency.
     pub outstanding: BTreeMap<String, u64>,
 }
 
@@ -437,19 +501,26 @@ pub fn summarise_invoices(invoices: &[Invoice], today: NaiveDate) -> InvoiceSumm
         issued: 0,
         overdue: 0,
         paid: 0,
+        partly_paid: 0,
+        written_off: 0,
         outstanding: BTreeMap::new(),
     };
     for inv in invoices {
         match inv.status {
             InvoiceStatus::Draft => s.draft += 1,
             InvoiceStatus::Paid => s.paid += 1,
-            InvoiceStatus::Issued => {
-                if inv.due_date.is_some_and(|d| d < today) {
-                    s.overdue += 1;
-                }
-                s.issued += 1;
-                *s.outstanding.entry(inv.currency.0.clone()).or_insert(0) += inv.total_minor;
+            InvoiceStatus::WrittenOff => s.written_off += 1,
+            InvoiceStatus::Issued => s.issued += 1,
+            InvoiceStatus::PartlyPaid => s.partly_paid += 1,
+        }
+        // Overdue + outstanding follow the BALANCE (#114): a settled or
+        // forgiven invoice is neither, and a partial payment pulls only the
+        // remainder into receivables.
+        if inv.status.is_open() && inv.balance_minor() > 0 {
+            if inv.due_date.is_some_and(|d| d < today) {
+                s.overdue += 1;
             }
+            *s.outstanding.entry(inv.currency.0.clone()).or_insert(0) += inv.balance_minor();
         }
     }
     s
@@ -933,6 +1004,9 @@ pub fn generate_invoice(
         paid_at: None,
         payment_reference: String::new(),
         pdf: None,
+        payments: vec![],
+        write_off_reason: String::new(),
+        written_off_at: None,
     })
 }
 
@@ -1466,6 +1540,9 @@ mod tests {
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
+            payments: vec![],
+            write_off_reason: String::new(),
+            written_off_at: None,
         }
     }
 
@@ -1556,6 +1633,43 @@ mod tests {
             .fixed_days(),
             Some(9)
         );
+    }
+
+    #[test]
+    fn summary_uses_balance_and_new_lifecycle_states() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
+        let mk = |status: InvoiceStatus, total: u64, paid: u64| {
+            let mut i = inv(
+                status,
+                total,
+                Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
+            );
+            if paid > 0 {
+                i.payments.push(InvoicePayment {
+                    id: Uuid::new_v4(),
+                    amount_minor: paid,
+                    received_at: i.created_at,
+                    reference: "r".into(),
+                    method: "manual".into(),
+                });
+            }
+            i
+        };
+        let invoices = vec![
+            mk(InvoiceStatus::Issued, 10_000, 0),
+            mk(InvoiceStatus::PartlyPaid, 10_000, 4_000),
+            mk(InvoiceStatus::Paid, 10_000, 10_000),
+            mk(InvoiceStatus::WrittenOff, 10_000, 2_000),
+        ];
+        let s = summarise_invoices(&invoices, today);
+        assert_eq!(s.issued, 1);
+        assert_eq!(s.partly_paid, 1);
+        assert_eq!(s.paid, 1);
+        assert_eq!(s.written_off, 1);
+        // Outstanding = balances of open states only: 10000 + 6000.
+        assert_eq!(s.outstanding.get("EUR").copied(), Some(16_000));
+        // Both open invoices are past due; paid/written_off never overdue.
+        assert_eq!(s.overdue, 2);
     }
 
     #[test]

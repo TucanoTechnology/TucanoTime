@@ -182,6 +182,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/invoices/{id}/pdf", get(api::invoice_pdf))
         .route("/invoices/{id}/pay", axum::routing::post(api::pay_invoice))
         .route(
+            "/invoices/{id}/write-off",
+            axum::routing::post(api::write_off_invoice),
+        )
+        .route(
             "/invoices/{id}/email",
             axum::routing::post(api::send_invoice_email),
         )

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, Utc};
 
-use crate::domain::{Invoice, InvoiceStatus};
+use crate::domain::Invoice;
 use crate::email::{EmailMessage, EmailSender, due_for_reminder, render_reminder_email};
 use crate::scheduler::Job;
 use crate::store::Store;
@@ -82,7 +82,9 @@ impl EmailReminderJob {
         invoices
             .iter()
             .filter_map(|inv| {
-                if inv.status != InvoiceStatus::Issued {
+                // #114: reminders chase the BALANCE — written-off and fully
+                // paid invoices are out, partly paid ones are in.
+                if !inv.status.is_open() || inv.balance_minor() == 0 {
                     return None;
                 }
                 let due = inv.due_date?;
@@ -180,7 +182,7 @@ impl Job for EmailReminderJob {
             // and archive on first sight. The reminder must carry the same
             // document the customer was issued, never a freshly derived one.
             let attachment = self.resolve_pdf(&inv, customer, now);
-            let amount = crate::api::money_for_email(inv.total_minor, &inv.currency.0);
+            let amount = crate::api::money_for_email(inv.balance_minor(), &inv.currency.0);
             let due = inv.due_date.map(|d| d.to_string()).unwrap_or_default();
             let text = render_reminder_email(
                 &customer.name,
@@ -232,6 +234,9 @@ mod tests {
             paid_at: None,
             payment_reference: String::new(),
             pdf: None,
+            payments: vec![],
+            write_off_reason: String::new(),
+            written_off_at: None,
         }
     }
 

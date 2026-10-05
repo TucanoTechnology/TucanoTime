@@ -80,8 +80,9 @@ impl EntryLock for InvoiceLock {
             .ok()?
             .iter()
             .find(|inv| {
-                inv.status == crate::domain::InvoiceStatus::Issued
-                    && inv.lines.iter().any(|l| l.entry_id == Some(entry_id))
+                // Open invoices freeze their entries; #114 adds the
+                // partly-paid state to the same lock family.
+                inv.status.is_open() && inv.lines.iter().any(|l| l.entry_id == Some(entry_id))
             })
             .map(|inv| LockReason::Invoiced {
                 id: inv.number.clone(),

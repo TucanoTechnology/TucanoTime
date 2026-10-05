@@ -745,8 +745,11 @@
         "enum": [
           "draft",
           "issued",
-          "paid"
-        ]
+          "partly_paid",
+          "paid",
+          "written_off"
+        ],
+        "description": "Invoice lifecycle (#27); partly_paid and written_off added by #114."
       },
       "InvoiceLine": {
         "type": "object",
@@ -917,6 +920,24 @@
                 "type": "null"
               }
             ]
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvoicePayment"
+            },
+            "description": "Payment ledger (#114). A legacy paid document without entries counts as fully paid."
+          },
+          "write_off_reason": {
+            "type": "string",
+            "description": "Non-empty once written off (#114)."
+          },
+          "written_off_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           }
         },
         "additionalProperties": false
@@ -953,7 +974,15 @@
               "type": "integer",
               "minimum": 0
             },
-            "description": "Unpaid issued totals keyed by currency (minor units)."
+            "description": "Outstanding BALANCES keyed by currency (#114: total - paid over issued/partly_paid)."
+          },
+          "partly_paid": {
+            "type": "integer",
+            "description": "Open invoices with a partially settled balance (#114)."
+          },
+          "written_off": {
+            "type": "integer",
+            "description": "Forgiven invoices, excluded from outstanding (#114)."
           }
         },
         "additionalProperties": false
@@ -1584,6 +1613,39 @@
                 "type": "null"
               }
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "InvoicePayment": {
+        "type": "object",
+        "description": "One recorded payment on the invoice ledger (#114).",
+        "required": [
+          "id",
+          "amount_minor",
+          "received_at",
+          "reference",
+          "method"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "description": "'manual' or a provider name"
           }
         },
         "additionalProperties": false
@@ -3971,7 +4033,7 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Mark an issued invoice as paid",
+        "summary": "Record a payment on an issued invoice (full balance or partial, #27/#114)",
         "requestBody": {
           "required": true,
           "content": {
@@ -3983,6 +4045,14 @@
                   "reference": {
                     "type": "string",
                     "maxLength": 200
+                  },
+                  "amount_minor": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1,
+                    "description": "Minor units collected now; absent = remaining balance (#114)."
                   }
                 },
                 "additionalProperties": false
@@ -4007,7 +4077,8 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           }
-        }
+        },
+        "description": "amount_minor absent = the full remaining balance (legacy behaviour). 0 is a 422, over-balance a 409 \u2014 both without persistence. Settling the last cent flips to paid; anything less parks at partly_paid with a ledger entry."
       }
     },
     "/invoices/{id}/checkout": {
@@ -4392,6 +4463,14 @@
                           },
                           "invoices": {
                             "type": "integer"
+                          },
+                          "paid_minor": {
+                            "type": "integer",
+                            "description": "Collected ledger total (#114)."
+                          },
+                          "balance_minor": {
+                            "type": "integer",
+                            "description": "Still-collectable balance; forgiven excluded (#114)."
                           }
                         },
                         "additionalProperties": false
@@ -4410,6 +4489,12 @@
                       "type": "integer"
                     },
                     "total_revenue_minor": {
+                      "type": "integer"
+                    },
+                    "partly_paid": {
+                      "type": "integer"
+                    },
+                    "written_off": {
                       "type": "integer"
                     }
                   },
@@ -5349,6 +5434,72 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/invoices/{id}/write-off": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "writeOffInvoice",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Forgive the remaining balance of an open invoice (#114)",
+        "description": "Admin only. Issued or partly-paid invoices become written_off (final); the ledger and paid amounts stay. Draft/paid/written-off states are 409; a missing/blank reason is 422 without persistence. Audit records invoice_write_off.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Why the remaining balance is forgiven."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Written-off invoice.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
