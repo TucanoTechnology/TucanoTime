@@ -276,29 +276,13 @@ impl IdentityProvider for SamlIdp {
 
 // ---------------------------------------------------------------- registry --
 
-#[derive(Default)]
-pub struct SsoRegistry {
-    providers: Vec<std::sync::Arc<dyn IdentityProvider>>,
-}
+/// Registry of enabled identity providers (#101: shared generic `Registry`;
+/// lookup stays case-insensitive, as SSO names always were).
+pub type SsoRegistry = crate::providers::Registry<dyn IdentityProvider>;
 
-impl SsoRegistry {
-    #[must_use]
-    pub fn new(providers: Vec<std::sync::Arc<dyn IdentityProvider>>) -> Self {
-        Self { providers }
-    }
-    pub fn get(&self, name: &str) -> Option<std::sync::Arc<dyn IdentityProvider>> {
-        self.providers
-            .iter()
-            .find(|p| p.name().eq_ignore_ascii_case(name))
-            .cloned()
-    }
-    #[must_use]
-    pub fn names(&self) -> Vec<String> {
-        self.providers.iter().map(|p| p.name().to_owned()).collect()
-    }
-    #[must_use]
-    pub fn enabled(&self) -> bool {
-        !self.providers.is_empty()
+impl crate::providers::NamedProvider for dyn IdentityProvider {
+    fn name(&self) -> &str {
+        IdentityProvider::name(self)
     }
 }
 
@@ -310,9 +294,7 @@ pub fn registry_from_vault(
     cfg: &crate::appconfig::AppConfig,
 ) -> SsoRegistry {
     let get = |key: &str, env: &str| -> Option<String> {
-        vault
-            .and_then(|v| v.get(key))
-            .or_else(|| std::env::var(env).ok())
+        crate::providers::resolve_secret(vault, key, env)
     };
     let domains_from = |s: Option<String>| -> Vec<String> {
         s.map(|d| {

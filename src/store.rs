@@ -80,6 +80,83 @@ struct WriteGuard<'a> {
     _lock: File,
 }
 
+/// One flat JSON document collection under the data root: every entity of
+/// type `T` lives at `<root>/<DIR>/<id>.json` (#101). The twelve
+/// `dir_entries -> read_json -> sort` / `write_lock -> create_dir_all ->
+/// write_json` / `exists -> NotFound -> remove` blocks this file carried now
+/// live once, in the primitives below, so the lock + atomicity discipline
+/// (and the #97 transaction seam) has a single home.
+pub trait Entity: serde::Serialize + serde::de::DeserializeOwned + Sized {
+    /// Collection directory below the data root, e.g. `"invoices"`.
+    const DIR: &'static str;
+    /// Document stem: the file is `<id>.json`. Usually the entity `Uuid`;
+    /// `Timer` keys by its owner instead.
+    fn id(&self) -> String;
+}
+
+impl Entity for User {
+    const DIR: &'static str = "users";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
+impl Entity for Invoice {
+    const DIR: &'static str = "invoices";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
+impl Entity for Category {
+    const DIR: &'static str = "categories";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
+impl Entity for Expense {
+    const DIR: &'static str = "expenses";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
+impl Entity for Submission {
+    const DIR: &'static str = "submissions";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
+impl Entity for ExpenseClaim {
+    const DIR: &'static str = "claims";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
+impl Entity for RecurringSchedule {
+    const DIR: &'static str = "schedules";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
+impl Entity for Customer {
+    const DIR: &'static str = "customers";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
+impl Entity for Timer {
+    const DIR: &'static str = "timers";
+    fn id(&self) -> String {
+        self.user_id.to_string()
+    }
+}
+
 impl Store {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, StoreError> {
         Self::with_lock_timeout(root, DEFAULT_LOCK_TIMEOUT)
@@ -213,22 +290,80 @@ impl Store {
         self
     }
 
-    // ---------------------------------------------------------------- users --
+    // ------------------------------------------------ collection primitives --
 
-    fn user_path(&self, id: Uuid) -> PathBuf {
-        self.root.join("users").join(format!("{id}.json"))
+    fn doc_dir<T: Entity>(&self) -> PathBuf {
+        self.root.join(T::DIR)
     }
 
-    pub fn list_users(&self) -> Result<Vec<User>, StoreError> {
+    fn doc_path<T: Entity>(&self, id: &str) -> PathBuf {
+        self.doc_dir::<T>().join(format!("{id}.json"))
+    }
+
+    /// Read every document in a collection directory. A missing directory is
+    /// an empty collection (it is created on first write); dot files and
+    /// stranded `.tmp` files are not documents (`dir_entries` skips them).
+    /// The caller owns the ordering.
+    pub(crate) fn list_docs<T: Entity>(&self) -> Result<Vec<T>, StoreError> {
+        self.walk_docs(&self.doc_dir::<T>(), read_json::<T>)
+    }
+
+    /// The shared `dir_entries -> json filter -> decode -> collect` walk,
+    /// with an injectable decoder: nested collections (projects) plug their
+    /// own legacy-aware decode hook here (`domain::project_from_bytes`).
+    pub(crate) fn walk_docs<T>(
+        &self,
+        dir: &Path,
+        decode: impl Fn(&Path) -> Result<Option<T>, StoreError>,
+    ) -> Result<Vec<T>, StoreError> {
         let mut out = Vec::new();
-        for path in dir_entries(&self.root.join("users"), self.max_docs)? {
+        if !dir.exists() {
+            return Ok(out);
+        }
+        for path in dir_entries(dir, self.max_docs)? {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            if let Some(u) = read_json::<User>(&path)? {
-                out.push(u);
+            if let Some(v) = decode(&path)? {
+                out.push(v);
             }
         }
+        Ok(out)
+    }
+
+    pub(crate) fn get_doc<T: Entity>(&self, id: &str) -> Result<Option<T>, StoreError> {
+        read_json(&self.doc_path::<T>(id))
+    }
+
+    /// Lock, ensure the directory, atomic write — the one put path for
+    /// flat collections.
+    pub(crate) fn put_doc<T: Entity>(&self, value: &T) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        std::fs::create_dir_all(self.doc_dir::<T>())?;
+        write_json(&self.doc_path::<T>(&value.id()), value)
+    }
+
+    /// Lock, exists → `NotFound`, remove — the one delete path. Guards that
+    /// need to inspect other collections take `write_lock` themselves and
+    /// reuse `remove_doc_locked`.
+    pub(crate) fn remove_doc<T: Entity>(&self, id: &str) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        self.remove_doc_locked::<T>(id)
+    }
+
+    pub(crate) fn remove_doc_locked<T: Entity>(&self, id: &str) -> Result<(), StoreError> {
+        let path = self.doc_path::<T>(id);
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        std::fs::remove_file(&path)?;
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- users --
+
+    pub fn list_users(&self) -> Result<Vec<User>, StoreError> {
+        let mut out = self.list_docs::<User>()?;
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
     }
@@ -238,7 +373,7 @@ impl Store {
     }
 
     pub fn get_user(&self, id: Uuid) -> Result<Option<User>, StoreError> {
-        read_json(&self.user_path(id))
+        self.get_doc::<User>(&id.to_string())
     }
 
     pub fn get_user_by_email(&self, email: &str) -> Result<Option<User>, StoreError> {
@@ -249,40 +384,17 @@ impl Store {
     }
 
     pub fn put_user(&self, user: &User) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        write_json(&self.user_path(user.id), user)
+        self.put_doc(user)
     }
 
     pub fn delete_user(&self, id: Uuid) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        let path = self.user_path(id);
-        if !path.exists() {
-            return Err(StoreError::NotFound);
-        }
-        std::fs::remove_file(&path)?;
-        Ok(())
+        self.remove_doc::<User>(&id.to_string())
     }
 
     // ------------------------------------------------------------- invoices --
 
-    fn invoice_path(&self, id: Uuid) -> PathBuf {
-        self.root.join("invoices").join(format!("{id}.json"))
-    }
-
     pub fn list_invoices(&self) -> Result<Vec<Invoice>, StoreError> {
-        let dir = self.root.join("invoices");
-        let mut out = Vec::new();
-        if !dir.exists() {
-            return Ok(out);
-        }
-        for path in dir_entries(&dir, self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(inv) = read_json::<Invoice>(&path)? {
-                out.push(inv);
-            }
-        }
+        let mut out = self.list_docs::<Invoice>()?;
         out.sort_by(|a, b| {
             a.created_at
                 .cmp(&b.created_at)
@@ -292,7 +404,7 @@ impl Store {
     }
 
     pub fn get_invoice(&self, id: Uuid) -> Result<Option<Invoice>, StoreError> {
-        read_json(&self.invoice_path(id))
+        self.get_doc::<Invoice>(&id.to_string())
     }
 
     /// First invoice with this number (numbers are sequential but a restored
@@ -310,19 +422,11 @@ impl Store {
     }
 
     pub fn put_invoice(&self, invoice: &Invoice) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        std::fs::create_dir_all(self.root.join("invoices"))?;
-        write_json(&self.invoice_path(invoice.id), invoice)
+        self.put_doc(invoice)
     }
 
     pub fn delete_invoice(&self, id: Uuid) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        let path = self.invoice_path(id);
-        if !path.exists() {
-            return Err(StoreError::NotFound);
-        }
-        std::fs::remove_file(&path)?;
-        Ok(())
+        self.remove_doc::<Invoice>(&id.to_string())
     }
 
     /// Atomically assign the next invoice number and persist under one writer
@@ -336,37 +440,23 @@ impl Store {
 
     // ----------------------------------------------------------- categories --
 
-    fn category_path(&self, id: Uuid) -> PathBuf {
-        self.root.join("categories").join(format!("{id}.json"))
-    }
-
     pub fn list_categories(&self) -> Result<Vec<Category>, StoreError> {
-        let mut out = Vec::new();
-        for path in dir_entries(&self.root.join("categories"), self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(c) = read_json::<Category>(&path)? {
-                out.push(c);
-            }
-        }
+        let mut out = self.list_docs::<Category>()?;
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
     }
 
     pub fn get_category(&self, id: Uuid) -> Result<Option<Category>, StoreError> {
-        read_json(&self.category_path(id))
+        self.get_doc::<Category>(&id.to_string())
     }
 
     pub fn put_category(&self, category: &Category) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        write_json(&self.category_path(category.id), category)
+        self.put_doc(category)
     }
 
     pub fn delete_category(&self, id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
-        let path = self.category_path(id);
-        if !path.exists() {
+        if !self.doc_path::<Category>(&id.to_string()).exists() {
             return Err(StoreError::NotFound);
         }
         if self
@@ -378,136 +468,74 @@ impl Store {
                 "category still used by expenses".into(),
             ));
         }
-        std::fs::remove_file(&path)?;
-        Ok(())
+        self.remove_doc_locked::<Category>(&id.to_string())
     }
 
     // ------------------------------------------------------------- expenses --
 
-    fn expense_path(&self, id: Uuid) -> PathBuf {
-        self.root.join("expenses").join(format!("{id}.json"))
-    }
-
     pub fn list_expenses(&self) -> Result<Vec<Expense>, StoreError> {
-        let mut out = Vec::new();
-        for path in dir_entries(&self.root.join("expenses"), self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(e) = read_json::<Expense>(&path)? {
-                out.push(e);
-            }
-        }
+        let mut out = self.list_docs::<Expense>()?;
         out.sort_by_key(|e| std::cmp::Reverse((e.date, e.created_at)));
         Ok(out)
     }
 
     pub fn get_expense(&self, id: Uuid) -> Result<Option<Expense>, StoreError> {
-        read_json(&self.expense_path(id))
+        self.get_doc::<Expense>(&id.to_string())
     }
 
     pub fn put_expense(&self, expense: &Expense) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        write_json(&self.expense_path(expense.id), expense)
+        self.put_doc(expense)
     }
 
     pub fn delete_expense(&self, id: Uuid) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        let path = self.expense_path(id);
-        if !path.exists() {
-            return Err(StoreError::NotFound);
-        }
-        std::fs::remove_file(&path)?;
-        Ok(())
+        self.remove_doc::<Expense>(&id.to_string())
     }
 
     // ---------------------------------------------------------- submissions --
 
-    fn submission_path(&self, id: Uuid) -> PathBuf {
-        self.root.join("submissions").join(format!("{id}.json"))
-    }
-
     pub fn list_submissions(&self) -> Result<Vec<Submission>, StoreError> {
-        let dir = self.root.join("submissions");
-        let mut out = Vec::new();
-        if !dir.exists() {
-            return Ok(out);
-        }
-        for path in dir_entries(&dir, self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(s) = read_json::<Submission>(&path)? {
-                out.push(s);
-            }
-        }
+        let mut out = self.list_docs::<Submission>()?;
         out.sort_by_key(|s| std::cmp::Reverse(s.week_start));
         Ok(out)
     }
 
     pub fn get_submission(&self, id: Uuid) -> Result<Option<Submission>, StoreError> {
-        read_json(&self.submission_path(id))
+        self.get_doc::<Submission>(&id.to_string())
     }
 
     pub fn put_submission(&self, submission: &Submission) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        std::fs::create_dir_all(self.root.join("submissions"))?;
-        write_json(&self.submission_path(submission.id), submission)
+        self.put_doc(submission)
     }
 
     // --------------------------------------------------------------- claims --
 
-    fn claim_path(&self, id: Uuid) -> PathBuf {
-        self.root.join("claims").join(format!("{id}.json"))
-    }
-
     pub fn list_claims(&self) -> Result<Vec<ExpenseClaim>, StoreError> {
-        let dir = self.root.join("claims");
-        let mut out = Vec::new();
-        if !dir.exists() {
-            return Ok(out);
-        }
-        for path in dir_entries(&dir, self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(c) = read_json::<ExpenseClaim>(&path)? {
-                out.push(c);
-            }
-        }
+        let mut out = self.list_docs::<ExpenseClaim>()?;
         out.sort_by_key(|c| std::cmp::Reverse(c.created_at));
         Ok(out)
     }
 
     pub fn get_claim(&self, id: Uuid) -> Result<Option<ExpenseClaim>, StoreError> {
-        read_json(&self.claim_path(id))
+        self.get_doc::<ExpenseClaim>(&id.to_string())
     }
 
     pub fn put_claim(&self, claim: &ExpenseClaim) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        std::fs::create_dir_all(self.root.join("claims"))?;
-        write_json(&self.claim_path(claim.id), claim)
+        self.put_doc(claim)
     }
 
     // ---------------------------------------------------------------- timers --
 
-    fn timer_path(&self, user_id: Uuid) -> PathBuf {
-        self.root.join("timers").join(format!("{user_id}.json"))
-    }
-
     pub fn get_timer(&self, user_id: Uuid) -> Result<Option<Timer>, StoreError> {
-        read_json(&self.timer_path(user_id))
+        self.get_doc::<Timer>(&user_id.to_string())
     }
 
     pub fn put_timer(&self, timer: &Timer) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        std::fs::create_dir_all(self.root.join("timers"))?;
-        write_json(&self.timer_path(timer.user_id), timer)
+        self.put_doc(timer)
     }
 
     pub fn delete_timer(&self, user_id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
-        let path = self.timer_path(user_id);
+        let path = self.doc_path::<Timer>(&user_id.to_string());
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
@@ -553,83 +581,42 @@ impl Store {
 
     // ------------------------------------------------------------- schedules --
 
-    fn schedule_path(&self, id: Uuid) -> PathBuf {
-        self.root.join("schedules").join(format!("{id}.json"))
-    }
-
     pub fn list_schedules(&self) -> Result<Vec<RecurringSchedule>, StoreError> {
-        let dir = self.root.join("schedules");
-        let mut out = Vec::new();
-        if !dir.exists() {
-            return Ok(out);
-        }
-        for path in dir_entries(&dir, self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(s) = read_json::<RecurringSchedule>(&path)? {
-                out.push(s);
-            }
-        }
+        let mut out = self.list_docs::<RecurringSchedule>()?;
         out.sort_by_key(|s| s.created_at);
         Ok(out)
     }
 
     pub fn get_schedule(&self, id: Uuid) -> Result<Option<RecurringSchedule>, StoreError> {
-        read_json(&self.schedule_path(id))
+        self.get_doc::<RecurringSchedule>(&id.to_string())
     }
 
     pub fn put_schedule(&self, s: &RecurringSchedule) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        std::fs::create_dir_all(self.root.join("schedules"))?;
-        write_json(&self.schedule_path(s.id), s)
+        self.put_doc(s)
     }
 
     pub fn delete_schedule(&self, id: Uuid) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        let path = self.schedule_path(id);
-        if !path.exists() {
-            return Err(StoreError::NotFound);
-        }
-        std::fs::remove_file(&path)?;
-        Ok(())
+        self.remove_doc::<RecurringSchedule>(&id.to_string())
     }
 
     // ------------------------------------------------------------ customers --
 
-    fn customer_path(&self, id: Uuid) -> PathBuf {
-        self.root.join("customers").join(format!("{id}.json"))
-    }
-
     pub fn list_customers(&self) -> Result<Vec<Customer>, StoreError> {
-        let mut out = Vec::new();
-        for path in dir_entries(&self.root.join("customers"), self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(c) = read_json::<Customer>(&path)? {
-                out.push(c);
-            }
-        }
+        let mut out = self.list_docs::<Customer>()?;
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
     }
 
     pub fn get_customer(&self, id: Uuid) -> Result<Option<Customer>, StoreError> {
-        read_json(&self.customer_path(id))
+        self.get_doc::<Customer>(&id.to_string())
     }
 
     pub fn put_customer(&self, customer: &Customer) -> Result<(), StoreError> {
-        let _guard = self.write_lock()?;
-        write_json(&self.customer_path(customer.id), customer)
+        self.put_doc(customer)
     }
 
     pub fn delete_customer(&self, id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
-        let path = self.customer_path(id);
-        if !path.exists() {
-            return Err(StoreError::NotFound);
-        }
         // A customer owns its project folder; removing it would orphan those
         // documents, so the caller must empty it first.
         let projects = self.list_projects(id).unwrap_or_default();
@@ -643,8 +630,12 @@ impl Store {
                 "customer still has time entries; delete or re-point them first".into(),
             ));
         }
+        let doc = self.doc_path::<Customer>(&id.to_string());
+        if !doc.exists() {
+            return Err(StoreError::NotFound);
+        }
         std::fs::remove_dir_all(self.root.join("customers").join(id.to_string()))?;
-        std::fs::remove_file(&path)?;
+        std::fs::remove_file(&doc)?;
         Ok(())
     }
 
@@ -665,19 +656,11 @@ impl Store {
         let customer = self
             .get_customer(customer_id)?
             .ok_or(StoreError::NotFound)?;
-        let mut out = Vec::new();
-        let dir = self.projects_dir(customer_id);
-        if !dir.exists() {
-            return Ok(out);
-        }
-        for path in dir_entries(&dir, self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(p) = self.read_project(&path, &customer)? {
-                out.push(p);
-            }
-        }
+        // The nested-collection case (#101): parent key + injected decode hook
+        // (`read_project` resolves pre-#11 documents from the customer).
+        let mut out = self.walk_docs(&self.projects_dir(customer_id), |path| {
+            self.read_project(path, &customer)
+        })?;
         out.sort_by(|a, b| a.code.cmp(&b.code));
         Ok(out)
     }
@@ -760,19 +743,10 @@ impl Store {
         customer_id: Uuid,
         project_code: &str,
     ) -> Result<Vec<Task>, StoreError> {
-        let dir = self.tasks_dir(customer_id, project_code);
-        let mut out = Vec::new();
-        if !dir.exists() {
-            return Ok(out);
-        }
-        for path in dir_entries(&dir, self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(t) = read_json::<Task>(&path)? {
-                out.push(t);
-            }
-        }
+        let mut out = self.walk_docs(
+            &self.tasks_dir(customer_id, project_code),
+            read_json::<Task>,
+        )?;
         out.sort_by(|a, b| a.code.cmp(&b.code));
         Ok(out)
     }
@@ -828,19 +802,7 @@ impl Store {
     }
 
     pub fn list_by_date(&self, date: NaiveDate) -> Result<Vec<Entry>, StoreError> {
-        let dir = self.day_dir(date);
-        let mut out = Vec::new();
-        if !dir.exists() {
-            return Ok(out);
-        }
-        for path in dir_entries(&dir, self.max_docs)? {
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            if let Some(e) = read_json::<Entry>(&path)? {
-                out.push(e);
-            }
-        }
+        let mut out = self.walk_docs(&self.day_dir(date), read_json::<Entry>)?;
         out.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
         Ok(out)
     }
@@ -970,7 +932,8 @@ impl Store {
         due: NaiveDate,
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
-        let Some(mut invoice) = read_json::<Invoice>(&self.invoice_path(id))? else {
+        let Some(mut invoice) = read_json::<Invoice>(&self.doc_path::<Invoice>(&id.to_string()))?
+        else {
             return Err(StoreError::NotFound);
         };
         if invoice.status != InvoiceStatus::Draft {
@@ -981,7 +944,7 @@ impl Store {
         invoice.status = InvoiceStatus::Issued;
         invoice.issued_at = Some(now);
         invoice.due_date = Some(due);
-        write_json(&self.invoice_path(id), &invoice)?;
+        write_json(&self.doc_path::<Invoice>(&id.to_string()), &invoice)?;
         Ok(invoice)
     }
 
@@ -993,7 +956,8 @@ impl Store {
         reference: String,
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
-        let Some(mut invoice) = read_json::<Invoice>(&self.invoice_path(id))? else {
+        let Some(mut invoice) = read_json::<Invoice>(&self.doc_path::<Invoice>(&id.to_string()))?
+        else {
             return Err(StoreError::NotFound);
         };
         if invoice.status != InvoiceStatus::Issued {
@@ -1004,7 +968,7 @@ impl Store {
         invoice.status = InvoiceStatus::Paid;
         invoice.paid_at = Some(now);
         invoice.payment_reference = reference;
-        write_json(&self.invoice_path(id), &invoice)?;
+        write_json(&self.doc_path::<Invoice>(&id.to_string()), &invoice)?;
         Ok(invoice)
     }
 
@@ -1019,7 +983,10 @@ impl Store {
         let _guard = self.write_lock()?;
         let invoice = self.create_invoice_inner(invoice)?;
         std::fs::create_dir_all(self.root.join("schedules"))?;
-        write_json(&self.schedule_path(schedule.id), schedule)?;
+        write_json(
+            &self.doc_path::<RecurringSchedule>(&schedule.id.to_string()),
+            schedule,
+        )?;
         Ok(invoice)
     }
 
@@ -1051,7 +1018,7 @@ impl Store {
         let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.day_dir(entry.date))?;
         write_json(&self.entry_path(entry.date, entry.id), entry)?;
-        let path = self.timer_path(user_id);
+        let path = self.doc_path::<Timer>(&user_id.to_string());
         if path.exists() {
             std::fs::remove_file(path)?;
         }
@@ -1065,7 +1032,7 @@ impl Store {
         if !self.list_users()?.is_empty() {
             return Err(StoreError::AlreadyExists("initialised".into()));
         }
-        write_json(&self.user_path(user.id), user)
+        write_json(&self.doc_path::<User>(&user.id.to_string()), user)
     }
 
     /// Number + persist an invoice with the lock **already** held.
@@ -1076,7 +1043,7 @@ impl Store {
         let n = stored.max(self.list_invoices()?.len() as u64) + 1;
         write_json(&seq_path, &n)?;
         invoice.number = format!("INV-{n:04}");
-        write_json(&self.invoice_path(invoice.id), &invoice)?;
+        write_json(&self.doc_path::<Invoice>(&invoice.id.to_string()), &invoice)?;
         Ok(invoice)
     }
 }

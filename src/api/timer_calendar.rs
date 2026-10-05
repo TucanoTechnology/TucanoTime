@@ -127,19 +127,19 @@ pub async fn calendar_events(
         .await?;
         return Ok(Json(serde_json::json!({ "events": events })).into_response());
     }
-    let source = app
-        .vault
-        .as_ref()
-        .and_then(|v| v.get("calendar.ics_url"))
-        .or_else(|| std::env::var("TUCANO_CALENDAR_ICS").ok())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            ApiError::new(
-                StatusCode::NOT_FOUND,
-                "calendar_not_configured",
-                "no calendar feed is configured",
-            )
-        })?;
+    let source = crate::providers::resolve_secret(
+        app.vault.as_deref(),
+        "calendar.ics_url",
+        "TUCANO_CALENDAR_ICS",
+    )
+    .filter(|s| !s.is_empty())
+    .ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "calendar_not_configured",
+            "no calendar feed is configured",
+        )
+    })?;
     let text = blocking("calendar fetch", move || {
         crate::calendar::fetch_ics(&source).map_err(|_| {
             ApiError::new(
@@ -178,32 +178,25 @@ pub async fn calendar_oauth_start(
             "provider must be google or microsoft",
         ));
     }
-    let get = |key: &str, env: &str| -> Option<String> {
-        app.vault
-            .as_ref()
-            .and_then(|v| v.get(key))
-            .or_else(|| std::env::var(env).ok())
-    };
     let cfg_key = match provider.as_str() {
         "google" => "google_calendar_client_id",
         _ => "ms_calendar_client_id",
     };
-    let client_id = app
-        .cfg()
-        .get_optional_str(cfg_key, &crate::appconfig::process_env)
-        .or_else(|| {
-            get(
-                &format!("calendar.{provider}.client_id"),
-                &provider_env(&provider, "CLIENT_ID"),
-            )
-        })
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            ApiError::validation(vec![crate::domain::FieldError::new(
-                "client_id",
-                "the provider's OAuth client id is not configured in the vault",
-            )])
-        })?;
+    let cfg = app.cfg();
+    let client_id = crate::providers::resolve_setting(
+        &cfg,
+        app.vault.as_deref(),
+        cfg_key,
+        &format!("calendar.{provider}.client_id"),
+        &provider_env(&provider, "CLIENT_ID"),
+    )
+    .filter(|s| !s.is_empty())
+    .ok_or_else(|| {
+        ApiError::validation(vec![crate::domain::FieldError::new(
+            "client_id",
+            "the provider's OAuth client id is not configured in the vault",
+        )])
+    })?;
     let redirect = app
         .cfg()
         .get_str("calendar_oauth_redirect", &crate::appconfig::process_env);
