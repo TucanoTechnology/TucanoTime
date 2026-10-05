@@ -94,14 +94,11 @@ impl StripeProvider {
         }
     }
 
-    pub fn from_sources(
-        vault: Option<&crate::vault::SecretVault>,
-        cfg: &crate::appconfig::AppConfig,
-    ) -> Option<Self> {
+    pub fn from_sources(vault: Option<&crate::vault::SecretVault>) -> Option<Self> {
         let secret = vault
             .and_then(|v| v.get("stripe.webhook_secret"))
             .or_else(|| std::env::var("TUCANO_STRIPE_WEBHOOK_SECRET").ok());
-        let fake = cfg.get_bool_flag("stripe_demo", &crate::appconfig::process_env);
+        let fake = demo_flag("TUCANO_STRIPE_FAKE", secret.is_some());
         if fake || secret.is_some() {
             Some(Self {
                 signing_secret: secret,
@@ -113,15 +110,29 @@ impl StripeProvider {
     }
 }
 
+/// Demo-mode webhook verification bypass: **env-only** (never config.json, so
+/// `PUT /admin/config` cannot turn it on remotely) and never honoured when a
+/// real webhook secret is configured or `TUCANO_ENV=production` (review A3).
+fn demo_flag(env: &str, has_real_secret: bool) -> bool {
+    if std::env::var(env).is_err() {
+        return false;
+    }
+    if has_real_secret || std::env::var("TUCANO_ENV").as_deref() == Ok("production") {
+        tracing::error!(
+            "{env} set while a real webhook secret exists / in production — demo bypass DISABLED"
+        );
+        return false;
+    }
+    tracing::warn!("{env}: webhook signature verification is DISABLED (demo mode, dev only)");
+    true
+}
+
 impl PayPalProvider {
-    pub fn from_sources(
-        vault: Option<&crate::vault::SecretVault>,
-        cfg: &crate::appconfig::AppConfig,
-    ) -> Option<Self> {
+    pub fn from_sources(vault: Option<&crate::vault::SecretVault>) -> Option<Self> {
         let secret = vault
             .and_then(|v| v.get("paypal.webhook_secret"))
             .or_else(|| std::env::var("TUCANO_PAYPAL_WEBHOOK_SECRET").ok());
-        let fake = cfg.get_bool_flag("paypal_demo", &crate::appconfig::process_env);
+        let fake = demo_flag("TUCANO_PAYPAL_FAKE", secret.is_some());
         if fake || secret.is_some() {
             Some(Self {
                 signing_secret: secret,
@@ -135,15 +146,12 @@ impl PayPalProvider {
 
 /// Builds the registry from vault/env: a provider is enabled only when its
 /// webhook secret (or explicit fake flag) is present.
-pub fn registry_from_vault(
-    vault: Option<&crate::vault::SecretVault>,
-    cfg: &crate::appconfig::AppConfig,
-) -> Arc<PaymentRegistry> {
+pub fn registry_from_vault(vault: Option<&crate::vault::SecretVault>) -> Arc<PaymentRegistry> {
     let mut providers: Vec<Arc<dyn PaymentProvider>> = Vec::new();
-    if let Some(p) = StripeProvider::from_sources(vault, cfg) {
+    if let Some(p) = StripeProvider::from_sources(vault) {
         providers.push(Arc::new(p));
     }
-    if let Some(p) = PayPalProvider::from_sources(vault, cfg) {
+    if let Some(p) = PayPalProvider::from_sources(vault) {
         providers.push(Arc::new(p));
     }
     Arc::new(PaymentRegistry::new(providers))
@@ -181,12 +189,31 @@ pub fn sign(secret: &str, body: &str) -> String {
 fn verify(secret: Option<&String>, signature: &str, body: &str) -> Result<(), PaymentError> {
     let secret = secret.ok_or(PaymentError::BadSignature)?;
     let got = signature.strip_prefix("sha256=").unwrap_or(signature);
-    let want = sign(secret, body);
-    // Constant-ish comparison over equal-length hex digests.
-    if got.len() != want.len() || !got.bytes().zip(want.bytes()).all(|(a, b)| a == b) {
-        return Err(PaymentError::BadSignature);
+    let tag = hex_decode(got).ok_or(PaymentError::BadSignature)?;
+    // hmac crate's verify_slice is the constant-time primitive (review A7).
+    let mut m = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("hmac any key");
+    m.update(body.as_bytes());
+    m.verify_slice(&tag).map_err(|_| PaymentError::BadSignature)
+}
+
+/// Strict lowercase-hex decoder (a malformed signature is a bad signature).
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    let b = s.as_bytes();
+    if !b.len().is_multiple_of(2) {
+        return None;
     }
-    Ok(())
+    let digit = |c: u8| -> Option<u8> {
+        match c {
+            b'0'..=b'9' => Some(c - b'0'),
+            b'a'..=b'f' => Some(c - b'a' + 10),
+            _ => None,
+        }
+    };
+    let mut out = Vec::with_capacity(b.len() / 2);
+    for pair in b.chunks(2) {
+        out.push(digit(pair[0])? << 4 | digit(pair[1])?);
+    }
+    Some(out)
 }
 
 /// Shared webhook decoding: verify, then accept only paid checkout events.
@@ -202,16 +229,21 @@ fn decode(
     }
     let v: serde_json::Value = serde_json::from_str(body).map_err(|_| PaymentError::BadPayload)?;
     let event = v.get("type").and_then(|t| t.as_str()).unwrap_or_default();
-    // Accept "<something>.checkout.completed" and Stripe's
-    // "checkout.session.completed" (which has no leading prefix).
-    let completed = event == "checkout.session.completed" || event.ends_with(".checkout.completed");
-    if !completed {
+    // Exact terminal-event vocabulary per provider (review B10): a suffix
+    // match lets unrelated "*\.checkout.completed" events settle invoices.
+    let terminal = match provider {
+        "stripe" => event == "checkout.session.completed",
+        "paypal" => event == "paypal.checkout.completed",
+        _ => false,
+    };
+    if !terminal {
         return Ok(None); // unrelated but valid
     }
     let status = v
         .get("payment_status")
         .and_then(|s| s.as_str())
-        .unwrap_or("");
+        .unwrap_or("")
+        .to_ascii_lowercase(); // PayPal posts "COMPLETED"; Stripe "paid"
     if !status.is_empty() && status != "paid" && status != "completed" {
         return Ok(None);
     }
@@ -331,6 +363,23 @@ mod tests {
             p.parse_webhook(&body, "sha256=deadbeef"),
             Err(PaymentError::BadSignature)
         ));
+    }
+
+    #[test]
+    fn suffix_spoof_events_are_not_terminal() {
+        // Review B10: "*\.checkout.completed" suffixes must not settle.
+        let p = stripe("whsec");
+        let body = "{\"type\":\"evil.checkout.completed\",\"client_reference_id\":\"stripe_1\",\"metadata\":{\"invoice_number\":\"INV-1\"}}";
+        let sig = sign("whsec", body);
+        assert_eq!(p.parse_webhook(body, &sig).unwrap(), None);
+        // PayPal's real terminal name differs from Stripe's.
+        let pp = PayPalProvider {
+            signing_secret: Some("psec".into()),
+            fake: false,
+        };
+        let body2 = "{\"type\":\"paypal.checkout.completed\",\"payment_status\":\"COMPLETED\",\"client_reference_id\":\"paypal_1\",\"metadata\":{\"invoice_number\":\"INV-2\"}}";
+        let sig2 = sign("psec", body2);
+        assert!(pp.parse_webhook(body2, &sig2).unwrap().is_some());
     }
 
     #[test]

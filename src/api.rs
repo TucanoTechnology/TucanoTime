@@ -165,7 +165,7 @@ impl AppState {
                 None => Arc::new(crate::email::DisabledEmailSender),
             };
         // Payment providers (#34): enabled when their webhook secrets exist.
-        let payments = crate::payments::registry_from_vault(vault.as_deref(), &cfg);
+        let payments = crate::payments::registry_from_vault(vault.as_deref());
         // Accounting providers (#33): enabled when an OAuth token exists.
         let accounting = crate::accounting::registry_from_vault(vault.as_deref(), &cfg);
         // SSO identity providers (#32): enabled when OIDC/SAML config exists.

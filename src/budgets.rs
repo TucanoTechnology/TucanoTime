@@ -121,9 +121,16 @@ impl Job for BudgetAlertJob {
                 }
             }
         }
-        let today = now.date_naive();
-        let from = today - chrono::Duration::days(3650);
-        let entries = self.store.list_range(from, today).unwrap_or_default();
+        // Full lifetime scan: budgets are lifetime totals, and list_range's
+        // MAX_RANGE_DAYS window made the old query always fail + be swallowed
+        // — the alert never fired (review B1). Uses the job-only scan API.
+        let entries = match self.store.list_all_entries() {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e, "budget job: entry scan failed");
+                return;
+            }
+        };
         let users = self.store.list_users().unwrap_or_default();
         let admins: Vec<Uuid> = users
             .iter()
@@ -179,6 +186,62 @@ mod tests {
                 budget_amount_minor: None,
             },
         )
+    }
+
+    #[test]
+    fn job_alerts_on_entries_older_than_the_range_window() {
+        // Review B1 regression: the job must see entries beyond MAX_RANGE_DAYS.
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(dir.path().join("data")).unwrap());
+        let admin = User {
+            id: uuid::Uuid::new_v4(),
+            name: "Boss".into(),
+            email: "boss@x.test".into(),
+            role: crate::auth::Role::Admin,
+            active: true,
+            default_rate_minor: 0,
+            cost_rate_minor: 0,
+            password_hash: String::new(),
+            created_at: Utc::now(),
+        };
+        store.put_user(&admin).unwrap();
+        let (cid, project) = proj(Some(1000)); // 10h budget
+        store
+            .put_customer(&Customer {
+                id: cid,
+                name: "ACME".into(),
+                currency: Currency("EUR".into()),
+                default_rate_minor: 6000,
+                active: true,
+                email: String::new(),
+            })
+            .unwrap();
+        store.put_project(&project).unwrap();
+        let long_ago = Utc::now().date_naive() - chrono::Duration::days(800);
+        store
+            .put_entry(&Entry {
+                id: uuid::Uuid::new_v4(),
+                date: long_ago,
+                customer_id: cid,
+                user_id: Some(admin.id),
+                project_code: project.code.clone(),
+                task_code: None,
+                hours: crate::domain::Hours(1200), // 12h > budget
+                note: String::new(),
+                billable: true,
+                source: crate::domain::Source::Manual,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .unwrap();
+        BudgetAlertJob::new(store.clone()).run(Utc::now());
+        let notes = store.list_notifications(admin.id).unwrap();
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.kind == "budget" && n.title.contains("over budget")),
+            "job must alert even for old entries: {notes:?}"
+        );
     }
 
     #[test]

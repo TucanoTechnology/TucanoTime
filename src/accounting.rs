@@ -231,7 +231,7 @@ impl AccountingSync for XeroProvider {
     fn push_invoice(&self, doc: &InvoiceDoc, suggested_id: &str) -> Result<String, SyncError> {
         let body = serde_json::json!({
             "Invoices": [{
-                "Type": "ACCPAY",
+                "Type": "ACCREC", // sales invoice (review B9: ACCPAY is a bill)
                 "InvoiceNumber": doc.invoice.number,
                 "ContactName": doc.customer.name,
                 "Date": doc.invoice.period_to.format("%Y-%m-%d").to_string(),

@@ -109,8 +109,6 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/reports/summary", get(api::summary))
         .route("/reports/export.csv", get(api::export_csv))
-        .route("/reports/profitability", get(api::profitability))
-        .route("/reports/budgets", get(api::budget_report))
         .route(
             "/categories",
             get(api::list_categories).post(api::create_category),
@@ -163,6 +161,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/users", get(api::list_users).post(api::create_user))
         .route("/users/{id}", axum::routing::delete(api::delete_user))
         .route("/audit", get(api::audit_log))
+        // Management reporting (cost rates, budgets) is admin-only (review A4):
+        // members see their own work via /reports/summary, not margins.
+        .route("/reports/profitability", get(api::profitability))
+        .route("/reports/budgets", get(api::budget_report))
         .route(
             "/invoices",
             get(api::list_invoices).post(api::create_invoice),
@@ -233,8 +235,9 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Baseline security response headers (#48). The docs page loads Swagger UI
-/// from unpkg, so the CSP allowlists it for scripts/styles/fonts.
+/// Baseline security response headers (#48). Swagger UI is vendored under
+/// web/ (review A9) so no third-party origin can ever execute in the admin
+/// GUI's cookie scope — the CSP is now strictly 'self'.
 async fn security_headers(
     req: axum::extract::Request,
     next: axum::middleware::Next,
@@ -249,9 +252,9 @@ async fn security_headers(
     h.insert(X_FRAME_OPTIONS, "DENY".parse().expect("static"));
     h.insert(
         CONTENT_SECURITY_POLICY,
-        "default-src 'self'; script-src 'self' https://unpkg.com; \
-         style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data:; \
-         font-src 'self' https://unpkg.com; connect-src 'self'; frame-ancestors 'none'; \
+        "default-src 'self'; script-src 'self'; \
+         style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
+         font-src 'self'; connect-src 'self'; frame-ancestors 'none'; \
          base-uri 'self'; form-action 'self'"
             .parse()
             .expect("static"),
@@ -277,6 +280,7 @@ async fn csrf_guard(
     // provider signature instead of the cookie+CSRF pair (#34).
     let exempt = path == "/auth/login"
         || path == "/auth/bootstrap"
+        || path == "/auth/sso/assertion" // pre-session; the assertion is its own proof (review A6)
         || path.starts_with("/payments/webhook/");
     if mutating && !exempt {
         let ok = req
@@ -324,7 +328,12 @@ async fn static_assets(uri: axum::http::Uri) -> Response {
     };
     match Assets::get(path) {
         Some(file) => (
-            [(axum::http::header::CONTENT_TYPE, content_type(path))],
+            [
+                (axum::http::header::CONTENT_TYPE, content_type(path)),
+                // Names are stable across image updates, so force a cheap
+                // revalidation instead of heuristic caching (review A10).
+                (axum::http::header::CACHE_CONTROL, "no-cache"),
+            ],
             file.data,
         )
             .into_response(),

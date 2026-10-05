@@ -88,6 +88,27 @@ impl Store {
         lock_timeout: Duration,
     ) -> Result<Self, StoreError> {
         let root = root.as_ref().to_path_buf();
+        // Best-effort hygiene (review D6): a crash between tmp-write and
+        // rename can strand `*.tmp` files; they are not documents.
+        for dir in [
+            "customers",
+            "users",
+            "invoices",
+            "categories",
+            "expenses",
+            "submissions",
+            "claims",
+        ] {
+            prune_tmp_files(&root.join(dir));
+        }
+        prune_tmp_files(&root.join("entries"));
+        if let Ok(days) = std::fs::read_dir(root.join("entries")) {
+            for day in days.filter_map(|e| e.ok()) {
+                if day.path().is_dir() {
+                    prune_tmp_files(&day.path());
+                }
+            }
+        }
         std::fs::create_dir_all(root.join("customers"))?;
         std::fs::create_dir_all(root.join("entries"))?;
         std::fs::create_dir_all(root.join("users"))?;
@@ -282,20 +303,20 @@ impl Store {
         Ok(())
     }
 
-    /// Next sequential invoice number (`INV-0001`, …).
-    pub fn next_invoice_number(&self) -> Result<String, StoreError> {
-        let n = self.list_invoices()?.len() + 1;
-        Ok(format!("INV-{n:04}"))
-    }
-
-    /// Atomically assign the next invoice number and persist it under the
-    /// writer lock, so two processes never mint the same number (#62). The
-    /// caller passes an invoice with a placeholder number.
+    /// Atomically assign the next invoice number and persist under one writer
+    /// lock, so two processes never mint the same number (#62) and a deleted
+    /// invoice never frees its number for reuse (review B3): the sequence is
+    /// kept in `invoices/.seq.json`, never derived from the current count.
     pub fn create_invoice(&self, mut invoice: Invoice) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
-        let n = self.list_invoices()?.len() + 1;
-        invoice.number = format!("INV-{n:04}");
         std::fs::create_dir_all(self.root.join("invoices"))?;
+        let seq_path = self.root.join("invoices").join(".seq.json");
+        let stored: u64 = read_json(&seq_path)?.unwrap_or(0);
+        // max(counter, live count) so a restore of an older counter cannot
+        // reissue a number that is still in use.
+        let n = stored.max(self.list_invoices()?.len() as u64) + 1;
+        write_json(&seq_path, &n)?;
+        invoice.number = format!("INV-{n:04}");
         write_json(&self.invoice_path(invoice.id), &invoice)?;
         Ok(invoice)
     }
@@ -887,6 +908,13 @@ impl Store {
         }))
     }
 
+    /// Every entry document, across all day folders, without the
+    /// `MAX_RANGE_DAYS` window. For load-bearing background jobs (budget
+    /// burn, review B1) — not for HTTP handlers.
+    pub fn list_all_entries(&self) -> Result<Vec<Entry>, StoreError> {
+        self.scan_all_entries()
+    }
+
     fn scan_all_entries(&self) -> Result<Vec<Entry>, StoreError> {
         let dir = self.root.join("entries");
         let mut out = Vec::new();
@@ -912,12 +940,35 @@ impl Store {
     }
 }
 
-/// Read a directory and return its entry paths, bounded by `max` (#50).
-/// Sorting by name keeps listings stable across platforms.
+fn prune_tmp_files(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.filter_map(|e| e.ok()) {
+        let p = e.path();
+        if p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".tmp"))
+            && let Ok(md) = p.metadata()
+            && md.is_file()
+        {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+}
+
+/// Read a directory and return its document paths, bounded by `max` (#50).
+/// Sorting by name keeps listings stable across platforms. Dot files (state
+/// such as `invoices/.seq.json`) and crashed-write `*.tmp` leftovers (review
+/// D6) are **not** documents: they are skipped here and pruned at open.
 fn dir_entries(dir: &Path, max: usize) -> Result<Vec<PathBuf>, StoreError> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
+        .filter(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            !(name.starts_with('.') || name.ends_with(".tmp"))
+        })
         .collect();
     if paths.len() > max {
         return Err(StoreError::TooManyItems);
@@ -979,5 +1030,48 @@ mod tests {
         store.put_customer(&cust()).unwrap(); // 3rd file
         let err = store.list_customers().expect_err("3 > cap of 2");
         assert!(matches!(err, StoreError::TooManyItems), "{err:?}");
+    }
+}
+
+#[cfg(test)]
+mod invoice_seq_tests {
+    use super::*;
+    use crate::domain::{Currency, Invoice, InvoiceStatus};
+
+    fn draft(number: &str) -> Invoice {
+        Invoice {
+            id: Uuid::new_v4(),
+            number: number.into(),
+            customer_id: Uuid::new_v4(),
+            currency: Currency("EUR".into()),
+            period_from: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            period_to: chrono::NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+            lines: vec![],
+            total_minor: 0,
+            status: InvoiceStatus::Draft,
+            created_at: chrono::Utc::now(),
+            issued_at: None,
+            due_date: None,
+            paid_at: None,
+            payment_reference: String::new(),
+        }
+    }
+
+    #[test]
+    fn deleted_invoice_never_frees_its_number() {
+        // Review B3: number must be monotonic, not count-derived.
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let a = store.create_invoice(draft("_")).unwrap();
+        let b = store.create_invoice(draft("_")).unwrap();
+        assert_eq!(
+            (a.number.as_str(), b.number.as_str()),
+            ("INV-0001", "INV-0002")
+        );
+        store.delete_invoice(a.id).unwrap();
+        let c = store.create_invoice(draft("_")).unwrap();
+        assert_eq!(c.number, "INV-0003", "numbers must not be recycled");
+        // The counter file is not mistaken for an invoice document.
+        assert_eq!(store.list_invoices().unwrap().len(), 2);
     }
 }
