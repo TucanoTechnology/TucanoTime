@@ -109,7 +109,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("TUCANO_SESSION_SECRET_FILE").ok(),
         production,
     );
-    let session = tucano_time::auth::make_session(secret, production)?;
+    // Cookie Secure is its own axis (review A5): default to on in production,
+    // off elsewhere; TUCANO_SECURE_COOKIES=0 permits plain-HTTP LAN serving.
+    let secure_cookies = std::env::var("TUCANO_SECURE_COOKIES")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| s != "0" && !s.eq_ignore_ascii_case("false"))
+        .unwrap_or(production);
+    let session = tucano_time::auth::make_session(secret, production, secure_cookies)?;
 
     // Vault: hard-fail when the store exists but the key cannot open it
     // (#94 — never start with a silently disabled Settings tab).

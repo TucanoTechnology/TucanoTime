@@ -28,9 +28,6 @@ pub enum Source {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// `true` when the env var is *present at all* (existing demo-flag
-    /// semantics) or when the file says true.
-    BoolFlag,
     Int {
         min: i64,
         max: i64,
@@ -120,18 +117,6 @@ pub const KEYS: &[KeyDef] = &[
         },
         description: "Per-collection document cap before writes are refused",
     },
-    KeyDef {
-        name: "stripe_demo",
-        env: "TUCANO_STRIPE_FAKE",
-        kind: Kind::BoolFlag,
-        description: "Demo mode: accept Stripe webhooks without signature verification (NEVER for production)",
-    },
-    KeyDef {
-        name: "paypal_demo",
-        env: "TUCANO_PAYPAL_FAKE",
-        kind: Kind::BoolFlag,
-        description: "Demo mode: accept PayPal webhooks without signature verification (NEVER for production)",
-    },
 ];
 
 pub fn key_def(name: &str) -> Option<&'static KeyDef> {
@@ -173,21 +158,17 @@ impl AppConfig {
     }
 
     fn env_lookup(env: &dyn Fn(&str) -> Option<String>, def: &KeyDef) -> Option<String> {
-        env(def.env).filter(|s| !s.is_empty() || def.kind == Kind::BoolFlag)
+        env(def.env).filter(|s| !s.is_empty())
     }
 
-    /// Resolve one key with precedence env > file > default. `env_fn` returns
-    /// `Some(_)` when the variable is set (even to "") so `BoolFlag` keeps the
-    /// "present means true" semantics.
+    /// Resolve one key with precedence env > file > default.
     pub fn resolve(
         &self,
         def: &'static KeyDef,
         env: &dyn Fn(&str) -> Option<String>,
     ) -> (Value, Source) {
         if let Some(raw) = Self::env_lookup(env, def) {
-            let v = match def.kind {
-                Kind::BoolFlag => Value::Bool(true), // presence = on (matches old env semantics)
-                Kind::Int { min, max, .. } => raw
+            let v = match def.kind {                Kind::Int { min, max, .. } => raw
                     .parse::<i64>()
                     .ok()
                     .filter(|v| (min..=max).contains(v))
@@ -208,7 +189,6 @@ impl AppConfig {
             return (v.clone(), Source::File);
         }
         let d = match def.kind {
-            Kind::BoolFlag => Value::Bool(false),
             Kind::Int { default, .. } => Value::from(default),
             Kind::Str { default } => Value::String(default.to_string()),
             Kind::OptionalStr | Kind::Csv => Value::Null,
@@ -242,10 +222,6 @@ impl AppConfig {
             _ => None,
         }
     }
-    pub fn get_bool_flag(&self, name: &str, env: &dyn Fn(&str) -> Option<String>) -> bool {
-        let def = key_def(name).expect("whitelisted key");
-        matches!(self.resolve(def, env).0, Value::Bool(true))
-    }
     pub fn get_csv(&self, name: &str, env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
         let def = key_def(name).expect("whitelisted key");
         match self.resolve(def, env).0 {
@@ -263,7 +239,6 @@ impl AppConfig {
     /// normalised value to store, or an error message for the API.
     pub fn validate(def: &'static KeyDef, value: &Value) -> Result<Value, String> {
         match (def.kind, value) {
-            (Kind::BoolFlag, Value::Bool(b)) => Ok(Value::Bool(*b)),
             (Kind::Int { min, max, .. }, Value::Number(n)) => match n.as_i64() {
                 Some(v) if (min..=max).contains(&v) => Ok(Value::from(v)),
                 Some(v) => Err(format!("{v} outside {min}..={max}")),
@@ -286,7 +261,6 @@ impl AppConfig {
                 "{} expects {}",
                 def.name,
                 match def.kind {
-                    Kind::BoolFlag => "a boolean",
                     Kind::Int { .. } => "an integer",
                     Kind::Csv | Kind::Str { .. } | Kind::OptionalStr => "a string",
                 }
@@ -330,7 +304,6 @@ impl AppConfig {
             .map(|def| {
                 let (value, source) = self.resolve(def, env);
                 let default = match def.kind {
-                    Kind::BoolFlag => Value::Bool(false),
                     Kind::Int { default, .. } => Value::from(default),
                     Kind::Str { default } => Value::String(default.to_string()),
                     Kind::OptionalStr | Kind::Csv => Value::Null,
@@ -396,16 +369,6 @@ mod tests {
         let (v, src) = cfg.resolve(key_def("reminder_days").unwrap(), &env);
         assert_eq!(v, Value::from(3));
         assert_eq!(src, Source::Env);
-    }
-
-    #[test]
-    fn bool_flag_present_means_true() {
-        let cfg = AppConfig::empty();
-        let env = env_from(&[("TUCANO_STRIPE_FAKE", "")]);
-        assert!(cfg.get_bool_flag("stripe_demo", &env));
-        let file_cfg = file(r#"{"paypal_demo": true}"#);
-        assert!(file_cfg.get_bool_flag("paypal_demo", &env_from(&[])));
-        assert!(!cfg.get_bool_flag("paypal_demo", &env_from(&[])));
     }
 
     #[test]

@@ -8,12 +8,18 @@ on:
 permissions:
   contents: read
 
+# Fork-PR guard (review A1): these jobs run on SELF-HOSTED runners, where an
+# untrusted fork PR means arbitrary code executing on org infra with a live
+# token. Same-repo branches and main pushes run normally; a fork contribution
+# is verified after a member pushes its branch.
+
 # Self-hosted, as in every other workflow in the organisation: GitHub-hosted
 # runners are billing-gated on this account. The lint/test job runs inside the
 # same pinned Rust image the Dockerfile builds with, so CI, image and local
 # `cargo test` share one toolchain.
 jobs:
   lint-test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
     container:
       image: rust:1.98.0-slim-trixie
@@ -31,6 +37,7 @@ jobs:
         run: cargo test --all-targets
 
   build-image:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Checkout
@@ -41,6 +48,7 @@ jobs:
         run: docker build --pull -t tucanotime:${{ github.sha }} .
 
   actionlint:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Checkout
@@ -53,6 +61,7 @@ jobs:
   # digest is pinned (matching the sibling project's supply-chain discipline)
   # so a tag re-push cannot silently change the scanner.
   secret-scan:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Checkout full history
@@ -66,6 +75,7 @@ jobs:
   # Supply-chain (#53): dependency advisories + licenses via cargo-deny (the
   # gate), plus a best-effort CycloneDX SBOM artifact.
   supply-chain:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
     container:
       image: rust:1.98.0-slim-trixie

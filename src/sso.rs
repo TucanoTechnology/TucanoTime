@@ -159,8 +159,12 @@ impl IdentityProvider for SignedTokenIdp {
         } else {
             (payload.to_string(), signature.to_string())
         };
-        let want = sign(&self.secret, &joined);
-        if want.len() != sig.len() || !want.bytes().zip(sig.bytes()).all(|(a, b)| a == b) {
+        // Constant-time verification via the hmac crate (review A7): compare
+        // the decoded tag, never re-encoded strings.
+        let tag = unb64(&sig).map_err(|_| SsoError::BadSignature)?;
+        let mut m = Hmac::<Sha256>::new_from_slice(self.secret.as_bytes()).expect("hmac any key");
+        m.update(joined.as_bytes());
+        if m.verify_slice(&tag).is_err() {
             return Err(SsoError::BadSignature);
         }
         let parts: Vec<&str> = joined.split('.').collect();
@@ -241,10 +245,11 @@ impl IdentityProvider for SamlIdp {
         // unwrap; signature: HMAC over the decoded statement with the pinned
         // cert fingerprint.
         let statement = String::from_utf8(unb64(payload)?).map_err(|_| SsoError::BadAssertion)?;
-        let want = sign(&self.cert_fingerprint, &statement);
-        if want.len() != signature.len()
-            || !want.bytes().zip(signature.bytes()).all(|(a, b)| a == b)
-        {
+        let tag = unb64(signature).map_err(|_| SsoError::BadSignature)?;
+        let mut m =
+            Hmac::<Sha256>::new_from_slice(self.cert_fingerprint.as_bytes()).expect("hmac any key");
+        m.update(statement.as_bytes());
+        if m.verify_slice(&tag).is_err() {
             return Err(SsoError::BadSignature);
         }
         let s: SamlStatement =

@@ -26,6 +26,11 @@ services:
     environment:
       # All optional. Empty/unset means defaults (sessions auto-persist).
       TUCANO_ENV: ${TUCANO_ENV:-production}
+      # Plain HTTP on a LAN (no TLS proxy)? Set TUCANO_SECURE_COOKIES=0 —
+      # browsers drop `Secure` cookies on non-localhost origins, so the
+      # default (secure in production) would break login over http://IP.
+      # This flag is independent of the strong-secret enforcement (review A5).
+      TUCANO_SECURE_COOKIES: ${TUCANO_SECURE_COOKIES:-}
       # Vault master key — pick ONE style; uncomment what you need:
       # TUCANO_SECRET_KEY: ${TUCANO_SECRET_KEY:?set or remove this line}
       # TUCANO_SESSION_SECRET_FILE: /secrets/session.key

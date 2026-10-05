@@ -2171,7 +2171,11 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         !text.contains("dummy-secret-value-1234"),
         "value leaked in list: {text}"
     );
-    assert!(text.contains("1234"), "expected masked hint: {text}");
+    assert!(text.contains("34"), "expected masked hint: {text}");
+    assert!(
+        !text.contains("1234"),
+        "hint must show at most the final 2 chars (review A8)"
+    );
     // member forbidden
     let (s3, _, _) = raw(
         &router,
@@ -3023,4 +3027,59 @@ async fn config_file_changes_request_time_behaviour_without_restart() {
         .unwrap();
     assert_eq!(grp2["value"], "finance-admins");
     assert_eq!(grp2["source"], "file");
+}
+
+#[tokio::test]
+async fn management_reports_are_admin_only() {
+    // Review A4: cost rates / budgets must not be visible to members.
+    let (app, _d) = app().await;
+    json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(json!({"name":"M","email":"repmember@t.local","password":"memberpass1","role":"member"})),
+    )
+    .await;
+    let member = login_cookie(&app.router, "repmember@t.local", "memberpass1").await;
+    for path in ["/reports/profitability", "/reports/budgets"] {
+        let (s, _, _) = raw(&app.router, "GET", path, None, Some(&member)).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{path} must be admin-only");
+    }
+    // Members keep their own summary/export.
+    let (s, _, _) = raw(
+        &app.router,
+        "GET",
+        "/reports/summary?from=2026-10-01&to=2026-10-07",
+        None,
+        Some(&member),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn sso_assertion_is_csrf_exempt_pre_session() {
+    // Review A6: a real IdP POST-binding cannot send X-CSRF-Protection; the
+    // route must reach the handler (400 unknown provider), not 403 csrf.
+    let (app, _d) = app().await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/sso/assertion")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({"provider":"nope","payload":"x"}).to_string(),
+        ))
+        .unwrap();
+    let res = app.router.clone().oneshot(req).await.expect("oneshot");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn demo_flags_cannot_be_persisted_via_config() {
+    // Review A3: webhook-bypass flags are env-only, never config.json.
+    let (app, _d) = app().await;
+    for key in ["stripe_demo", "paypal_demo"] {
+        let (s, body) = json_req(&app, "PUT", "/admin/config", Some(json!({key: true}))).await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{key}: {body}");
+    }
 }

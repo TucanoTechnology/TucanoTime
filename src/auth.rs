@@ -256,16 +256,25 @@ pub fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), St
     Ok(())
 }
 
-pub fn make_session(secret: Option<String>, production: bool) -> Result<Session, String> {
+/// `secure` controls the cookie `Secure` flag; it is resolved separately from
+/// `production` (review A5): an embedded LAN deployment terminates TLS at no
+/// proxy and serves plain HTTP, where a `Secure` cookie is dropped by the
+/// browser and login loops. Operators on such a setup set
+/// `TUCANO_SECURE_COOKIES=0` **without** weakening the strong-secret policy.
+pub fn make_session(
+    secret: Option<String>,
+    production: bool,
+    secure: bool,
+) -> Result<Session, String> {
     match secret.filter(|s| !s.is_empty()) {
-        Some(s) if s.len() >= 32 => Ok(Session::new(s.into_bytes(), 60 * 60 * 24, production)),
+        Some(s) if s.len() >= 32 => Ok(Session::new(s.into_bytes(), 60 * 60 * 24, secure)),
         Some(_) if production => Err(
             "TUCANO_SESSION_SECRET is set but shorter than 32 bytes; refuse to start in production"
                 .to_string(),
         ),
         Some(s) => {
             tracing::warn!("TUCANO_SESSION_SECRET is <32 bytes; use a longer key in production");
-            Ok(Session::new(s.into_bytes(), 60 * 60 * 24, production))
+            Ok(Session::new(s.into_bytes(), 60 * 60 * 24, secure))
         }
         None if production => Err(
             "TUCANO_SESSION_SECRET is required in production (generate: openssl rand -hex 32)"
@@ -278,7 +287,7 @@ pub fn make_session(secret: Option<String>, production: bool) -> Result<Session,
             let mut key = [0u8; 32];
             use rand::RngCore;
             rand::rngs::OsRng.fill_bytes(&mut key);
-            Ok(Session::new(key.to_vec(), 60 * 60 * 24, production))
+            Ok(Session::new(key.to_vec(), 60 * 60 * 24, secure))
         }
     }
 }
@@ -355,14 +364,14 @@ mod tests {
     #[test]
     fn make_session_requires_strong_secret_in_production() {
         // Production with no secret -> refuse.
-        assert!(make_session(None, true).is_err());
+        assert!(make_session(None, true, false).is_err());
         // Production with a short secret -> refuse.
-        assert!(make_session(Some("tooshort".into()), true).is_err());
+        assert!(make_session(Some("tooshort".into()), true, false).is_err());
         // Production with a strong secret -> ok, Secure cookie.
-        let s = make_session(Some("0123456789abcdef0123456789abcdef".into()), true).unwrap();
+        let s = make_session(Some("0123456789abcdef0123456789abcdef".into()), true, true).unwrap();
         assert!(s.secure());
         // Dev with no secret -> ephemeral, non-secure.
-        let d = make_session(None, false).unwrap();
+        let d = make_session(None, false, false).unwrap();
         assert!(!d.secure());
     }
 }
@@ -404,9 +413,9 @@ mod persistence_tests {
         assert_eq!(s1, s2);
         // a token issued before the restart verifies after it
         let u1 = user("a@b.co");
-        let session1 = make_session(Some(s1.clone()), false).unwrap();
+        let session1 = make_session(Some(s1.clone()), false, false).unwrap();
         let token = session1.issue(&u1, Utc.timestamp_opt(1_730_000_000, 0).unwrap());
-        let session2 = make_session(Some(s2), false).unwrap();
+        let session2 = make_session(Some(s2), false, false).unwrap();
         let claims = session2
             .verify(&token, Utc.timestamp_opt(1_730_000_100, 0).unwrap())
             .expect("cross-boot token still valid");

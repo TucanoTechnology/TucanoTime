@@ -163,10 +163,12 @@ impl SecretVault {
         lock(&self.data).keys().cloned().collect()
     }
 
-    /// A masked hint for display: last 4 chars of the value, or empty.
+    /// A masked hint for display. Only the final **2** characters are shown
+    /// (review A8 — 4 tail chars plus a length bucket is more than a display
+    /// hint needs); enough to tell two keys apart, not to leak an edge.
     pub fn hint(&self, key: &str) -> String {
         match lock(&self.data).get(key) {
-            Some(v) if v.len() >= 4 => format!("••••{}", &v[v.len() - 4..]),
+            Some(v) if v.len() >= 2 => format!("••••{}", &v[v.len() - 2..]),
             Some(_) => "••••".to_string(),
             None => String::new(),
         }
@@ -215,7 +217,7 @@ mod tests {
             vault.get("stripe.secret_key").as_deref(),
             Some("unit-test-secret-value-abcdef")
         );
-        assert_eq!(vault.hint("stripe.secret_key"), "••••cdef");
+        assert_eq!(vault.hint("stripe.secret_key"), "••••ef");
         assert_eq!(vault.keys(), vec!["stripe.secret_key".to_string()]);
 
         // On-disk blob must not contain the plaintext.
