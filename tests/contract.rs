@@ -1812,6 +1812,9 @@ fn concurrent_writer_times_out_with_lock_busy() {
         default_rate_minor: 1,
         active: true,
         email: String::new(),
+        payment_terms: None,
+        invoice_notes: String::new(),
+        invoice_subject: String::new(),
     };
     let err = store.put_customer(&cust).expect_err("should time out");
     assert!(
@@ -3597,4 +3600,413 @@ async fn email_copy_accepts_paid_invoices() {
     let msgs = app.email.messages();
     assert_eq!(msgs.len(), 1);
     assert!(msgs[0].attachment.is_some());
+}
+
+// ------------------------------------------------------------------ #116 ---
+
+async fn new_customer_ex(app: &Client, body: Value) -> (StatusCode, Value) {
+    json_req(app, "POST", "/customers", Some(body)).await
+}
+
+/// Draft an invoice for a customer (billing email set), returning (customer,
+/// draft invoice). `extra` merges into the customer creation body (#116
+/// fields).
+async fn seed_customer_invoice(app: &Client, name: &str, extra: Value) -> (Value, Value) {
+    let mut body = json!({"name": name, "currency": "EUR", "default_rate_minor": 6000, "email": "billing@t116.test"});
+    if let (Some(obj), Some(e)) = (body.as_object_mut(), extra.as_object()) {
+        for (k, v) in e {
+            obj.insert(k.clone(), v.clone());
+        }
+    }
+    let (s, c) = new_customer_ex(app, body).await;
+    assert_eq!(s, StatusCode::CREATED, "{c}");
+    let cid = c["id"].as_str().unwrap();
+    new_project(app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s2, inv) = json_req(
+        app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    (c, inv)
+}
+
+#[tokio::test]
+async fn payment_terms_decide_due_date_at_issue() {
+    let today = chrono::Utc::now().date_naive();
+    let cases = [
+        (json!({"kind":"upon_receipt"}), today),
+        (json!({"kind":"net_15"}), today + chrono::Duration::days(15)),
+        (json!({"kind":"net_30"}), today + chrono::Duration::days(30)),
+        (json!({"kind":"net_45"}), today + chrono::Duration::days(45)),
+        (
+            json!({"kind":"custom","days":21}),
+            today + chrono::Duration::days(21),
+        ),
+    ];
+    for (i, (terms, expected)) in cases.iter().enumerate() {
+        let (app, _d) = app().await;
+        let (_c, inv) =
+            seed_customer_invoice(&app, &format!("TERMS{i}"), json!({"payment_terms": terms}))
+                .await;
+        let iid = inv["id"].as_str().unwrap();
+        let (s, issued) = json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+        assert_eq!(s, StatusCode::OK, "{issued}");
+        assert_eq!(
+            issued["due_date"].as_str().unwrap(),
+            expected.to_string(),
+            "terms {terms}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn legacy_net14_fallback_is_untouched_and_org_default_applies() {
+    // No terms anywhere: the legacy net-14 from period_to (2026-10-07) stays.
+    let (app, _d) = app().await;
+    let (_c, inv) = seed_customer_invoice(&app, "LEGACY", json!({})).await;
+    let iid = inv["id"].as_str().unwrap();
+    let (_, issued) = json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    assert_eq!(
+        issued["due_date"], "2026-10-21",
+        "legacy fallback unchanged"
+    );
+
+    // Org default terms now apply to a terms-less customer.
+    let (s, _) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"","body":"","footer":"","payment_terms":{"kind":"net_20"}})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (_c2, inv2) = seed_customer_invoice(&app, "NEXT", json!({})).await;
+    let iid2 = inv2["id"].as_str().unwrap();
+    let (_, issued2) = json_req(&app, "POST", &format!("/invoices/{iid2}/issue"), None).await;
+    let today = chrono::Utc::now().date_naive();
+    assert_eq!(
+        issued2["due_date"].as_str().unwrap(),
+        (today + chrono::Duration::days(20)).to_string()
+    );
+
+    // Customer terms beat the org default.
+    let (_c3, inv3) = seed_customer_invoice(
+        &app,
+        "PAYER",
+        json!({"payment_terms": {"kind": "upon_receipt"}}),
+    )
+    .await;
+    let iid3 = inv3["id"].as_str().unwrap();
+    let (_, issued3) = json_req(&app, "POST", &format!("/invoices/{iid3}/issue"), None).await;
+    assert_eq!(issued3["due_date"].as_str().unwrap(), today.to_string());
+}
+
+#[tokio::test]
+async fn template_save_validates_and_rejects_without_persisting() {
+    let (app, d) = app().await;
+    // Unknown %token% in the body: 422 naming the field; nothing persisted.
+    let (s, body) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"Inv %invoice_number%","body":"pay %bogus% now","footer":""})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["fields"][0]["field"], "body");
+    assert!(
+        body["error"]["fields"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("%bogus%")
+    );
+    assert!(
+        !d.path().join("data").join("invoice_template.json").exists(),
+        "rejection persists nothing"
+    );
+
+    // Case-sensitive: %Total% is unknown.
+    let (s2, _) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"%Total%","body":"","footer":""})),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Malformed payment terms.
+    let (s3, b3) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"payment_terms": {"kind": "custom"}})),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::UNPROCESSABLE_ENTITY, "{b3}");
+    let (s4, _) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"payment_terms": {"kind": "net_30", "days": 30}})),
+    )
+    .await;
+    assert_eq!(s4, StatusCode::UNPROCESSABLE_ENTITY);
+    let (s5, _) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"payment_terms": {"kind": "custom", "days": 0}})),
+    )
+    .await;
+    assert_eq!(s5, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Unknown field rejected pre-write (#deny_unknown_fields contract).
+    let (s6, _) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject": "s", "evil": true})),
+    )
+    .await;
+    assert_eq!(s6, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // A valid template round-trips and lands on disk atomically.
+    let (s7, saved) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"Invoice %invoice_number% for %customer_name%","body":"# Hello\n\nthanks","footer":"Bank: IBAN","payment_terms":{"kind":"net_30"}})),
+    )
+    .await;
+    assert_eq!(s7, StatusCode::OK, "{saved}");
+    assert_eq!(saved["body"], "# Hello\n\nthanks");
+
+    // GET returns the template plus the variable cheatsheet.
+    let (_s8, got) = json_req(&app, "GET", "/admin/invoice-template", None).await;
+    assert_eq!(
+        got["template"]["subject"],
+        "Invoice %invoice_number% for %customer_name%"
+    );
+    let vars = got["variables"].as_array().unwrap();
+    assert!(vars.iter().any(|v| v["name"] == "%invoice_issue_month%"));
+    assert!(vars.iter().any(|v| v["name"] == "%line_count%"));
+
+    // Member: admin tier.
+    json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(
+            json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
+        ),
+    )
+    .await;
+    let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
+    let (s9, _, _) = raw(
+        &app.router,
+        "GET",
+        "/admin/invoice-template",
+        None,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(s9, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn document_endpoint_renders_live_and_escapes() {
+    let (app, _d) = app().await;
+    let (_c, inv) = seed_customer_invoice(
+        &app,
+        "DOCS",
+        json!({"invoice_notes": "Please pay by <script>alert(1)</script> transfer"}),
+    )
+    .await;
+    json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"October: %invoice_number%","body":"Dear %customer_name%,\n\n- consulting\n- support","footer":"Wire to IBAN XX","payment_terms":null})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    let (s, doc) = json_req(&app, "GET", &format!("/invoices/{iid}/document"), None).await;
+    assert_eq!(s, StatusCode::OK, "{doc}");
+    assert_eq!(
+        doc["subject"],
+        format!("October: {}", inv["number"].as_str().unwrap())
+    );
+    let html = doc["html"].as_str().unwrap();
+    assert!(html.contains("<li>consulting</li>"), "{html}");
+    assert!(html.contains("Wire to IBAN XX"), "{html}");
+    // Customer notes are appended after the org footer.
+    assert!(html.contains("by &lt;script&gt;"), "{html}");
+    assert!(!html.contains("<script>"), "escaping is non-negotiable");
+
+    // Unknown id: 404.
+    let (s404, _) = json_req(
+        &app,
+        "GET",
+        "/invoices/00000000-0000-0000-0000-000000000000/document",
+        None,
+    )
+    .await;
+    assert_eq!(s404, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn email_uses_resolved_subject_and_html_body() {
+    let (app, _d) = app().await;
+    let (_c, inv) = seed_customer_invoice(
+        &app,
+        "MAILER",
+        json!({"invoice_subject": "%invoice_number% for %customer_name% — %invoice_issue_month%"}),
+    )
+    .await;
+    json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"WRONG %invoice_number%","body":"Org footer body","footer":"","payment_terms":null})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (s, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let msgs = app.email.messages();
+    assert_eq!(msgs.len(), 1);
+    // Customer subject override beats the org template, variables resolved.
+    assert_eq!(
+        msgs[0].subject,
+        format!("{} for MAILER — October", inv["number"].as_str().unwrap())
+    );
+    assert!(
+        msgs[0].text.contains("Please find invoice"),
+        "legacy text part stays"
+    );
+    let html = msgs[0].html.as_ref().expect("template body -> html part");
+    assert!(html.contains("Org footer body"), "{html}");
+    // The PDF attachment still rides along.
+    assert!(msgs[0].attachment.is_some());
+}
+
+#[tokio::test]
+async fn pdf_archive_applies_template_on_both_issue_and_lazy_paths() {
+    let (app, d) = app().await;
+    json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"","body":"THANK-YOU NOTE text","footer":"","payment_terms":null})),
+    )
+    .await;
+    let (_c, inv) = seed_customer_invoice(&app, "SEAM", json!({})).await;
+    let iid = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (_s, _h, at_issue) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+
+    // Drop the archive: the lazy path re-renders from the *same* content
+    // source and must produce identical bytes (#113 determinism x #116 seam).
+    std::fs::remove_file(
+        d.path()
+            .join("data")
+            .join("invoices")
+            .join(format!("{iid}.pdf")),
+    )
+    .unwrap();
+    let (_s2, _h2, at_lazy) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    assert_eq!(
+        at_issue, at_lazy,
+        "issue and lazy paths share the content source"
+    );
+
+    // And template content actually flows into the document: a body-less
+    // template renders different bytes for the same invoice state.
+    json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"","body":"","footer":"","payment_terms":null})),
+    )
+    .await;
+    std::fs::remove_file(
+        d.path()
+            .join("data")
+            .join("invoices")
+            .join(format!("{iid}.pdf")),
+    )
+    .unwrap();
+    let (_s3, _h3, at_no_template) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    assert_ne!(
+        at_issue, at_no_template,
+        "the body text changed the document"
+    );
+}
+
+#[tokio::test]
+async fn customer_invoice_fields_round_trip_and_validate() {
+    let (app, _d) = app().await;
+    // Unknown token in the subject: rejected before persistence.
+    let (s, _) = new_customer_ex(
+        &app,
+        json!({"name":"BAD","currency":"EUR","default_rate_minor":1,"invoice_subject":"%nope%"}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_s2, list) = json_req(&app, "GET", "/customers", None).await;
+    assert!(list["customers"].as_array().unwrap().is_empty());
+
+    // Invalid terms shapes.
+    for bad in [
+        json!({"kind":"custom","days":400}),
+        json!({"kind":"net_20","days":20}),
+    ] {
+        let (sb, _bb) = new_customer_ex(
+            &app,
+            json!({"name":"BAD","currency":"EUR","default_rate_minor":1,"payment_terms": bad}),
+        )
+        .await;
+        assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    }
+
+    // Valid shape round-trips through create and update.
+    let (sc, c) = new_customer_ex(
+        &app,
+        json!({"name":"FULL","currency":"EUR","default_rate_minor":1,
+               "payment_terms":{"kind":"custom","days":21},
+               "invoice_notes":"net 21, thanks","invoice_subject":"Inv %invoice_number%"}),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{c}");
+    assert_eq!(c["payment_terms"]["kind"], "custom");
+    assert_eq!(c["payment_terms"]["days"], 21);
+    let cid = c["id"].as_str().unwrap();
+    let (_su, u) = json_req(
+        &app,
+        "PUT",
+        &format!("/customers/{cid}"),
+        Some(
+            json!({"name":"FULL","currency":"EUR","default_rate_minor":1,
+                    "payment_terms":{"kind":"upon_receipt"},
+                    "invoice_notes":"","invoice_subject":""}),
+        ),
+    )
+    .await;
+    assert_eq!(u["payment_terms"]["kind"], "upon_receipt");
+    assert!(
+        u["payment_terms"].get("days").is_none() || u["payment_terms"]["days"].is_null(),
+        "skipped when absent: {}",
+        u["payment_terms"]
+    );
 }

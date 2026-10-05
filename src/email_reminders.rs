@@ -116,7 +116,22 @@ impl EmailReminderJob {
                 bytes,
             )),
             Ok(None) => {
-                let doc = crate::pdf::doc_for(inv, customer, &self.org);
+                // Same content source as the API lazy path (#116): current
+                // template + customer notes merged into the doc.
+                let template = self
+                    .store
+                    .read_json_rel::<crate::domain::InvoiceTemplate>("invoice_template.json")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let mut doc = crate::pdf::doc_for(inv, customer, &self.org);
+                let vars = crate::template::vars_for(
+                    inv,
+                    &customer.name,
+                    Some(inv.issued_at.unwrap_or(inv.created_at).date_naive()),
+                );
+                let content = crate::template::doc_content(&template, customer, &vars);
+                crate::template::apply_doc_content(&mut doc, &content);
                 let bytes = crate::pdf::render_invoice_pdf(&doc);
                 let filename = match self.store.attach_invoice_pdf(inv.id, &bytes, now) {
                     Ok(updated) => updated

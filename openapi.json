@@ -183,6 +183,27 @@
             "type": "string",
             "maxLength": 200,
             "description": "Optional billing email for invoice delivery (#35)"
+          },
+          "payment_terms": {
+            "description": "Payment terms for the issue-time due date (#116).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invoice_notes": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "Markdown-subset notes appended to this customer's invoice documents (#116)."
+          },
+          "invoice_subject": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Per-customer subject override with %variables% (#116)."
           }
         },
         "additionalProperties": false
@@ -214,6 +235,27 @@
             "type": "string",
             "maxLength": 200,
             "default": ""
+          },
+          "payment_terms": {
+            "description": "Payment terms for the issue-time due date (#116).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invoice_notes": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "Markdown-subset notes appended to this customer's invoice documents (#116)."
+          },
+          "invoice_subject": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Per-customer subject override with %variables% (#116)."
           }
         },
         "additionalProperties": false
@@ -1475,6 +1517,73 @@
           "archived_at": {
             "type": "string",
             "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TermsKind": {
+        "type": "string",
+        "enum": [
+          "upon_receipt",
+          "net_15",
+          "net_20",
+          "net_30",
+          "net_45",
+          "custom"
+        ],
+        "description": "Payment terms kind (#116)."
+      },
+      "PaymentTerms": {
+        "type": "object",
+        "description": "Payment terms deciding the due date at issue (#116).",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/TermsKind"
+          },
+          "days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 365,
+            "description": "Only for `custom` (then required); other kinds must omit it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "InvoiceTemplate": {
+        "type": "object",
+        "description": "Org-wide invoice template (`invoice_template.json`, #116). Empty/unset fields keep legacy behaviour.",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Subject with %variable% placeholders."
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Markdown-subset body before the line table."
+          },
+          "footer": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Markdown-subset footer (e.g. bank details)."
+          },
+          "payment_terms": {
+            "description": "Org-default payment terms.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -5099,6 +5208,147 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/admin/invoice-template": {
+      "get": {
+        "operationId": "getInvoiceTemplate",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Read the org invoice template plus the %variable% cheatsheet (#116)",
+        "responses": {
+          "200": {
+            "description": "Template (defaults when unset) and variables.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "template",
+                    "variables"
+                  ],
+                  "properties": {
+                    "template": {
+                      "$ref": "#/components/schemas/InvoiceTemplate"
+                    },
+                    "variables": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "example"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "example": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          }
+        }
+      },
+      "put": {
+        "operationId": "putInvoiceTemplate",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Save the org invoice template (#116)",
+        "description": "Fail-loud validation: unknown %variables%, oversized fields and malformed payment terms return the standard 422 shape and persist nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceTemplate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored template.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceTemplate"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/invoices/{id}/document": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getInvoiceDocument",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Live {subject, html} preview of an invoice document (#116)",
+        "description": "Resolved from the CURRENT template + customer (not a snapshot); the same content the PDF (#113) renders from. HTML is escaped markdown-subset output.",
+        "responses": {
+          "200": {
+            "description": "Rendered document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "subject",
+                    "html"
+                  ],
+                  "properties": {
+                    "subject": {
+                      "type": "string"
+                    },
+                    "html": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }

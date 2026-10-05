@@ -1093,6 +1093,13 @@ function startCustomerEdit(c) {
   $('customer-rate').value = (c.default_rate_minor / 100).toFixed(2);
   $('customer-active').checked = c.active;
   $('customer-email').value = c.email || '';
+  // Invoice document fields (#116).
+  const terms = c.payment_terms || null;
+  $('customer-terms').value = terms ? terms.kind : '';
+  $('customer-terms-days').value = terms && terms.days != null ? terms.days : '';
+  $('customer-terms-days-field').hidden = !terms || terms.kind !== 'custom';
+  $('customer-subject').value = c.invoice_subject || '';
+  $('customer-notes').value = c.invoice_notes || '';
   $('customer-save').textContent = 'Update customer';
   $('customer-cancel').hidden = false;
   clearFormError($('customer-error'));
@@ -1103,12 +1110,22 @@ async function saveCustomer(evt) {
   evt.preventDefault();
   clearFormError($('customer-error'));
   const id = $('customer-id').value;
+  // Payment terms (#116): the select carries the kind; only `custom` sends days.
+  const kind = $('customer-terms').value;
+  let payment_terms = null;
+  if (kind) {
+    payment_terms = { kind };
+    if (kind === 'custom') payment_terms.days = Number($('customer-terms-days').value);
+  }
   const body = {
     name: $('customer-name').value.trim(),
     currency: $('customer-currency').value.trim().toUpperCase(),
     default_rate_minor: Math.round(Number($('customer-rate').value) * 100),
     active: $('customer-active').checked,
     email: $('customer-email').value.trim(),
+    payment_terms,
+    invoice_subject: $('customer-subject').value.trim(),
+    invoice_notes: $('customer-notes').value.trim(),
   };
   try {
     if (id) await api.put(`/customers/${id}`, body);
@@ -1127,6 +1144,7 @@ function cancelCustomerEdit() {
   $('customer-id').value = '';
   $('customer-form').reset();
   $('customer-active').checked = true;
+  $('customer-terms-days-field').hidden = true;
   $('customer-save').textContent = 'Add customer';
   $('customer-cancel').hidden = true;
   clearFormError($('customer-error'));
@@ -1466,7 +1484,7 @@ async function refreshInvoices() {
     const actions = [];
     if (inv.status === 'draft') {
       actions.push(
-        action('link', 'Issue', () => issueInvoice(inv.id)),
+        action('link', 'Issue', () => issueInvoice(inv)),
         action('danger', 'Delete', () => removeInvoice(inv.id)),
       );
     } else if (inv.status === 'issued') {
@@ -1550,8 +1568,39 @@ async function generateInvoice(evt) {
   }
 }
 
-async function issueInvoice(id) {
-  if (!(await askConfirm('Issue this invoice? Its entries will be locked from editing.'))) return;
+/// Same resolution order as the server (#116): customer terms → org template
+/// terms → legacy net-14 from the period end. Only the confirm text; the
+/// server always owns the persisted value.
+async function dueDatePreview(inv) {
+  try {
+    const c = state.customers.find((x) => x.id === inv.customer_id);
+    let terms = c && c.payment_terms ? c.payment_terms : null;
+    if (!terms) {
+      const t = await api.get('/admin/invoice-template');
+      terms = (t.template || {}).payment_terms || null;
+    }
+    const fixed = { upon_receipt: 0, net_15: 15, net_20: 20, net_30: 30, net_45: 45 };
+    const d = new Date();
+    if (terms) {
+      const days = terms.kind === 'custom' ? Number(terms.days) : fixed[terms.kind];
+      if (!Number.isFinite(days)) return null;
+      d.setTime(d.getTime() + days * 86400000);
+      return { date: d.toISOString().slice(0, 10), label: terms.kind };
+    }
+    d.setTime(new Date(`${inv.period_to}T00:00:00Z`).getTime() + 14 * 86400000);
+    return { date: d.toISOString().slice(0, 10), label: 'legacy net-14' };
+  } catch {
+    return null; // terms are a hint only; never block the action
+  }
+}
+
+async function issueInvoice(inv) {
+  const preview = await dueDatePreview(inv);
+  const due = preview
+    ? ` It will be due ${preview.date} (${preview.label}).`
+    : '';
+  if (!(await askConfirm(`Issue this invoice?${due} Its entries will be locked from editing.`))) return;
+  const id = inv.id;
   try {
     await api.post(`/invoices/${id}/issue`);
     invalidateLockCache(); // issuing locks its entries
@@ -1868,6 +1917,7 @@ async function refreshSettings() {
     }
   }
   await refreshConfig();
+  await refreshInvoiceTemplate();
 }
 
 /// Effective runtime configuration card (#94). Admin surface; members get a
@@ -1941,6 +1991,85 @@ async function saveConfig(evt) {
     await refreshConfig();
   } catch (err) {
     showFormError($('config-error'), err);
+  }
+}
+
+// ------------------------------------------------- invoice template (#116) --
+
+let templateVarsLoaded = false;
+
+async function refreshInvoiceTemplate() {
+  try {
+    const data = await api.get('/admin/invoice-template');
+    const t = data.template || {};
+    $('template-subject').value = t.subject || '';
+    $('template-body').value = t.body || '';
+    $('template-footer').value = t.footer || '';
+    const terms = t.payment_terms || null;
+    $('template-terms').value = terms ? terms.kind : '';
+    $('template-terms-days').value = terms && terms.days != null ? terms.days : '';
+    $('template-terms-days-field').hidden = !terms || terms.kind !== 'custom';
+    // Variable cheat-sheet rendered from the server table (same source the
+    // validator enforces).
+    const tbody = $('template-vars').querySelector('tbody');
+    tbody.textContent = '';
+    for (const v of data.variables || []) {
+      tbody.appendChild(
+        el('tr', {}, [
+          el('th', { attrs: { scope: 'row' }, text: v.name }),
+          el('td', { text: v.example }),
+        ]),
+      );
+    }
+    templateVarsLoaded = true;
+    await refreshTemplatePreview();
+  } catch {
+    /* members cannot see the template; tab stays hidden for them */
+  }
+}
+
+async function refreshTemplatePreview() {
+  const card = $('template-preview');
+  try {
+    const data = await api.get('/invoices');
+    const invoices = (data.invoices || []).filter((i) => i.status !== 'draft');
+    if (invoices.length === 0) {
+      card.hidden = true;
+      return;
+    }
+    const newest = invoices[invoices.length - 1];
+    const doc = await api.get(`/invoices/${newest.id}/document`);
+    $('template-preview-subject').textContent = doc.subject || '';
+    // The server-returned HTML is reduced to plain text through the DOM (no
+    // markup is ever inserted into this page: the textContent rule holds).
+    const parsed = new DOMParser().parseFromString(doc.html || '', 'text/html');
+    $('template-preview-body').textContent = parsed.body.textContent;
+    card.hidden = false;
+  } catch {
+    card.hidden = true;
+  }
+}
+
+async function saveInvoiceTemplate(evt) {
+  evt.preventDefault();
+  clearFormError($('template-error'));
+  const kind = $('template-terms').value;
+  let payment_terms = null;
+  if (kind) {
+    payment_terms = { kind };
+    if (kind === 'custom') payment_terms.days = Number($('template-terms-days').value);
+  }
+  try {
+    await api.put('/admin/invoice-template', {
+      subject: $('template-subject').value.trim(),
+      body: $('template-body').value,
+      footer: $('template-footer').value,
+      payment_terms,
+    });
+    announce('Invoice template saved.');
+    await refreshInvoiceTemplate();
+  } catch (err) {
+    showFormError($('template-error'), err);
   }
 }
 
@@ -2255,8 +2384,16 @@ async function startApp() {
     announce(`Row added for ${code} — type hours to save.`);
   });
 
+  $('template-form').addEventListener('submit', saveInvoiceTemplate);
+  $('template-terms').addEventListener('change', () => {
+    $('template-terms-days-field').hidden = $('template-terms').value !== 'custom';
+  });
   $('customer-form').addEventListener('submit', saveCustomer);
   $('customer-cancel').addEventListener('click', cancelCustomerEdit);
+  // #116: the day input only makes sense for `custom` terms.
+  $('customer-terms').addEventListener('change', () => {
+    $('customer-terms-days-field').hidden = $('customer-terms').value !== 'custom';
+  });
   $('project-form').addEventListener('submit', saveProject);
   $('project-cancel').addEventListener('click', cancelProjectEdit);
   $('task-form').addEventListener('submit', saveTask);

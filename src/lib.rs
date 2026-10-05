@@ -35,6 +35,7 @@ pub mod revoke;
 pub mod scheduler;
 pub mod sso;
 pub mod store;
+pub mod template;
 pub mod vault;
 
 use api::AppState;
@@ -197,6 +198,12 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::post(api::sync_invoice),
         )
         .route("/sync/accounting", get(api::sync_status))
+        // Invoice document templates (#116): org singleton + live preview.
+        .route(
+            "/admin/invoice-template",
+            get(api::invoice_template_get).put(api::invoice_template_put),
+        )
+        .route("/invoices/{id}/document", get(api::invoice_document))
         .route("/invoices/summary", get(api::invoice_summary))
         .route("/invoices/report", get(api::invoice_report_handler))
         .route("/invoices/export.csv", get(api::invoice_export_csv))

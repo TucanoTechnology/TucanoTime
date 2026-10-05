@@ -1040,6 +1040,9 @@ mod tests {
             default_rate_minor: 9000,
             active: true,
             email: "billing@capybara.example".into(),
+            payment_terms: None,
+            invoice_notes: String::new(),
+            invoice_subject: String::new(),
         }
     }
 
