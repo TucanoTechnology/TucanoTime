@@ -68,11 +68,16 @@ fn walk(root: &Path) -> Result<Vec<(String, PathBuf)>, BackupError> {
             let name = entry.file_name();
             let name = name.to_string_lossy().to_string();
             if path.is_dir() {
-                stack.push(path);
+                // `.restoring` (and any dot-dir) is transient machinery.
+                if !name.starts_with('.') {
+                    stack.push(path);
+                }
                 continue;
             }
-            // Transient files are never part of a backup.
-            if name.ends_with(".tmp") || name == ".tucanotime.lock" {
+            // Transient/runtime files are never part of a backup. Dot files
+            // like `invoices/.seq.json` ARE kept — the numbering counter must
+            // survive a restore too (review B3/D5).
+            if name.ends_with(".tmp") || name.ends_with(".lock") {
                 continue;
             }
             let rel = path
@@ -87,10 +92,28 @@ fn walk(root: &Path) -> Result<Vec<(String, PathBuf)>, BackupError> {
     Ok(out)
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+fn finalize_hex(h: &Sha256) -> String {
+    h.clone()
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Stream-hash a file (no whole-file read).
+fn hash_file(path: &Path) -> Result<(u64, String), BackupError> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)?;
     let mut h = Sha256::new();
-    h.update(bytes);
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok((f.metadata()?.len(), finalize_hex(&h)))
 }
 
 /// Take the store's lock file without blocking and **hold it** for the
@@ -122,17 +145,17 @@ pub fn create(root: &Path, out: &Path) -> Result<usize, BackupError> {
     // Lock or fail: never snapshot through an in-flight write, and hold off
     // new writes for the duration of the copy.
     let _lock = acquire_lock(root)?;
+    // Two streaming passes (hash, then copy): the archive is never held in
+    // memory (review D5) — the lock guarantees nothing changes in between.
     let files = walk(root)?;
     let mut entries = Vec::new();
-    let mut blobs: Vec<(String, Vec<u8>)> = Vec::new();
     for (rel, abs) in &files {
-        let bytes = std::fs::read(abs)?;
+        let (size, digest) = hash_file(abs)?;
         entries.push(FileEntry {
             path: rel.clone(),
-            size: bytes.len() as u64,
-            sha256: sha256_hex(&bytes),
+            size,
+            sha256: digest,
         });
-        blobs.push((rel.clone(), bytes));
     }
     let manifest = Manifest {
         app: "tucano-time".into(),
@@ -146,16 +169,22 @@ pub fn create(root: &Path, out: &Path) -> Result<usize, BackupError> {
     let file = std::fs::File::create(out)?;
     let mut gz = GzEncoder::new(file, Compression::default());
     tar_write(&mut gz, "manifest.json", &manifest_json)?;
-    for (rel, bytes) in &blobs {
-        tar_write(&mut gz, rel, bytes)?;
+    for (rel, abs) in &files {
+        let mut f = std::fs::File::open(abs)?;
+        let size = f.metadata()?.len();
+        tar_write_stream(&mut gz, rel, &mut f, size)?;
     }
     tar_finish(&mut gz)?;
     gz.finish()?;
-    Ok(blobs.len())
+    Ok(files.len())
 }
 
 /// Restore `in.tar.gz` into `target` (the data dir). Returns operator-facing
 /// notes (vault reminder etc.).
+///
+/// Streaming (review D5): the manifest must be the FIRST entry; each body is
+/// copied into a staging folder while hashing, verified against the manifest,
+/// then moved into place — memory stays O(1) per file.
 pub fn restore(in_path: &Path, target: &Path, force: bool) -> Result<Vec<String>, BackupError> {
     if target.exists() && !force && std::fs::read_dir(target)?.next().is_some() {
         return Err(BackupError::NotEmpty);
@@ -166,58 +195,95 @@ pub fn restore(in_path: &Path, target: &Path, force: bool) -> Result<Vec<String>
     } else {
         None
     };
+    std::fs::create_dir_all(target)?;
+    let staging = target.join(".restoring");
+    let _ = std::fs::remove_dir_all(&staging); // stale leftovers from a crash
+    std::fs::create_dir_all(&staging)?;
+
     let src = std::fs::File::open(in_path)?;
     let mut gz = GzDecoder::new(src);
     let mut notes = Vec::new();
-    let mut manifest: Option<Manifest> = None;
-    let mut restored: Vec<(String, Vec<u8>)> = Vec::new();
-    while let Some((name, bytes)) = tar_read(&mut gz)? {
-        let safe = sanitize(&name)?;
-        if safe == "manifest.json" {
-            manifest = Some(
-                serde_json::from_slice(&bytes).map_err(|e| BackupError::Corrupt(e.to_string()))?,
-            );
-            continue;
+
+    // 1) manifest (first entry)
+    let manifest = match tar_read(&mut gz)? {
+        Some((name, bytes)) if sanitize(&name)? == "manifest.json" => {
+            serde_json::from_slice::<Manifest>(&bytes)
+                .map_err(|e| BackupError::Corrupt(e.to_string()))?
         }
-        if safe == "secrets.bin" {
-            notes.push(
-                "backup contains the encrypted vault store (secrets.bin): the original \
-                 TUCANO_SECRET_KEY(_FILE) must be configured or the Settings tab will be \
-                 unreadable"
-                    .into(),
-            );
+        Some(_) => {
+            return Err(BackupError::Corrupt("manifest.json must be first".into()));
         }
-        restored.push((safe, bytes));
+        None => return Err(BackupError::Corrupt("empty archive".into())),
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut had_vault = false;
+
+    // 2) stream + verify each body
+    let result = (|| -> Result<(), BackupError> {
+        while let Some((name, mut copy)) = tar_read_stream(&mut gz)? {
+            let rel = sanitize(&name)?;
+            let entry = manifest
+                .files
+                .iter()
+                .find(|f| f.path == rel)
+                .ok_or_else(|| BackupError::Corrupt(format!("{rel}: not in manifest")))?;
+            let dest = staging.join(&rel);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut f = std::fs::File::create(&dest)?;
+            let mut h = Sha256::new();
+            std::io::copy(&mut TeeReader(&mut h, &mut copy), &mut f)
+                .map_err(|e| BackupError::Io(e.to_string()))?;
+            let digest = finalize_hex(&h);
+            if digest != entry.sha256 {
+                return Err(BackupError::Corrupt(format!(
+                    "{rel}: sha256 mismatch (archive is older than manifest?)"
+                )));
+            }
+            if rel == "secrets.bin" {
+                had_vault = true;
+                notes.push(
+                    "backup contains the encrypted vault store (secrets.bin): the original \
+                     TUCANO_SECRET_KEY(_FILE) must be configured or the Settings tab will be \
+                     unreadable"
+                        .into(),
+                );
+            }
+            seen.insert(rel);
+        }
+        for entry in &manifest.files {
+            if !seen.contains(&entry.path) {
+                return Err(BackupError::Corrupt(format!(
+                    "{} missing from archive",
+                    entry.path
+                )));
+            }
+        }
+        Ok(())
+    })();
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e);
     }
-    let manifest = manifest.ok_or_else(|| BackupError::Corrupt("manifest.json missing".into()))?;
-    // Verify checksums *before* touching the target dir.
+
+    // 3) publish verified files
     for entry in &manifest.files {
-        let (_, bytes) = restored
-            .iter()
-            .find(|(name, _)| name == &entry.path)
-            .ok_or_else(|| BackupError::Corrupt(format!("{} missing from archive", entry.path)))?;
-        let got = sha256_hex(bytes);
-        if got != entry.sha256 {
-            return Err(BackupError::Corrupt(format!(
-                "{} sha256 mismatch (archive is older than manifest?)",
-                entry.path
-            )));
-        }
-    }
-    std::fs::create_dir_all(target)?;
-    for (rel, bytes) in &restored {
-        let dest = target.join(rel);
-        if let Some(parent) = dest.parent() {
+        let from = staging.join(&entry.path);
+        let to = target.join(&entry.path);
+        if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&dest, bytes)?;
+        std::fs::rename(&from, &to)?;
     }
+    let _ = std::fs::remove_dir_all(&staging);
+
     // Operator nudge: a vault store without its key is unreadable on boot.
     let key_present = std::env::var("TUCANO_SECRET_KEY")
         .ok()
         .or_else(|| std::env::var("TUCANO_SECRET_KEY_FILE").ok())
         .is_some_and(|v| !v.is_empty());
-    if !key_present && restored.iter().any(|(name, _)| name == "secrets.bin") {
+    if !key_present && had_vault {
         notes.push(
             "WARNING: no TUCANO_SECRET_KEY(_FILE) is set in this environment, but the \
              backup carries a vault store."
@@ -225,6 +291,49 @@ pub fn restore(in_path: &Path, target: &Path, force: bool) -> Result<Vec<String>
         );
     }
     Ok(notes)
+}
+
+/// One streamed archive entry: name + seekable body cursor.
+type ArchiveEntry = (String, std::io::Cursor<Vec<u8>>);
+
+/// Read one tar entry (name + body). The body is held one-file-at-a-time —
+/// memory is O(largest file), not O(whole data dir) as before (review D5).
+fn tar_read_stream<R: Read>(r: &mut R) -> Result<Option<ArchiveEntry>, BackupError> {
+    let mut header = [0u8; 512];
+    if !read_exact_or_eof(r, &mut header)? {
+        return Ok(None);
+    }
+    if header.iter().all(|b| *b == 0) {
+        return Ok(None);
+    }
+    let name = cstr(&header[0..100]);
+    let size = octal(&header[124..136])? as usize;
+    let pad = (512 - (size % 512)) % 512;
+    // Caller consumes `size` bytes; we leave body in the stream, and the pad
+    // is skipped after the copy. To keep the API honest we wrap the reader:
+    // copy exactly size, then consume pad.
+    let mut limiter = r.take(size as u64);
+    let mut body = Vec::new();
+    std::io::Read::read_to_end(&mut limiter, &mut body)
+        .map_err(|e| BackupError::Io(e.to_string()))?;
+    let mut discard = [0u8; 512];
+    let mut left = pad;
+    while left > 0 {
+        let n = left.min(512);
+        r.read_exact(&mut discard[..n])?;
+        left -= n;
+    }
+    Ok(Some((name, std::io::Cursor::new(body))))
+}
+
+/// Tee bytes through a hasher while copying.
+struct TeeReader<'a, H: sha2::Digest, R>(&'a mut H, &'a mut R);
+impl<R: Read, H: sha2::Digest> Read for TeeReader<'_, H, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.1.read(buf)?;
+        self.0.update(&buf[..n]);
+        Ok(n)
+    }
 }
 
 /// Reject absolute paths and any `..` component; keep plain relative paths.
@@ -251,7 +360,7 @@ fn sanitize(name: &str) -> Result<String, BackupError> {
 // size 124..136, mtime 136..148, chksum 148..156, typeflag 156, linkname
 // 157..257, magic 257..263 ("ustar\0"), version 263..265 ("00").
 
-fn tar<W: Write>(w: &mut W, name: &str, bytes: &[u8]) -> Result<(), BackupError> {
+fn tar_header<W: Write>(w: &mut W, name: &str, size: u64) -> Result<(), BackupError> {
     if name.len() > 99 {
         return Err(BackupError::Io(format!("path too long for tar: {name}")));
     }
@@ -260,7 +369,7 @@ fn tar<W: Write>(w: &mut W, name: &str, bytes: &[u8]) -> Result<(), BackupError>
     write_octal(&mut header[100..108], 0o644);
     write_octal(&mut header[108..116], 0);
     write_octal(&mut header[116..124], 0);
-    write_octal(&mut header[124..136], bytes.len() as u64);
+    write_octal(&mut header[124..136], size);
     write_octal(&mut header[136..148], chrono::Utc::now().timestamp() as u64);
     header[156] = b'0'; // regular file
     header[257..263].copy_from_slice(b"ustar\0");
@@ -271,11 +380,6 @@ fn tar<W: Write>(w: &mut W, name: &str, bytes: &[u8]) -> Result<(), BackupError>
     let cs = format!("{sum:06o}\0 ");
     header[148..156].copy_from_slice(cs.as_bytes());
     w.write_all(&header)?;
-    w.write_all(bytes)?;
-    let pad = (512 - (bytes.len() % 512)) % 512;
-    if pad > 0 {
-        w.write_all(&vec![0u8; pad])?;
-    }
     Ok(())
 }
 
@@ -290,8 +394,31 @@ fn write_octal(field: &mut [u8], value: u64) {
     field[n - 1] = b'\0';
 }
 
+/// Tar entry sourced from a reader — the archive never holds a file body.
+fn tar_write_stream<W: Write, R: Read>(
+    w: &mut W,
+    name: &str,
+    r: &mut R,
+    size: u64,
+) -> Result<(), BackupError> {
+    tar_header(w, name, size)?;
+    let mut limiter = r.take(size);
+    std::io::copy(&mut limiter, w).map_err(|e| BackupError::Io(e.to_string()))?;
+    let pad = (512 - (size % 512)) % 512;
+    if pad > 0 {
+        w.write_all(&vec![0u8; pad as usize])?;
+    }
+    Ok(())
+}
+
 fn tar_write<W: Write>(w: &mut W, name: &str, bytes: &[u8]) -> Result<(), BackupError> {
-    tar(w, name, bytes)
+    tar_header(w, name, bytes.len() as u64)?;
+    w.write_all(bytes)?;
+    let pad = (512 - (bytes.len() % 512)) % 512;
+    if pad > 0 {
+        w.write_all(&vec![0u8; pad])?;
+    }
+    Ok(())
 }
 
 fn tar_finish<W: Write>(w: &mut W) -> Result<(), BackupError> {

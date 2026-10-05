@@ -322,7 +322,7 @@ if (payBtn) {
   check('Pay link announces a checkout URL', /checkout link: https:\/\//i.test(liveTxt));
   // A signed webhook (fake-mode Stripe, signature ignored) marks the invoice paid.
   const chk = await (await fetch(`${BASE}/invoices/${acmeInv.id}/checkout`, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ provider: 'stripe' }) })).json();
-  const whBody = JSON.stringify({ type: 'checkout.session.completed', payment_status: 'paid', client_reference_id: chk.reference, metadata: { invoice_number: acmeInv.number } });
+  const whBody = JSON.stringify({ type: 'checkout.session.completed', payment_status: 'paid', amount_minor: 9500, currency: 'EUR', client_reference_id: chk.reference, metadata: { invoice_number: acmeInv.number } });
   const whRes = await fetch(`${BASE}/payments/webhook/stripe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: whBody });
   const whJson = await whRes.json();
   check('webhook marks the invoice paid', whRes.status === 200 && whJson.status === 'paid');

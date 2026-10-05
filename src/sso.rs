@@ -191,15 +191,19 @@ impl IdentityProvider for SignedTokenIdp {
 
 // ---------------------------------------------------------------- SAML IdP --
 
-/// SAML 2.0 SP adapter (shape-level). An IdP posts a `SAMLResponse`
-/// (base64 XML); this adapter extracts the NameID/email + session-index
-/// attributes and verifies the assertion digest against the pinned
-/// certificate fingerprint using the same HMAC seam as a real XML-DSig would
-/// pin. A production deployment attaches the `xmlsec` verifier here — the
-/// port, the JIT provisioning and the endpoints do not change.
+/// SAML-2.0-shaped SP adapter (statement-level; stub IdP for tests).
+///
+/// Review A2: verifying with a key derived from the certificate *fingerprint*
+/// is no protection — a fingerprint is public metadata, so anyone holding the
+/// IdP certificate could sign arbitrary assertions. The adapter therefore
+/// **requires a deployment-shared HMAC secret** (`saml.signing_secret` /
+/// `TUCANO_SAML_SIGNING_SECRET`, vault or env), and the registry refuses to
+/// enable SAML without it. When a real XML-DSig verifier attaches to this
+/// port the fingerprint becomes the pin input; the port, JIT provisioning and
+/// endpoints do not change.
 pub struct SamlIdp {
     issuer: String,
-    cert_fingerprint: String,
+    signing_secret: String,
     allowed_domains: Vec<String>,
 }
 
@@ -207,12 +211,12 @@ impl SamlIdp {
     #[must_use]
     pub fn new(
         issuer: impl Into<String>,
-        cert_fingerprint: impl Into<String>,
+        signing_secret: impl Into<String>,
         allowed_domains: Vec<String>,
     ) -> Self {
         Self {
             issuer: issuer.into(),
-            cert_fingerprint: cert_fingerprint.into(),
+            signing_secret: signing_secret.into(),
             allowed_domains,
         }
     }
@@ -220,7 +224,7 @@ impl SamlIdp {
     /// Digests the assertion statement the way the stub Idp signs it.
     #[must_use]
     pub fn sign_statement(&self, statement: &str) -> String {
-        sign(&self.cert_fingerprint, statement)
+        sign(&self.signing_secret, statement)
     }
 }
 
@@ -247,7 +251,7 @@ impl IdentityProvider for SamlIdp {
         let statement = String::from_utf8(unb64(payload)?).map_err(|_| SsoError::BadAssertion)?;
         let tag = unb64(signature).map_err(|_| SsoError::BadSignature)?;
         let mut m =
-            Hmac::<Sha256>::new_from_slice(self.cert_fingerprint.as_bytes()).expect("hmac any key");
+            Hmac::<Sha256>::new_from_slice(self.signing_secret.as_bytes()).expect("hmac any key");
         m.update(statement.as_bytes());
         if m.verify_slice(&tag).is_err() {
             return Err(SsoError::BadSignature);
@@ -338,9 +342,18 @@ pub fn registry_from_vault(
             domains(),
         )));
     }
-    if let Some(fp) = get("saml.cert_fingerprint", "TUCANO_SAML_CERT_FINGERPRINT") {
-        let issuer = get("saml.issuer", "TUCANO_SAML_ISSUER").unwrap_or_else(|| "saml".to_string());
-        providers.push(std::sync::Arc::new(SamlIdp::new(issuer, fp, domains())));
+    if get("saml.cert_fingerprint", "TUCANO_SAML_CERT_FINGERPRINT").is_some() {
+        // A2 fail-closed: a public fingerprint alone does NOT enable SAML.
+        match get("saml.signing_secret", "TUCANO_SAML_SIGNING_SECRET") {
+            Some(secret) => {
+                let issuer =
+                    get("saml.issuer", "TUCANO_SAML_ISSUER").unwrap_or_else(|| "saml".to_string());
+                providers.push(std::sync::Arc::new(SamlIdp::new(issuer, secret, domains())));
+            }
+            None => tracing::error!(
+                "SAML fingerprint configured but no saml.signing_secret — SAML login                  disabled (fingerprint-derived keys are forgeable, review A2)"
+            ),
+        }
     }
     SsoRegistry::new(providers)
 }
@@ -413,7 +426,11 @@ mod tests {
 
     #[test]
     fn saml_assertion_verified_and_domain_gated() {
-        let idp = SamlIdp::new("entra", "cert-fp-123", vec!["contoso.test".into()]);
+        let idp = SamlIdp::new(
+            "entra",
+            "shared-deployment-secret",
+            vec!["contoso.test".into()],
+        );
         let statement = serde_json::json!({
             "NameID": "dana@contoso.test",
             "display_name": "Dana",
