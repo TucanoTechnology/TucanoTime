@@ -105,6 +105,8 @@ pub struct AppState {
     pub email: Arc<dyn crate::email::EmailSender>,
     /// Payment providers (#34). Empty registry disables the endpoints.
     pub payments: Arc<crate::payments::PaymentRegistry>,
+    /// Accounting sync providers (#33). Empty registry disables the endpoints.
+    pub accounting: Arc<crate::accounting::AccountingRegistry>,
 }
 
 impl AppState {
@@ -137,6 +139,8 @@ impl AppState {
             };
         // Payment providers (#34): enabled when their webhook secrets exist.
         let payments = crate::payments::registry_from_vault(vault.as_deref());
+        // Accounting providers (#33): enabled when an OAuth token exists.
+        let accounting = crate::accounting::registry_from_vault(vault.as_deref());
         Self {
             clock: Arc::new(crate::clock::SystemClock),
             locks,
@@ -151,6 +155,7 @@ impl AppState {
             vault,
             email,
             payments,
+            accounting,
             store,
         }
     }
@@ -166,6 +171,13 @@ impl AppState {
     #[must_use]
     pub fn with_payments(mut self, registry: Arc<crate::payments::PaymentRegistry>) -> Self {
         self.payments = registry;
+        self
+    }
+
+    /// Swaps the accounting registry (tests inject stub transports).
+    #[must_use]
+    pub fn with_accounting(mut self, registry: Arc<crate::accounting::AccountingRegistry>) -> Self {
+        self.accounting = registry;
         self
     }
 }
@@ -888,6 +900,173 @@ pub async fn payment_webhook(
     app.audit
         .record("payment_received", &invoice.number, app.clock.now());
     Ok(Json(serde_json::json!({ "status": "paid", "invoice": invoice.number })).into_response())
+}
+
+/// Body for `POST /invoices/{id}/sync`.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncInput {
+    pub provider: String,
+}
+
+/// Copies an issued invoice to the accounting provider (#33). Idempotent:
+/// a previously synced invoice is a no-op, and failures are recorded rather
+/// than thrown (sync must never block the invoice flow).
+pub async fn sync_invoice(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<SyncInput>,
+) -> ApiResult {
+    let invoice = app
+        .store
+        .get_invoice(id)?
+        .ok_or_else(|| ApiError::not_found("invoice"))?;
+    if invoice.status == crate::domain::InvoiceStatus::Draft {
+        return Err(ApiError::conflict("issue the invoice before syncing it"));
+    }
+    let provider = app
+        .accounting
+        .get(&input.provider)
+        .ok_or_else(|| ApiError::bad_request("unknown or disabled accounting provider"))?;
+    let customer = get_customer(&app.store, invoice.customer_id)?;
+    let records = crate::accounting::list_records(&app.store)?;
+    if let Some(prev) = records
+        .iter()
+        .find(|r| {
+            r.provider == provider.name() && r.kind == "invoice" && r.invoice_id == invoice.id
+        })
+        .cloned()
+        .filter(|r| r.status == crate::accounting::SyncStatus::Synced)
+    {
+        // Invoice already synced. If it has since been paid and no payment
+        // record exists yet, push the payment against the remote invoice (#33).
+        let has_payment = records.iter().any(|r| {
+            r.provider == prev.provider && r.kind == "payment" && r.invoice_id == invoice.id
+        });
+        if invoice.status != crate::domain::InvoiceStatus::Paid || has_payment {
+            return Ok(Json(serde_json::json!({ "record": prev, "noop": true })).into_response());
+        }
+        let paid_at = invoice.paid_at.unwrap_or_else(|| app.clock.now());
+        return match provider.push_payment(
+            &prev.remote_id,
+            invoice.total_minor,
+            &invoice.currency.0,
+            &invoice.payment_reference,
+            paid_at,
+        ) {
+            Ok(remote) => {
+                let rec = crate::accounting::record_sync(
+                    &app.store,
+                    crate::accounting::SyncAttempt {
+                        provider: provider.name(),
+                        kind: "payment",
+                        invoice: &invoice,
+                        remote_id: remote,
+                        status: crate::accounting::SyncStatus::Synced,
+                        error: String::new(),
+                        now: app.clock.now(),
+                    },
+                )?;
+                app.audit
+                    .record("accounting_payment_sync", &invoice.number, app.clock.now());
+                Ok(
+                    Json(serde_json::json!({ "record": rec, "invoice_synced": prev.remote_id }))
+                        .into_response(),
+                )
+            }
+            Err(e) => {
+                let rec = crate::accounting::record_sync(
+                    &app.store,
+                    crate::accounting::SyncAttempt {
+                        provider: provider.name(),
+                        kind: "payment",
+                        invoice: &invoice,
+                        remote_id: String::new(),
+                        status: crate::accounting::SyncStatus::Failed,
+                        error: e.to_string(),
+                        now: app.clock.now(),
+                    },
+                )?;
+                Ok(Json(serde_json::json!({ "record": rec, "failed": true })).into_response())
+            }
+        };
+    }
+    let key = crate::accounting::invoice_key(provider.name(), &invoice.number);
+    let doc = crate::accounting::InvoiceDoc {
+        invoice: &invoice,
+        customer: &customer,
+    };
+    match provider.push_invoice(&doc, &key) {
+        Ok(remote) => {
+            if invoice.status == crate::domain::InvoiceStatus::Paid
+                && let Err(e) = provider.push_payment(
+                    &remote,
+                    invoice.total_minor,
+                    &invoice.currency.0,
+                    &invoice.payment_reference,
+                    invoice.paid_at.unwrap_or_else(|| app.clock.now()),
+                )
+            {
+                let prec = crate::accounting::record_sync(
+                    &app.store,
+                    crate::accounting::SyncAttempt {
+                        provider: provider.name(),
+                        kind: "payment",
+                        invoice: &invoice,
+                        remote_id: String::new(),
+                        status: crate::accounting::SyncStatus::Failed,
+                        error: e.to_string(),
+                        now: app.clock.now(),
+                    },
+                )?;
+                tracing::warn!(error = %e, "payment sync failed (invoice synced anyway)");
+                return Ok(
+                    Json(serde_json::json!({ "record": prec, "invoice_synced": remote }))
+                        .into_response(),
+                );
+            }
+            let rec = crate::accounting::record_sync(
+                &app.store,
+                crate::accounting::SyncAttempt {
+                    provider: provider.name(),
+                    kind: "invoice",
+                    invoice: &invoice,
+                    remote_id: remote,
+                    status: crate::accounting::SyncStatus::Synced,
+                    error: String::new(),
+                    now: app.clock.now(),
+                },
+            )?;
+            app.audit
+                .record("accounting_sync", &invoice.number, app.clock.now());
+            Ok(Json(serde_json::json!({ "record": rec })).into_response())
+        }
+        Err(e) => {
+            let rec = crate::accounting::record_sync(
+                &app.store,
+                crate::accounting::SyncAttempt {
+                    provider: provider.name(),
+                    kind: "invoice",
+                    invoice: &invoice,
+                    remote_id: String::new(),
+                    status: crate::accounting::SyncStatus::Failed,
+                    error: e.to_string(),
+                    now: app.clock.now(),
+                },
+            )?;
+            Ok(Json(serde_json::json!({ "record": rec, "failed": true })).into_response())
+        }
+    }
+}
+
+/// Visible sync status for the dashboard (#33): every provider record.
+pub async fn sync_status(State(app): State<AppState>) -> ApiResult {
+    let records = crate::accounting::list_records(&app.store)?;
+    Ok(Json(serde_json::json!({
+        "records": records,
+        "providers": app.accounting.names(),
+    }))
+    .into_response())
 }
 
 pub async fn invoice_report_handler(

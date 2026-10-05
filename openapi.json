@@ -1230,6 +1230,33 @@
         }
       }
     },
+    "/invoices/{id}/sync": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "post": {
+        "operationId": "syncInvoice",
+        "tags": ["invoices"],
+        "summary": "Copy an issued invoice (and later its payment) to an accounting provider (#33). Idempotent; failures are recorded, not fatal.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["provider"], "properties": { "provider": { "type": "string", "enum": ["qbo", "xero"] } }, "additionalProperties": false } } } },
+        "responses": {
+          "200": { "description": "Sync record (status synced/failed; noop when already synced).", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "description": "Admin role required." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/sync/accounting": {
+      "get": {
+        "operationId": "accountingSyncStatus",
+        "tags": ["invoices"],
+        "summary": "Visible accounting sync status: provider records + enabled providers (#33)",
+        "responses": {
+          "200": { "description": "Status.", "content": { "application/json": { "schema": { "type": "object", "required": ["records", "providers"], "properties": { "records": { "type": "array", "items": { "type": "object", "required": ["provider", "kind", "invoice_id", "invoice_number", "remote_id", "status", "error", "attempts", "updated_at"], "properties": { "provider": { "type": "string" }, "kind": { "type": "string" }, "invoice_id": { "type": "string", "format": "uuid" }, "invoice_number": { "type": "string" }, "remote_id": { "type": "string" }, "status": { "type": "string", "enum": ["synced", "failed"] }, "error": { "type": "string" }, "attempts": { "type": "integer" }, "updated_at": { "type": "string", "format": "date-time" } }, "additionalProperties": false } }, "providers": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": false } } } },
+          "403": { "description": "Admin role required." }
+        }
+      }
+    },
     "/invoices/summary": {
       "get": {
         "operationId": "invoiceSummary",

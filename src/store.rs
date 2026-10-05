@@ -140,6 +140,29 @@ impl Store {
         &self.root
     }
 
+    /// Generic JSON document read at a root-relative path (auxiliary state
+    /// files like the accounting sync status, #33). `Ok(None)` when absent.
+    pub fn read_json_rel<T: serde::de::DeserializeOwned>(
+        &self,
+        rel: &str,
+    ) -> Result<Option<T>, StoreError> {
+        read_json(&self.root.join(rel))
+    }
+
+    /// Generic atomic JSON write at a root-relative path, under the write lock.
+    pub fn write_json_rel<T: serde::Serialize + ?Sized>(
+        &self,
+        rel: &str,
+        value: &T,
+    ) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.root.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        write_json(&path, value)
+    }
+
     /// Override the per-collection document cap (used by tests; production uses
     /// the default or `TUCANO_MAX_DOCS`).
     pub fn with_max_docs(mut self, max: usize) -> Self {
@@ -920,7 +943,7 @@ where
 
 fn write_json<T>(path: &Path, value: &T) -> Result<(), StoreError>
 where
-    T: serde::Serialize,
+    T: serde::Serialize + ?Sized,
 {
     let bytes = serde_json::to_vec_pretty(value)
         .map_err(|e| StoreError::Io(format!("serialisation failed: {e}")))?;
