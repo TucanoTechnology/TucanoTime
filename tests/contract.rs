@@ -79,12 +79,30 @@ async fn login_cookie(router: &Router, email: &str, pw: &str) -> String {
 
 impl Client {
     async fn new(store: Store, locks: Option<Arc<dyn EntryLock>>) -> Self {
+        Self::build(
+            store,
+            locks,
+            tucano_time::payments::PaymentRegistry::default(),
+        )
+        .await
+    }
+
+    async fn with_payments(store: Store, payments: tucano_time::payments::PaymentRegistry) -> Self {
+        Self::build(store, None, payments).await
+    }
+
+    async fn build(
+        store: Store,
+        locks: Option<Arc<dyn EntryLock>>,
+        payments: tucano_time::payments::PaymentRegistry,
+    ) -> Self {
         let session = Arc::new(Session::new(
             b"test-session-secret-0000000000000032".to_vec(),
             3600,
             false,
         ));
         let recorder = Arc::new(tucano_time::email::RecordingEmailSender::default());
+        let payments = Arc::new(payments);
         let state = match locks {
             Some(l) => {
                 let store = Arc::new(store);
@@ -103,9 +121,12 @@ impl Client {
                     revocations,
                     vault: None,
                     email: recorder.clone(),
+                    payments,
                 }
             }
-            None => AppState::with_session(store, session).with_email(recorder.clone()),
+            None => AppState::with_session(store, session)
+                .with_email(recorder.clone())
+                .with_payments(payments),
         };
         let router = tucano_time::build_router(state);
         // Bootstrap the first admin (403 if users already exist — fine).
@@ -2071,6 +2092,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
         vault: Some(vault),
         email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
+        payments: std::sync::Arc::new(tucano_time::payments::PaymentRegistry::default()),
     };
     let router = tucano_time::build_router(state);
     // bootstrap admin
@@ -2213,6 +2235,7 @@ async fn calendar_events_from_configured_feed() {
         revocations: std::sync::Arc::new(tucano_time::revoke::Revocations::new(&root)),
         vault: Some(vault),
         email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
+        payments: std::sync::Arc::new(tucano_time::payments::PaymentRegistry::default()),
     };
     let router = tucano_time::build_router(state);
     raw(
@@ -2390,4 +2413,124 @@ async fn invoice_email_without_customer_email_is_422() {
     let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(app.email.messages().len(), 0);
+}
+
+/// Posts a raw string body to the webhook endpoint WITHOUT the CSRF header,
+/// proving the provider webhook is exempt and authenticated only by signature.
+async fn webhook_post(
+    router: &Router,
+    provider: &str,
+    body: &str,
+    signature: Option<&str>,
+) -> (StatusCode, Value) {
+    let mut b = Request::builder()
+        .method("POST")
+        .uri(format!("/payments/webhook/{provider}"))
+        .header("content-type", "application/json");
+    if let Some(s) = signature {
+        b = b.header("x-webhook-signature", s);
+    }
+    let res = router
+        .clone()
+        .oneshot(b.body(Body::from(body.to_string())).unwrap())
+        .await
+        .expect("oneshot");
+    let status = res.status();
+    let bytes = res.into_body().collect().await.expect("body").to_bytes();
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    };
+    (status, value)
+}
+
+#[tokio::test]
+async fn checkout_then_signed_webhook_marks_invoice_paid() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let stripe = tucano_time::payments::StripeProvider::with_secret("whsec_topsecret");
+    let registry = tucano_time::payments::PaymentRegistry::new(vec![Arc::new(stripe)]);
+    let app = Client::with_payments(store, registry).await;
+
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    let number = inv["number"].as_str().unwrap().to_string();
+
+    // Draft -> checkout rejected.
+    let (sd, _) = json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{iid}/checkout"),
+        Some(json!({"provider":"stripe"})),
+    )
+    .await;
+    assert_eq!(sd, StatusCode::CONFLICT);
+
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+
+    // Unknown provider rejected.
+    let (su, _) = json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{iid}/checkout"),
+        Some(json!({"provider":"bitcoin"})),
+    )
+    .await;
+    assert_eq!(su, StatusCode::BAD_REQUEST);
+
+    // Checkout link for the issued invoice.
+    let (sc, session) = json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{iid}/checkout"),
+        Some(json!({"provider":"stripe"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{session}");
+    assert!(session["url"].as_str().unwrap().contains(&number));
+    let reference = session["reference"].as_str().unwrap().to_string();
+
+    // Unsigned / badly signed webhook rejected (and CSRF-exempt, since no
+    // x-csrf header was sent at all).
+    let payload = format!(
+        "{{\"type\":\"checkout.session.completed\",\"payment_status\":\"paid\",\"client_reference_id\":\"{reference}\",\"metadata\":{{\"invoice_number\":\"{number}\"}}}}"
+    );
+    let (sbad, _) = webhook_post(&app.router, "stripe", &payload, Some("sha256=deadbeef")).await;
+    assert_eq!(sbad, StatusCode::UNAUTHORIZED);
+
+    // Correct HMAC signature pays the invoice.
+    let sig = tucano_time::payments::sign("whsec_topsecret", &payload);
+    let (sgood, body) = webhook_post(&app.router, "stripe", &payload, Some(&sig)).await;
+    assert_eq!(sgood, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "paid");
+    let (_s2, got) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    assert_eq!(got["status"], "paid");
+    assert!(
+        got["payment_reference"]
+            .as_str()
+            .unwrap()
+            .contains("stripe:")
+    );
+
+    // Replay is idempotent.
+    let (sre, re) = webhook_post(&app.router, "stripe", &payload, Some(&sig)).await;
+    assert_eq!(sre, StatusCode::OK, "{re}");
+    assert_eq!(re["status"], "already_paid");
 }

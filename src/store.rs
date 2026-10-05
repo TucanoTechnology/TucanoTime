@@ -229,6 +229,20 @@ impl Store {
         read_json(&self.invoice_path(id))
     }
 
+    /// First invoice with this number (numbers are sequential but a restored
+    /// file could duplicate one; the earliest wins). Used by payment webhooks
+    /// (#34), which know the invoice by its human number.
+    pub fn find_invoice_by_number(&self, number: &str) -> Result<Option<Invoice>, StoreError> {
+        let mut found: Option<Invoice> = None;
+        for inv in self.list_invoices()? {
+            if inv.number == number && found.as_ref().is_none_or(|f| inv.created_at < f.created_at)
+            {
+                found = Some(inv);
+            }
+        }
+        Ok(found)
+    }
+
     pub fn put_invoice(&self, invoice: &Invoice) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         std::fs::create_dir_all(self.root.join("invoices"))?;

@@ -103,6 +103,8 @@ pub struct AppState {
     /// Email transport (#35). Disabled unless SMTP is configured; tests inject
     /// a recording sender.
     pub email: Arc<dyn crate::email::EmailSender>,
+    /// Payment providers (#34). Empty registry disables the endpoints.
+    pub payments: Arc<crate::payments::PaymentRegistry>,
 }
 
 impl AppState {
@@ -133,6 +135,8 @@ impl AppState {
                 Some(cfg) => Arc::new(crate::email::SmtpEmailSender::new(cfg)),
                 None => Arc::new(crate::email::DisabledEmailSender),
             };
+        // Payment providers (#34): enabled when their webhook secrets exist.
+        let payments = crate::payments::registry_from_vault(vault.as_deref());
         Self {
             clock: Arc::new(crate::clock::SystemClock),
             locks,
@@ -146,6 +150,7 @@ impl AppState {
             revocations,
             vault,
             email,
+            payments,
             store,
         }
     }
@@ -154,6 +159,13 @@ impl AppState {
     #[must_use]
     pub fn with_email(mut self, sender: Arc<dyn crate::email::EmailSender>) -> Self {
         self.email = sender;
+        self
+    }
+
+    /// Swaps the payment registry (tests inject providers with known secrets).
+    #[must_use]
+    pub fn with_payments(mut self, registry: Arc<crate::payments::PaymentRegistry>) -> Self {
+        self.payments = registry;
         self
     }
 }
@@ -672,6 +684,12 @@ pub struct PayInput {
     pub reference: String,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckoutInput {
+    pub provider: String,
+}
+
 /// Mark an issued invoice as paid (#27).
 pub async fn pay_invoice(
     State(app): State<AppState>,
@@ -777,6 +795,99 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
             )
         })?;
     Ok(Json(serde_json::json!({ "sent_to": sent_to })).into_response())
+}
+
+// ------------------------------------------------------------- payments #34 --
+
+/// Creates a hosted checkout link for an issued invoice (#34). The provider
+/// adapter builds the URL and a client reference that the webhook echoes back
+/// so the payment can be matched to the invoice.
+pub async fn create_checkout(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<CheckoutInput>,
+) -> ApiResult {
+    let invoice = app
+        .store
+        .get_invoice(id)?
+        .ok_or_else(|| ApiError::not_found("invoice"))?;
+    match invoice.status {
+        crate::domain::InvoiceStatus::Draft => {
+            return Err(ApiError::conflict(
+                "issue the invoice before taking payment",
+            ));
+        }
+        crate::domain::InvoiceStatus::Paid => {
+            return Err(ApiError::conflict("this invoice is already paid"));
+        }
+        crate::domain::InvoiceStatus::Issued => {}
+    }
+    let provider = app
+        .payments
+        .get(&input.provider)
+        .ok_or_else(|| ApiError::bad_request("unknown or disabled payment provider"))?;
+    let session = provider
+        .create_checkout(
+            invoice.id,
+            &invoice.number,
+            invoice.total_minor,
+            &invoice.currency.0,
+        )
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    app.audit.record(
+        "checkout_created",
+        &format!("{}:{id}", session.provider),
+        app.clock.now(),
+    );
+    Ok((StatusCode::CREATED, Json(session)).into_response())
+}
+
+/// Provider webhook receiver (#34, public route — authenticated by the
+/// provider signature, hence the CSRF exemption). A completed payment flips
+/// the invoice to `paid` through the #27 status model; unrelated or replayed
+/// events are accepted without effect so providers stop retrying.
+pub async fn payment_webhook(
+    State(app): State<AppState>,
+    Path(provider): Path<String>,
+    headers: axum::http::HeaderMap,
+    body: String,
+) -> ApiResult {
+    let Some(p) = app.payments.get(&provider) else {
+        return Err(ApiError::bad_request("unknown payment provider"));
+    };
+    let signature = headers
+        .get("x-webhook-signature")
+        .or_else(|| headers.get("stripe-signature"))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let event = p.parse_webhook(&body, signature).map_err(|e| match e {
+        crate::payments::PaymentError::BadSignature => ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "bad_signature",
+            "webhook signature verification failed",
+        ),
+        other => ApiError::bad_request(other.to_string()),
+    })?;
+    let Some(event) = event else {
+        return Ok(Json(serde_json::json!({ "ignored": true })).into_response());
+    };
+    let Some(mut invoice) = app.store.find_invoice_by_number(&event.invoice_number)? else {
+        return Err(ApiError::not_found("invoice"));
+    };
+    if invoice.status == crate::domain::InvoiceStatus::Paid {
+        // Replay-safe: the provider can deliver the same event more than once.
+        return Ok(Json(serde_json::json!({ "status": "already_paid" })).into_response());
+    }
+    if invoice.status != crate::domain::InvoiceStatus::Issued {
+        return Err(ApiError::conflict("invoice is not issued"));
+    }
+    invoice.status = crate::domain::InvoiceStatus::Paid;
+    invoice.paid_at = Some(app.clock.now());
+    invoice.payment_reference = format!("{}:{}", event.provider, event.reference);
+    app.store.put_invoice(&invoice)?;
+    app.audit
+        .record("payment_received", &invoice.number, app.clock.now());
+    Ok(Json(serde_json::json!({ "status": "paid", "invoice": invoice.number })).into_response())
 }
 
 pub async fn invoice_report_handler(
