@@ -222,6 +222,9 @@ mod tests {
                 default_rate_minor: 6000,
                 active: true,
                 email: String::new(),
+                payment_terms: None,
+                invoice_notes: String::new(),
+                invoice_subject: String::new(),
             })
             .unwrap();
         store.put_project(&project).unwrap();
@@ -262,6 +265,9 @@ mod tests {
             default_rate_minor: 6000,
             active: true,
             email: String::new(),
+            payment_terms: None,
+            invoice_notes: String::new(),
+            invoice_subject: String::new(),
         };
         let entries = vec![Entry {
             id: uuid::Uuid::new_v4(),

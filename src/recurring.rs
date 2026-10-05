@@ -213,6 +213,9 @@ mod tests {
             default_rate_minor: 6000,
             active: true,
             email: String::new(),
+            payment_terms: None,
+            invoice_notes: String::new(),
+            invoice_subject: String::new(),
         };
         store.put_customer(&cust).unwrap();
         let sched = RecurringSchedule {

@@ -91,6 +91,9 @@ pub async fn create_customer(
         default_rate_minor: draft.default_rate_minor,
         active: draft.active,
         email: draft.email,
+        payment_terms: draft.payment_terms,
+        invoice_notes: draft.invoice_notes,
+        invoice_subject: draft.invoice_subject,
     };
     app.store.put_customer(&customer)?;
     Ok((StatusCode::CREATED, Json(&customer)).into_response())
@@ -114,6 +117,9 @@ pub async fn update_customer(
         default_rate_minor: draft.default_rate_minor,
         active: draft.active,
         email: draft.email,
+        payment_terms: draft.payment_terms,
+        invoice_notes: draft.invoice_notes,
+        invoice_subject: draft.invoice_subject,
     };
     app.store.put_customer(&updated)?;
     Ok(Json(&updated).into_response())

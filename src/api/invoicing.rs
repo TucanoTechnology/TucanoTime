@@ -118,19 +118,20 @@ pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) ->
     // Draft check + transition happen inside one store lock (review B4):
     // an issue racing a pay (or another issue) cannot double-transition.
     let invoice = get_invoice_or_404(&app, id)?;
-    // net-14 terms (fallback = same day; only reachable at date extremes)
-    let due = invoice
-        .period_to
-        .checked_add_days(chrono::Days::new(14))
-        .unwrap_or(invoice.period_to);
     let customer = get_customer(&app.store, invoice.customer_id)?;
+    let template = load_template(&app)?;
+    // Payment terms (#116): customer -> org template -> legacy net-14 from
+    // period_to (the fallback keeps its exact original arithmetic).
+    let due = resolve_due_date(&invoice, &customer, &template, app.clock.now());
     // Render against the to-be-issued snapshot: the PDF is the issue-time
     // document, and bytes are pure in this state (legacy re-renders match).
     let mut snapshot = invoice;
     snapshot.status = crate::domain::InvoiceStatus::Issued;
     snapshot.issued_at = Some(app.clock.now());
     snapshot.due_date = Some(due);
-    let doc = crate::pdf::doc_for(&snapshot, &customer, &org_for(&app));
+    let mut doc = crate::pdf::doc_for(&snapshot, &customer, &org_for(&app));
+    let content = content_for(&snapshot, &customer, &template);
+    crate::template::apply_doc_content(&mut doc, &content);
     let pdf = crate::pdf::render_invoice_pdf(&doc);
     let issued = app.store.issue_invoice(id, app.clock.now(), due, &pdf)?;
     Ok(Json(issued).into_response())
@@ -150,9 +151,7 @@ pub async fn invoice_pdf(State(app): State<AppState>, Path(id): Path<Uuid>) -> A
     let (bytes, filename) = match app.store.invoice_pdf_bytes(id)? {
         Some(b) => (b, format!("{}.pdf", sanitize_number(&invoice.number))),
         None => {
-            let customer = get_customer(&app.store, invoice.customer_id)?;
-            let doc = crate::pdf::doc_for(&invoice, &customer, &org_for(&app));
-            let b = crate::pdf::render_invoice_pdf(&doc);
+            let b = render_pdf_now(&app, &invoice)?;
             // Persist the archive + hint; a failure here is a plain 500 and
             // costs nothing (the invoice JSON remains the record of truth).
             let attached = app.store.attach_invoice_pdf(id, &b, app.clock.now())?;
@@ -270,9 +269,7 @@ pub(crate) fn invoice_pdf_for_delivery(
             .unwrap_or_else(|| format!("{}.pdf", sanitize_number(&invoice.number)));
         return Ok((name, bytes));
     }
-    let customer = get_customer(&app.store, invoice.customer_id)?;
-    let doc = crate::pdf::doc_for(invoice, &customer, &org_for(app));
-    let bytes = crate::pdf::render_invoice_pdf(&doc);
+    let bytes = render_pdf_now(app, invoice)?;
     let attached = app
         .store
         .attach_invoice_pdf(invoice.id, &bytes, app.clock.now())?;
@@ -303,6 +300,8 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
     let amount = money_for_email(invoice.total_minor, &invoice.currency.0);
     let due = invoice.due_date.map(|d| d.to_string());
     let org = org_for(&app);
+    let template = load_template(&app)?;
+    let content = content_for(&invoice, &customer, &template);
     let text = crate::email::render_invoice_email(
         &customer.name,
         &invoice.number,
@@ -311,12 +310,19 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
         &org.name,
         true,
     );
-    let subject = crate::email::invoice_subject(&invoice.number, &org.name);
+    // #116: the template subject wins when configured (customer override →
+    // org template → legacy); the HTML letter is set only when there is
+    // template content, keeping unset templates byte-identical.
+    let subject = content
+        .subject
+        .clone()
+        .unwrap_or_else(|| crate::email::invoice_subject(&invoice.number, &org.name));
+    let html = crate::template::email_html(&content);
     let msg = crate::email::EmailMessage {
         to: customer.email.clone(),
         subject,
         text,
-        html: None,
+        html,
         attachment: Some((filename, pdf)),
     };
     let sent_to = msg.to.clone();
@@ -732,4 +738,173 @@ pub async fn delete_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) -
     }
     app.store.delete_invoice(id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+// ------------------------------------------------- templates & document --
+
+/// The singleton invoice template (#116) as stored; absent means defaults.
+pub(crate) fn load_template(app: &AppState) -> Result<crate::domain::InvoiceTemplate, ApiError> {
+    Ok(app
+        .store
+        .read_json_rel::<crate::domain::InvoiceTemplate>("invoice_template.json")?
+        .unwrap_or_default())
+}
+
+/// Resolved variables + rendered content for one invoice/customer/template.
+pub(crate) fn content_for(
+    invoice: &Invoice,
+    customer: &crate::domain::Customer,
+    template: &crate::domain::InvoiceTemplate,
+) -> crate::template::DocContent {
+    let issue_day = invoice
+        .issued_at
+        .or(Some(invoice.created_at))
+        .map(|dt| dt.date_naive());
+    let vars = crate::template::vars_for(invoice, &customer.name, issue_day);
+    crate::template::doc_content(template, customer, &vars)
+}
+
+/// Render + archive the PDF from the invoice as stored today, using the
+/// current template content (the legacy path of #113/#116). Deterministic in
+/// (invoice, customer, template, org): a re-render while nothing was edited
+/// yields identical bytes.
+pub(crate) fn render_pdf_now(app: &AppState, invoice: &Invoice) -> Result<Vec<u8>, ApiError> {
+    let customer = get_customer(&app.store, invoice.customer_id)?;
+    let template = load_template(app)?;
+    let mut doc = crate::pdf::doc_for(invoice, &customer, &org_for(app));
+    let content = content_for(invoice, &customer, &template);
+    crate::template::apply_doc_content(&mut doc, &content);
+    Ok(crate::pdf::render_invoice_pdf(&doc))
+}
+
+/// `due_date` at issue (#116): customer terms → org default terms → the
+/// legacy net-14-from-`period_to`. Terms count from the issue day; the legacy
+/// fallback keeps its exact original arithmetic so nothing shifts.
+pub(crate) fn resolve_due_date(
+    invoice: &Invoice,
+    customer: &crate::domain::Customer,
+    template: &crate::domain::InvoiceTemplate,
+    now: chrono::DateTime<chrono::Utc>,
+) -> chrono::NaiveDate {
+    let terms = customer
+        .payment_terms
+        .as_ref()
+        .or(template.payment_terms.as_ref());
+    if let Some(days) = terms.and_then(|t| t.fixed_days()) {
+        let from = now.date_naive();
+        return from
+            .checked_add_days(chrono::Days::new(u64::from(days)))
+            .unwrap_or(from);
+    }
+    invoice
+        .period_to
+        .checked_add_days(chrono::Days::new(14))
+        .unwrap_or(invoice.period_to)
+}
+
+/// `GET /admin/invoice-template` — the stored template plus the variable
+/// cheatsheet, so the GUI renders the same table the validator enforces.
+pub async fn invoice_template_get(State(app): State<AppState>) -> ApiResult {
+    let template = load_template(&app)?;
+    Ok(Json(serde_json::json!({
+        "template": template,
+        "variables": crate::template::VAR_HELP
+            .iter()
+            .map(|(name, example)| serde_json::json!({"name": name, "example": example}))
+            .collect::<Vec<_>>(),
+    }))
+    .into_response())
+}
+
+/// `PUT /admin/invoice-template` — validate fail-loud (unknown `%tokens%`,
+/// oversized fields, malformed payment terms), render the pieces against a
+/// synthetic invoice as an extra gauntlet, then persist atomically. A
+/// rejection persists nothing.
+pub async fn invoice_template_put(
+    State(app): State<AppState>,
+    ValidJson(template): ValidJson<crate::domain::InvoiceTemplate>,
+) -> ApiResult {
+    let mut errors = Vec::new();
+    crate::template::validate_field(
+        "subject",
+        &template.subject,
+        crate::template::SUBJECT_MAX,
+        &mut errors,
+    );
+    crate::template::validate_field(
+        "body",
+        &template.body,
+        crate::template::BODY_MAX,
+        &mut errors,
+    );
+    crate::template::validate_field(
+        "footer",
+        &template.footer,
+        crate::template::FOOTER_MAX,
+        &mut errors,
+    );
+    crate::domain::validate_payment_terms(template.payment_terms.as_ref(), &mut errors);
+    if errors.is_empty() {
+        // Render against a synthetic sample: anything that fails here would
+        // fail on a real invoice later. Never persists a broken template.
+        let sample = Invoice {
+            id: Uuid::nil(),
+            number: "INV-0000".into(),
+            customer_id: Uuid::nil(),
+            currency: crate::domain::Currency("EUR".into()),
+            period_from: chrono::NaiveDate::MIN + chrono::Duration::days(1),
+            period_to: chrono::NaiveDate::MIN + chrono::Duration::days(2),
+            lines: vec![],
+            total_minor: 0,
+            status: crate::domain::InvoiceStatus::Draft,
+            created_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
+            issued_at: None,
+            due_date: None,
+            paid_at: None,
+            payment_reference: String::new(),
+            pdf: None,
+        };
+        let vars = crate::template::vars_for(&sample, "Sample Customer", None);
+        // interpolate/parse cannot fail by design; the call is the assertion
+        // that no panic escapes for this template.
+        let _ = crate::template::doc_content(&template, &synthetic_customer(), &vars);
+    }
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    app.store
+        .write_json_rel("invoice_template.json", &template)?;
+    Ok(Json(template).into_response())
+}
+
+fn synthetic_customer() -> crate::domain::Customer {
+    crate::domain::Customer {
+        id: Uuid::nil(),
+        name: "Sample Customer".into(),
+        currency: crate::domain::Currency("EUR".into()),
+        default_rate_minor: 0,
+        active: true,
+        email: String::new(),
+        payment_terms: None,
+        invoice_notes: String::new(),
+        invoice_subject: String::new(),
+    }
+}
+
+/// `GET /invoices/{id}/document` — the live `{subject, html}` preview:
+/// exactly the content the PDF (#113) and the email (#35) render from,
+/// resolved from the *current* template + customer, not a baked snapshot.
+pub async fn invoice_document(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    let invoice = get_invoice_or_404(&app, id)?;
+    let customer = get_customer(&app.store, invoice.customer_id)?;
+    let template = load_template(&app)?;
+    let content = content_for(&invoice, &customer, &template);
+    let org = org_for(&app);
+    let subject = content
+        .subject
+        .clone()
+        .or_else(|| Some(crate::email::invoice_subject(&invoice.number, &org.name)))
+        .unwrap_or_default();
+    let html = crate::template::email_html(&content).unwrap_or_default();
+    Ok(Json(serde_json::json!({ "subject": subject, "html": html })).into_response())
 }

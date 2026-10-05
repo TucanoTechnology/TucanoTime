@@ -1373,6 +1373,9 @@ mod tests {
             default_rate_minor: 1,
             active: true,
             email: String::new(),
+            payment_terms: None,
+            invoice_notes: String::new(),
+            invoice_subject: String::new(),
         }
     }
 

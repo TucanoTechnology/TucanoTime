@@ -160,6 +160,82 @@ pub struct Customer {
     /// Optional billing email for invoice delivery (#35).
     #[serde(default)]
     pub email: String,
+    /// Payment terms used for `due_date` at issue (#116). `None` defers to
+    /// the org template's default, then the legacy net-14-from-period-to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payment_terms: Option<PaymentTerms>,
+    /// Markdown-subset notes appended to this customer's invoice documents
+    /// after the org footer (#116). Cap enforced by validation.
+    #[serde(default)]
+    pub invoice_notes: String,
+    /// Per-customer subject override; `%variable%` placeholders allowed
+    /// (#116). Empty defers to the org template, then the legacy subject.
+    #[serde(default)]
+    pub invoice_subject: String,
+}
+
+/// Payment terms that decide an invoice's `due_date` at issue (#116).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub struct PaymentTerms {
+    pub kind: TermsKind,
+    /// Only meaningful for `custom`; `1..=365`. Other kinds must omit it
+    /// (validation rejects it otherwise, serde defaults it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub days: Option<u16>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TermsKind {
+    /// Due the day the invoice is issued.
+    #[serde(rename = "upon_receipt")]
+    UponReceipt,
+    #[serde(rename = "net_15")]
+    Net15,
+    #[serde(rename = "net_20")]
+    Net20,
+    #[serde(rename = "net_30")]
+    Net30,
+    #[serde(rename = "net_45")]
+    Net45,
+    /// `days` required, 1..=365.
+    #[serde(rename = "custom")]
+    Custom,
+}
+
+impl PaymentTerms {
+    /// The fixed-day kinds carry their days implicitly; `custom` and
+    /// `upon_receipt` do not.
+    pub fn fixed_days(&self) -> Option<u16> {
+        match self.kind {
+            TermsKind::UponReceipt => Some(0),
+            TermsKind::Net15 => Some(15),
+            TermsKind::Net20 => Some(20),
+            TermsKind::Net30 => Some(30),
+            TermsKind::Net45 => Some(45),
+            TermsKind::Custom => self.days,
+        }
+    }
+}
+
+/// The org-wide invoice document template (#116), stored as the singleton
+/// `invoice_template.json` next to `scheduler.json`. Every field is optional:
+/// an unset template keeps the hard-coded legacy behaviour byte-for-byte.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvoiceTemplate {
+    /// Subject line; `%variable%` placeholders resolved at render/issue.
+    #[serde(default)]
+    pub subject: String,
+    /// Markdown-subset body shown before the line table.
+    #[serde(default)]
+    pub body: String,
+    /// Markdown-subset footer (e.g. bank details), after body + notes.
+    #[serde(default)]
+    pub footer: String,
+    /// Default terms for customers that carry none.
+    #[serde(default)]
+    pub payment_terms: Option<PaymentTerms>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -921,6 +997,12 @@ pub struct CustomerInput {
     pub active: bool,
     #[serde(default)]
     pub email: String,
+    #[serde(default)]
+    pub payment_terms: Option<PaymentTerms>,
+    #[serde(default)]
+    pub invoice_notes: String,
+    #[serde(default)]
+    pub invoice_subject: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1017,6 +1099,21 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
     if !email.is_empty() && !crate::email::valid_address(email) {
         errors.push(FieldError::new("email", "not a valid email address"));
     }
+    // Invoice document fields (#116): same gauntlet as the rest of the input,
+    // including the template validators so unknown %tokens% never persist.
+    validate_payment_terms(input.payment_terms.as_ref(), &mut errors);
+    crate::template::validate_field(
+        "invoice_notes",
+        &input.invoice_notes,
+        crate::template::NOTES_MAX,
+        &mut errors,
+    );
+    crate::template::validate_field(
+        "invoice_subject",
+        &input.invoice_subject,
+        crate::template::SUBJECT_MAX,
+        &mut errors,
+    );
     if errors.is_empty() {
         Ok(CustomerDraft {
             name: name.unwrap(),
@@ -1024,9 +1121,34 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
             default_rate_minor: input.default_rate_minor,
             active: input.active,
             email: email.to_string(),
+            payment_terms: input.payment_terms,
+            invoice_notes: input.invoice_notes.trim().to_string(),
+            invoice_subject: input.invoice_subject.trim().to_string(),
         })
     } else {
         Err(errors)
+    }
+}
+
+/// `custom` requires days in 1..=365; every other kind must omit them (#116).
+pub fn validate_payment_terms(terms: Option<&PaymentTerms>, errors: &mut Vec<FieldError>) {
+    let Some(t) = terms else { return };
+    match t.kind {
+        TermsKind::Custom => match t.days {
+            Some(d) if (1..=365).contains(&d) => {}
+            _ => errors.push(FieldError::new(
+                "payment_terms",
+                "custom terms require days in 1..=365",
+            )),
+        },
+        _ => {
+            if t.days.is_some() {
+                errors.push(FieldError::new(
+                    "payment_terms",
+                    "only custom terms carry a day count",
+                ));
+            }
+        }
     }
 }
 
@@ -1092,6 +1214,9 @@ pub struct CustomerDraft {
     pub default_rate_minor: u64,
     pub active: bool,
     pub email: String,
+    pub payment_terms: Option<PaymentTerms>,
+    pub invoice_notes: String,
+    pub invoice_subject: String,
 }
 
 #[derive(Debug)]
@@ -1216,6 +1341,9 @@ mod tests {
             default_rate_minor: rate,
             active: true,
             email: String::new(),
+            payment_terms: None,
+            invoice_notes: String::new(),
+            invoice_subject: String::new(),
         }
     }
 
@@ -1276,6 +1404,9 @@ mod tests {
             default_rate_minor: 6000,
             active: true,
             email: String::new(),
+            payment_terms: None,
+            invoice_notes: String::new(),
+            invoice_subject: String::new(),
         };
         let project = Project {
             customer_id: customer.id,
@@ -1336,6 +1467,95 @@ mod tests {
             payment_reference: String::new(),
             pdf: None,
         }
+    }
+
+    #[test]
+    fn legacy_customer_docs_parse_with_new_invoice_fields_defaulted() {
+        // #116 backward compatibility: documents written before payment
+        // terms / notes / subject existed must still deserialize (and the
+        // absent terms must not break due-date resolution).
+        let legacy = r#"{
+            "id": "11111111-1111-1111-1111-111111111111",
+            "name": "Old Co",
+            "currency": "EUR",
+            "default_rate_minor": 5000,
+            "active": true
+        }"#;
+        let c: Customer = serde_json::from_str(legacy).unwrap();
+        assert_eq!(c.payment_terms, None);
+        assert_eq!(c.invoice_notes, "");
+        assert_eq!(c.invoice_subject, "");
+        // Round-trips without serialising empty optionals back out.
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(!json.contains("payment_terms"), "{json}");
+    }
+
+    #[test]
+    fn payment_terms_validation() {
+        let mut errs = Vec::new();
+        validate_payment_terms(
+            Some(&PaymentTerms {
+                kind: TermsKind::Custom,
+                days: None,
+            }),
+            &mut errs,
+        );
+        assert_eq!(errs.len(), 1);
+        validate_payment_terms(
+            Some(&PaymentTerms {
+                kind: TermsKind::Custom,
+                days: Some(400),
+            }),
+            &mut errs,
+        );
+        assert_eq!(errs.len(), 2);
+        validate_payment_terms(
+            Some(&PaymentTerms {
+                kind: TermsKind::Net30,
+                days: Some(30),
+            }),
+            &mut errs,
+        );
+        assert_eq!(errs.len(), 3, "fixed kinds must omit days");
+        validate_payment_terms(
+            Some(&PaymentTerms {
+                kind: TermsKind::Custom,
+                days: Some(21),
+            }),
+            &mut errs,
+        );
+        validate_payment_terms(
+            Some(&PaymentTerms {
+                kind: TermsKind::UponReceipt,
+                days: None,
+            }),
+            &mut errs,
+        );
+        assert_eq!(errs.len(), 3);
+        assert_eq!(
+            PaymentTerms {
+                kind: TermsKind::UponReceipt,
+                days: None
+            }
+            .fixed_days(),
+            Some(0)
+        );
+        assert_eq!(
+            PaymentTerms {
+                kind: TermsKind::Net45,
+                days: None
+            }
+            .fixed_days(),
+            Some(45)
+        );
+        assert_eq!(
+            PaymentTerms {
+                kind: TermsKind::Custom,
+                days: Some(9)
+            }
+            .fixed_days(),
+            Some(9)
+        );
     }
 
     #[test]

@@ -198,6 +198,26 @@
         <div class="field"><label for="customer-currency">Default currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
         <div class="field"><label for="customer-email">Billing email (optional, for invoice delivery)</label><input id="customer-email" type="email" maxlength="200" autocomplete="off"></div>
+        <fieldset class="field"><legend>Invoice document (#116)</legend>
+          <div class="field"><label for="customer-terms">Payment terms (due date at issue)</label>
+            <select id="customer-terms">
+              <option value="">Org default / net-14</option>
+              <option value="upon_receipt">Upon Receipt</option>
+              <option value="net_15">NET 15</option>
+              <option value="net_20">NET 20</option>
+              <option value="net_30">NET 30</option>
+              <option value="net_45">NET 45</option>
+              <option value="custom">Custom (n days)</option>
+            </select></div>
+          <div class="field" id="customer-terms-days-field" hidden>
+            <label for="customer-terms-days">Days (1–365)</label>
+            <input id="customer-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
+          </div>
+          <div class="field"><label for="customer-subject">Invoice subject override (%variables% allowed)</label>
+            <input id="customer-subject" maxlength="120" autocomplete="off"></div>
+          <div class="field"><label for="customer-notes">Invoice notes (markdown subset, appended after the footer)</label>
+            <textarea id="customer-notes" maxlength="4000" rows="3"></textarea></div>
+        </fieldset>
         <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
         <p class="form-error" id="customer-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="customer-save">Add customer</button><button type="button" class="secondary" id="customer-cancel" hidden>Cancel</button></div>
@@ -362,6 +382,43 @@
         <p class="form-error" id="config-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="config-save">Apply to config.json</button></div>
       </form>
+
+      <h2>Invoice template</h2>
+      <p class="hint">Subject, body and footer for invoice documents and emails (#116). <code>%variable%</code> placeholders resolve at issue/render time; unknown variables are rejected on save. Leave everything empty to keep the built-in wording.</p>
+      <form id="template-form" class="card">
+        <div class="field"><label for="template-subject">Subject (max 120)</label>
+          <input id="template-subject" maxlength="120" autocomplete="off" placeholder="Invoice %invoice_number% for %customer_name%"></div>
+        <div class="field"><label for="template-body">Body (markdown: #, ##, ###, **bold**, *italic*, - bullets, 1. lists)</label>
+          <textarea id="template-body" maxlength="8000" rows="5" placeholder="Dear %customer_name%,&#10;&#10;Here is the work for %invoice_issue_month% %invoice_issue_year%."></textarea></div>
+        <div class="field"><label for="template-footer">Footer (markdown, e.g. bank details)</label>
+          <textarea id="template-footer" maxlength="8000" rows="3"></textarea></div>
+        <div class="field"><label for="template-terms">Default payment terms</label>
+          <select id="template-terms">
+            <option value="">Legacy (net-14 from period end)</option>
+            <option value="upon_receipt">Upon Receipt</option>
+            <option value="net_15">NET 15</option>
+            <option value="net_20">NET 20</option>
+            <option value="net_30">NET 30</option>
+            <option value="net_45">NET 45</option>
+            <option value="custom">Custom (n days)</option>
+          </select></div>
+        <div class="field" id="template-terms-days-field" hidden>
+          <label for="template-terms-days">Days (1-365)</label>
+          <input id="template-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
+        </div>
+        <p class="form-error" id="template-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="template-save">Save template</button></div>
+      </form>
+      <table id="template-vars">
+        <caption class="sr-only">Available %variable% placeholders</caption>
+        <thead><tr><th scope="col">Variable</th><th scope="col">Example</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="template-preview" class="card" hidden>
+        <h3>Preview - newest invoice</h3>
+        <p id="template-preview-subject"></p>
+        <div id="template-preview-body"></div>
+      </div>
     </section>
       </main>
 

@@ -561,6 +561,58 @@ if (daysRow) {
 const badCfg = await fetch(BASE + '/admin/config', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: '{"smtp.password":"nope"}' });
 check('secret-shaped config keys are refused', badCfg.status === 422);
 
+// ---- INVOICE TEMPLATE (#116): admin editor, cheat-sheet, rejection, preview ----
+window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(300);
+const varRows = [...window.document.querySelectorAll('#template-vars tbody tr')];
+check('template editor renders the variable cheat-sheet from the server', varRows.length >= 12 && varRows.some((r) => r.textContent.includes('%invoice_issue_month%')));
+// Unknown variable: inline error, no save.
+window.document.getElementById('template-subject').value = 'Invoice %invoice_number%';
+window.document.getElementById('template-body').value = 'Dear %customer_name%,\n\n- consulting work';
+window.document.getElementById('template-footer').value = 'Wire to IBAN TT16';
+window.document.getElementById('template-terms').value = 'net_30';
+window.document.getElementById('template-terms').dispatchEvent(new window.Event('change', { bubbles: true }));
+window.document.getElementById('template-body').value = 'bad %nope% here';
+window.document.getElementById('template-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await tick(300);
+check('unknown %variable% shows an inline error', !window.document.getElementById('template-error').hidden
+  && window.document.getElementById('template-error').textContent.includes('%nope%'));
+// Fix it and save; terms select toggles the days field for custom.
+window.document.getElementById('template-body').value = 'Dear %customer_name%,\n\n- consulting work';
+window.document.getElementById('template-terms').value = 'custom';
+window.document.getElementById('template-terms').dispatchEvent(new window.Event('change', { bubbles: true }));
+check('custom terms reveal the days input', !window.document.getElementById('template-terms-days-field').hidden);
+window.document.getElementById('template-terms-days').value = '21';
+window.document.getElementById('template-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await tick(300);
+const tpl = await (await fetch(BASE + '/admin/invoice-template', { headers: { Cookie: SESSION_COOKIE } })).json();
+check('template saved with custom terms', tpl.template.body.includes('%customer_name%') && tpl.template.payment_terms.kind === 'custom' && tpl.template.payment_terms.days === 21);
+check('template save announced', /template saved/i.test(window.document.getElementById('live-region').textContent));
+
+// ---- CUSTOMER INVOICE FIELDS (#116): terms, subject, notes via the form ----
+window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('customer-name').value = 'Termy LLC';
+window.document.getElementById('customer-currency').value = 'EUR';
+window.document.getElementById('customer-rate').value = '50';
+window.document.getElementById('customer-terms').value = 'upon_receipt';
+window.document.getElementById('customer-subject').value = 'INV %invoice_number% for %customer_name%';
+window.document.getElementById('customer-notes').value = 'Please quote the invoice number.';
+window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await tick(400);
+const termCusts = (await (await fetch(BASE + '/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
+const termy = termCusts.find((c) => c.name === 'Termy LLC');
+check('customer invoice fields persist via the form', !!termy && termy.payment_terms.kind === 'upon_receipt'
+  && termy.invoice_subject.includes('%invoice_number%') && termy.invoice_notes.includes('quote the invoice'));
+
+// Document preview card uses GET /invoices/{id}/document on the newest invoice.
+window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(400);
+const prev = window.document.getElementById('template-preview');
+check('template preview card shows the rendered subject', !prev.hidden
+  && window.document.getElementById('template-preview-subject').textContent.includes('Invoice '));
+check('preview body is plain text (textContent-only rule)', window.document.getElementById('template-preview-body').children.length === 0
+  && window.document.getElementById('template-preview-body').textContent.includes('consulting work'));
+
 console.log(`\n${failures === 0 ? 'ALL GUI CHECKS PASSED' : failures + ' GUI CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);
 
