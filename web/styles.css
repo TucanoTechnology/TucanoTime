@@ -253,3 +253,16 @@ td.cell.locked .cell-input { opacity: .6; }
   color: var(--accent); font-weight: 700;
   box-shadow: inset 0 -3px 0 var(--accent);
 }
+
+/* ------------------------------------------- day view refresh (#108) ---- */
+#day-table { border-collapse: separate; border-spacing: 0 .45rem; }
+#day-table tbody tr { background: var(--row-alt); }
+#day-table tbody td { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-block: .6rem; }
+#day-table tbody td:first-child { border-left: 1px solid var(--line); border-radius: var(--radius) 0 0 var(--radius); }
+#day-table tbody td:last-child { border-right: 1px solid var(--line); border-radius: 0 var(--radius) var(--radius) 0; }
+#day-table .entry-hours { white-space: nowrap; }
+.ws-day { position: relative; }
+.ws-clock { position: absolute; right: .5rem; bottom: .45rem; font-size: .85rem; opacity: .55; }
+.lock { margin-left: .45rem; font-size: .95rem; opacity: .75; }
+.day-total-cell { text-align: right; font-weight: 700; }
+.copy-bar select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }

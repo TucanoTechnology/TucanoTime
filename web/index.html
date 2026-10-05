@@ -92,6 +92,7 @@
           <span id="day-label" class="day-label"></span>
           <button type="button" id="day-next" aria-label="Next day">›</button>
         </nav>
+        <button type="button" id="day-today" class="link">Return to today</button>
       </div>
       <nav id="week-strip" class="week-strip" aria-label="Days of this week"></nav>
       <div id="notif-section" hidden>
@@ -104,12 +105,16 @@
           <tr><th scope="col">Project / customer / note</th><th scope="col" class="num">Hours</th><th scope="col" class="actions-col">Actions</th></tr>
         </thead>
         <tbody></tbody>
-        <tfoot><tr><th scope="row">Total:</th><td id="day-total" class="num"></td><td></td></tr></tfoot>
+        <tfoot><tr>
+          <th scope="row"><button type="button" id="day-add-bottom" class="link">+ Track time</button></th>
+          <td colspan="2" class="day-total-cell">Total: <span id="day-total" class="num"></span></td>
+        </tr></tfoot>
       </table>
-      <p id="day-empty" hidden>Nothing logged on this day yet. Use <strong>+ Track time</strong> to add an entry, or copy the previous day's projects below.</p>
+      <p id="day-empty" hidden>Nothing logged on this day yet. Use <strong>+ Track time</strong> to add an entry, or copy projects from an earlier day below.</p>
       <div class="copy-bar">
-        <button type="button" id="copy-prev" class="secondary">Copy from previous day (projects only)</button>
-        <ul id="copy-rows" class="copy-rows" aria-label="Projects copied from the previous day"></ul>
+        <label for="copy-days" class="sr-only">Copy projects from an earlier day</label>
+        <select id="copy-days" aria-label="Copy projects from an earlier day"></select>
+        <ul id="copy-rows" class="copy-rows" aria-label="Projects copied from an earlier day"></ul>
       </div>
 
       <div id="calendar-section" hidden>

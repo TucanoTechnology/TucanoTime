@@ -99,7 +99,7 @@ check('entry note stored as typed', made && made.note === 'gui-test entry');
 const rows = window.document.querySelectorAll('#day-table tbody tr');
 check('day table renders the new entry row', rows.length >= 1);
 const totals = window.document.getElementById('day-total').textContent;
-check('day total reflects 4.25h', totals.trim() === '4.25');
+check('day total reflects 4.25h as H:MM', totals.trim() === '4:15');
 
 // ---- live region announced the success (accessibility) ----
 const live = window.document.getElementById('live-region').textContent;
@@ -159,10 +159,12 @@ window.document.getElementById('day-next').dispatchEvent(new window.Event('click
 await tick(200);
 check('day navigator moves forward', window.document.getElementById('day-date').value === '2026-11-12');
 
-window.document.getElementById('copy-prev').dispatchEvent(new window.Event('click', { bubbles: true }));
+const copySel = window.document.getElementById('copy-days');
+copySel.value = '1'; // one day back from 2026-11-12 -> the 2026-11-11 entry
+copySel.dispatchEvent(new window.Event('change', { bubbles: true }));
 await tick(200);
 const copyRow = window.document.querySelector('#copy-rows .copy-row');
-check('copy-from-previous-day lists the P-9 row', !!copyRow && copyRow.textContent.includes('P-9'));
+check('copy-from-N-days lists the P-9 row', !!copyRow && copyRow.textContent.includes('P-9'));
 copyRow.querySelector('input').value = '3';
 copyRow.querySelector('button').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(250);
