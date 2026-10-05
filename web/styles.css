@@ -188,6 +188,22 @@ button.pill.danger:hover { border-color: var(--danger, #b3261e); color: var(--da
 #day-table tfoot th { text-align: left; }
 #day-table tfoot td { font-variant-numeric: tabular-nums; font-weight: 700; }
 
+/* Week grid (#13) */
+#week-table.grid { border-collapse: collapse; width: 100%; }
+#week-table.grid th, #week-table.grid td { border: 1px solid var(--line); padding: 0; text-align: left; }
+#week-table.grid thead th { padding: .35rem .5rem; font-size: .85rem; white-space: nowrap; }
+#week-table.grid thead th.today { color: var(--accent); border-bottom: 3px solid var(--accent); }
+#week-table.grid .row-band { padding: .4rem .6rem; min-width: 15rem; }
+.cell-input { width: 5.4rem; border: 0; background: transparent; text-align: right; font: inherit; padding: .45rem .5rem; }
+.cell-input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--surface); }
+td.cell.has { background: var(--accent-soft); }
+td.cell.locked { background: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(128, 128, 128, .12) 6px, rgba(128, 128, 128, .12) 12px); }
+td.cell.locked .cell-input { opacity: .6; }
+.note-flag { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0 .35rem; font-weight: 700; }
+.row-total { font-weight: 700; padding: .4rem .6rem; white-space: nowrap; }
+#week-table tfoot th, #week-table tfoot td { padding: .45rem .6rem; font-weight: 700; border-top: 2px solid var(--line); font-variant-numeric: tabular-nums; }
+.week-controls { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; flex-wrap: wrap; }
+
 /* ---- narrow: sidebar collapses to a top bar ---- */
 @media (max-width: 720px) {
   .app { flex-direction: column; }
