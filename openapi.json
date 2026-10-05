@@ -3,22 +3,53 @@
   "info": {
     "title": "TucanoTime API",
     "version": "0.1.0",
-    "license": { "name": "AGPL-3.0-or-later", "identifier": "AGPL-3.0-or-later" },
+    "license": {
+      "name": "AGPL-3.0-or-later",
+      "identifier": "AGPL-3.0-or-later"
+    },
     "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /users and /invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62)."
   },
-  "servers": [{ "url": "/" }],
-  "security": [{ "cookieAuth": [] }],
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "cookieAuth": []
+    }
+  ],
   "tags": [
-    { "name": "customers" },
-    { "name": "projects" },
-    { "name": "entries" },
-    { "name": "reports" },
-    { "name": "auth" },
-    { "name": "users" },
-    { "name": "invoices" },
-    { "name": "expenses" },
-    { "name": "submissions" },
-    { "name": "meta" }
+    {
+      "name": "customers"
+    },
+    {
+      "name": "projects"
+    },
+    {
+      "name": "entries"
+    },
+    {
+      "name": "reports"
+    },
+    {
+      "name": "auth"
+    },
+    {
+      "name": "users"
+    },
+    {
+      "name": "invoices"
+    },
+    {
+      "name": "expenses"
+    },
+    {
+      "name": "submissions"
+    },
+    {
+      "name": "meta"
+    }
   ],
   "components": {
     "securitySchemes": {
@@ -32,18 +63,38 @@
     "schemas": {
       "Error": {
         "type": "object",
-        "required": ["error"],
+        "required": [
+          "error"
+        ],
         "properties": {
           "error": {
             "type": "object",
-            "required": ["code", "message"],
+            "required": [
+              "code",
+              "message"
+            ],
             "properties": {
-              "code": { "type": "string", "enum": ["validation_failed", "not_found", "conflict", "bad_request", "internal", "invalid_json"] },
-              "message": { "type": "string", "description": "Human-readable; never contains paths, stack traces or raw filesystem errors." },
+              "code": {
+                "type": "string",
+                "enum": [
+                  "validation_failed",
+                  "not_found",
+                  "conflict",
+                  "bad_request",
+                  "internal",
+                  "invalid_json"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable; never contains paths, stack traces or raw filesystem errors."
+              },
               "fields": {
                 "type": "array",
                 "description": "Per-field problems for validation_failed.",
-                "items": { "$ref": "#/components/schemas/FieldError" }
+                "items": {
+                  "$ref": "#/components/schemas/FieldError"
+                }
               }
             }
           }
@@ -51,454 +102,1404 @@
       },
       "FieldError": {
         "type": "object",
-        "required": ["field", "message"],
+        "required": [
+          "field",
+          "message"
+        ],
         "properties": {
-          "field": { "type": "string" },
-          "message": { "type": "string" }
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
         }
       },
       "Currency": {
         "type": "string",
         "pattern": "^[A-Z]{3}$",
         "description": "ISO-4217 alpha-3 code, upper case.",
-        "examples": ["EUR", "USD"]
+        "examples": [
+          "EUR",
+          "USD"
+        ]
       },
       "ProjectCode": {
         "type": "string",
         "pattern": "^[A-Z0-9][A-Z0-9_-]{0,23}$",
         "description": "Normalised upper case; letters and digits, dashes and underscores after the first character; at most 24 characters.",
-        "examples": ["ACME-42"]
+        "examples": [
+          "ACME-42"
+        ]
       },
       "Hours": {
         "type": "number",
         "minimum": 0.01,
         "maximum": 24,
         "description": "Hours as a decimal with at most two fractional digits (0.01–24.00). Stored as integer hundredths.",
-        "examples": [7.5]
+        "examples": [
+          7.5
+        ]
       },
       "RateMinor": {
         "type": "integer",
         "minimum": 0,
         "maximum": 100000000,
         "description": "Hourly rate in currency minor units (cents). 6000 = 60.00.",
-        "examples": [6000]
+        "examples": [
+          6000
+        ]
       },
       "Customer": {
         "type": "object",
-        "required": ["id", "name", "currency", "default_rate_minor", "active", "email"],
+        "required": [
+          "id",
+          "name",
+          "currency",
+          "default_rate_minor",
+          "active",
+          "email"
+        ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean" },
-          "email": { "type": "string", "maxLength": 200, "description": "Optional billing email for invoice delivery (#35)" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "default_rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Optional billing email for invoice delivery (#35)"
+          }
         },
         "additionalProperties": false
       },
       "CustomerInput": {
         "type": "object",
-        "required": ["name", "currency", "default_rate_minor"],
+        "required": [
+          "name",
+          "currency",
+          "default_rate_minor"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean", "default": true },
-          "email": { "type": "string", "maxLength": 200, "default": "" }
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "default_rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 200,
+            "default": ""
+          }
         },
         "additionalProperties": false
       },
       "Project": {
         "type": "object",
-        "required": ["customer_id", "code", "name", "currency", "rate_minor", "active"],
+        "required": [
+          "customer_id",
+          "code",
+          "name",
+          "currency",
+          "rate_minor",
+          "active"
+        ],
         "properties": {
-          "customer_id": { "type": "string", "format": "uuid" },
-          "code": { "$ref": "#/components/schemas/ProjectCode" },
-          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean" },
-          "budget_hours": { "type": ["integer", "null"], "minimum": 1, "description": "Total budget in hundredths of an hour (#30)" },
-          "budget_amount_minor": { "type": ["integer", "null"], "minimum": 1 }
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "budget_hours": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "Total budget in hundredths of an hour (#30)"
+          },
+          "budget_amount_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
         },
         "additionalProperties": false
       },
       "ProjectInput": {
         "type": "object",
-        "required": ["code", "currency", "rate_minor"],
+        "required": [
+          "code",
+          "currency",
+          "rate_minor"
+        ],
         "properties": {
-          "code": { "$ref": "#/components/schemas/ProjectCode" },
-          "name": { "type": "string", "maxLength": 120, "default": "" },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean", "default": true },
-          "budget_hours": { "type": ["integer", "null"], "minimum": 1 },
-          "budget_amount_minor": { "type": ["integer", "null"], "minimum": 1 }
+          "code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "default": ""
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
+          },
+          "budget_hours": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "budget_amount_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
         },
         "additionalProperties": false
       },
       "Task": {
         "type": "object",
-        "required": ["customer_id", "project_code", "code", "name", "active"],
+        "required": [
+          "customer_id",
+          "project_code",
+          "code",
+          "name",
+          "active"
+        ],
         "properties": {
-          "customer_id": { "type": "string", "format": "uuid" },
-          "project_code": { "$ref": "#/components/schemas/ProjectCode" },
-          "code": { "$ref": "#/components/schemas/ProjectCode" },
-          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean" }
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          },
+          "active": {
+            "type": "boolean"
+          }
         },
         "additionalProperties": false
       },
       "TaskInput": {
         "type": "object",
-        "required": ["code"],
+        "required": [
+          "code"
+        ],
         "properties": {
-          "code": { "$ref": "#/components/schemas/ProjectCode" },
-          "name": { "type": "string", "maxLength": 120, "default": "" },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean", "default": true }
+          "code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "default": ""
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
+          }
         },
         "additionalProperties": false
       },
       "Entry": {
         "type": "object",
-        "required": ["id", "date", "customer_id", "project_code", "hours", "note", "billable", "source", "created_at", "updated_at"],
+        "required": [
+          "id",
+          "date",
+          "customer_id",
+          "project_code",
+          "hours",
+          "note",
+          "billable",
+          "source",
+          "created_at",
+          "updated_at"
+        ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
-          "customer_id": { "type": "string", "format": "uuid" },
-          "user_id": { "oneOf": [ { "type": "string", "format": "uuid" }, { "type": "null" } ], "description": "The user who logged the entry (attribution, #21)." },
-          "project_code": { "$ref": "#/components/schemas/ProjectCode" },
-          "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ], "description": "Optional task within the project (#38)." },
-          "hours": { "$ref": "#/components/schemas/Hours" },
-          "note": { "type": "string", "maxLength": 500 },
-          "billable": { "type": "boolean", "description": "Billable vs non-billable time. Non-billable time is never invoiced." },
-          "source": { "type": "string", "enum": ["manual", "timer", "calendar-import"], "description": "Provenance. Server-set; API clients create manual entries." },
-          "created_at": { "type": "string", "format": "date-time" },
-          "updated_at": { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user who logged the entry (attribution, #21)."
+          },
+          "project_code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "task_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional task within the project (#38)."
+          },
+          "hours": {
+            "$ref": "#/components/schemas/Hours"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "billable": {
+            "type": "boolean",
+            "description": "Billable vs non-billable time. Non-billable time is never invoiced."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "timer",
+              "calendar-import"
+            ],
+            "description": "Provenance. Server-set; API clients create manual entries."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         },
         "additionalProperties": false
       },
       "EntryInput": {
         "type": "object",
-        "required": ["date", "customer_id", "project_code", "hours"],
+        "required": [
+          "date",
+          "customer_id",
+          "project_code",
+          "hours"
+        ],
         "properties": {
-          "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
-          "customer_id": { "type": "string", "format": "uuid" },
-          "project_code": { "$ref": "#/components/schemas/ProjectCode" },
-          "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
-          "hours": { "$ref": "#/components/schemas/Hours" },
-          "note": { "type": "string", "maxLength": 500, "default": "" },
-          "billable": { "type": "boolean", "default": true }
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "task_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hours": {
+            "$ref": "#/components/schemas/Hours"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500,
+            "default": ""
+          },
+          "billable": {
+            "type": "boolean",
+            "default": true
+          }
         },
         "additionalProperties": false
       },
       "SummaryRow": {
         "type": "object",
-        "required": ["key", "label", "currency", "hours", "amount_minor", "entries"],
+        "required": [
+          "key",
+          "label",
+          "currency",
+          "hours",
+          "amount_minor",
+          "entries"
+        ],
         "properties": {
-          "key": { "type": "string" },
-          "label": { "type": "string" },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "hours": { "type": "number" },
-          "amount_minor": { "type": "integer", "minimum": 0 },
-          "entries": { "type": "integer", "minimum": 0 }
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "hours": {
+            "type": "number"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "entries": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
         "additionalProperties": false
       },
       "Summary": {
         "type": "object",
-        "required": ["group", "rows", "total_hours", "billable_hours", "nonbillable_hours"],
+        "required": [
+          "group",
+          "rows",
+          "total_hours",
+          "billable_hours",
+          "nonbillable_hours"
+        ],
         "properties": {
-          "group": { "type": "string", "enum": ["customer", "project", "person", "week"] },
-          "rows": { "type": "array", "items": { "$ref": "#/components/schemas/SummaryRow" } },
-          "total_hours": { "type": "number" },
-          "billable_hours": { "type": "number" },
-          "nonbillable_hours": { "type": "number" }
+          "group": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "project",
+              "person",
+              "week"
+            ]
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SummaryRow"
+            }
+          },
+          "total_hours": {
+            "type": "number"
+          },
+          "billable_hours": {
+            "type": "number"
+          },
+          "nonbillable_hours": {
+            "type": "number"
+          }
         },
         "additionalProperties": false
       },
       "PublicUser": {
         "type": "object",
-        "required": ["id", "name", "email", "role", "active", "default_rate_minor"],
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role",
+          "active",
+          "default_rate_minor"
+        ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "name": { "type": "string" },
-          "email": { "type": "string", "format": "email" },
-          "role": { "type": "string", "enum": ["admin", "member"] },
-          "active": { "type": "boolean" },
-          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "cost_rate_minor": { "$ref": "#/components/schemas/RateMinor" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "default_rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          },
+          "cost_rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          }
         },
         "additionalProperties": false
       },
       "LoginInput": {
         "type": "object",
-        "required": ["email", "password"],
+        "required": [
+          "email",
+          "password"
+        ],
         "properties": {
-          "email": { "type": "string", "format": "email" },
-          "password": { "type": "string" }
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
       "BootstrapInput": {
         "type": "object",
-        "required": ["name", "email", "password"],
+        "required": [
+          "name",
+          "email",
+          "password"
+        ],
         "properties": {
-          "name": { "type": "string", "maxLength": 120 },
-          "email": { "type": "string", "format": "email" },
-          "password": { "type": "string", "minLength": 8 }
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8
+          }
         },
         "additionalProperties": false
       },
       "UserInput": {
         "type": "object",
-        "required": ["name", "email", "password"],
+        "required": [
+          "name",
+          "email",
+          "password"
+        ],
         "properties": {
-          "name": { "type": "string", "maxLength": 120 },
-          "email": { "type": "string", "format": "email" },
-          "password": { "type": "string", "minLength": 8 },
-          "role": { "type": "string", "enum": ["admin", "member"] },
-          "active": { "type": "boolean", "default": true },
-          "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "cost_rate_minor": { "$ref": "#/components/schemas/RateMinor" }
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ]
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
+          },
+          "default_rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          },
+          "cost_rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          }
         },
         "additionalProperties": false
       },
-      "InvoiceStatus": { "type": "string", "enum": ["draft", "issued", "paid"] },
+      "InvoiceStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "issued",
+          "paid"
+        ]
+      },
       "InvoiceLine": {
         "type": "object",
-        "required": ["kind", "date", "amount_minor", "note"],
+        "required": [
+          "kind",
+          "date",
+          "amount_minor",
+          "note"
+        ],
         "properties": {
-          "kind": { "type": "string", "enum": ["time", "expense", "fixed"] },
-          "date": { "type": "string", "format": "date" },
-          "entry_id": { "type": ["string", "null"], "format": "uuid" },
-          "expense_id": { "type": ["string", "null"], "format": "uuid" },
-          "project_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
-          "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
-          "hours": { "oneOf": [ { "$ref": "#/components/schemas/Hours" }, { "type": "null" } ] },
-          "rate_minor": { "type": ["integer", "null"], "minimum": 0 },
-          "amount_minor": { "type": "integer", "minimum": 0 },
-          "note": { "type": "string" }
+          "kind": {
+            "type": "string",
+            "enum": [
+              "time",
+              "expense",
+              "fixed"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "entry_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "expense_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "project_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hours": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Hours"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rate_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "note": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
       "Invoice": {
         "type": "object",
-        "required": ["id", "number", "customer_id", "currency", "period_from", "period_to", "lines", "total_minor", "status", "created_at"],
+        "required": [
+          "id",
+          "number",
+          "customer_id",
+          "currency",
+          "period_from",
+          "period_to",
+          "lines",
+          "total_minor",
+          "status",
+          "created_at"
+        ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "number": { "type": "string" },
-          "customer_id": { "type": "string", "format": "uuid" },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "period_from": { "type": "string", "format": "date" },
-          "period_to": { "type": "string", "format": "date" },
-          "lines": { "type": "array", "items": { "$ref": "#/components/schemas/InvoiceLine" } },
-          "total_minor": { "type": "integer", "minimum": 0 },
-          "status": { "$ref": "#/components/schemas/InvoiceStatus" },
-          "created_at": { "type": "string", "format": "date-time" },
-          "issued_at": { "type": [ "string", "null" ], "format": "date-time" },
-          "due_date": { "type": [ "string", "null" ], "format": "date" },
-          "paid_at": { "type": [ "string", "null" ], "format": "date-time" },
-          "payment_reference": { "type": "string" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "number": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "period_from": {
+            "type": "string",
+            "format": "date"
+          },
+          "period_to": {
+            "type": "string",
+            "format": "date"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvoiceLine"
+            }
+          },
+          "total_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvoiceStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "issued_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "due_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "paid_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "payment_reference": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
       "InvoiceSummary": {
         "type": "object",
-        "required": ["draft", "issued", "overdue", "paid", "outstanding"],
+        "required": [
+          "draft",
+          "issued",
+          "overdue",
+          "paid",
+          "outstanding"
+        ],
         "properties": {
-          "draft": { "type": "integer", "minimum": 0 },
-          "issued": { "type": "integer", "minimum": 0 },
-          "overdue": { "type": "integer", "minimum": 0 },
-          "paid": { "type": "integer", "minimum": 0 },
-          "outstanding": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "Unpaid issued totals keyed by currency (minor units)." }
+          "draft": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "issued": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "overdue": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "paid": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "outstanding": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Unpaid issued totals keyed by currency (minor units)."
+          }
         },
         "additionalProperties": false
       },
       "InvoiceInput": {
         "type": "object",
-        "required": ["customer_id", "from", "to"],
+        "required": [
+          "customer_id",
+          "from",
+          "to"
+        ],
         "properties": {
-          "customer_id": { "type": "string", "format": "uuid" },
-          "from": { "type": "string", "format": "date" },
-          "to": { "type": "string", "format": "date" },
-          "include_expenses": { "type": "boolean", "default": true, "description": "Roll billable expenses in (#25)." }
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "include_expenses": {
+            "type": "boolean",
+            "default": true,
+            "description": "Roll billable expenses in (#25)."
+          }
         },
         "additionalProperties": false
       },
       "Category": {
         "type": "object",
-        "required": ["id", "name", "default_billable", "active"],
+        "required": [
+          "id",
+          "name",
+          "default_billable",
+          "active"
+        ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "name": { "type": "string", "maxLength": 120 },
-          "default_billable": { "type": "boolean" },
-          "active": { "type": "boolean" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "default_billable": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
         },
         "additionalProperties": false
       },
       "CategoryInput": {
         "type": "object",
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "properties": {
-          "name": { "type": "string", "maxLength": 120 },
-          "default_billable": { "type": "boolean", "default": true },
-          "active": { "type": "boolean", "default": true }
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "default_billable": {
+            "type": "boolean",
+            "default": true
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
+          }
         },
         "additionalProperties": false
       },
       "Expense": {
         "type": "object",
-        "required": ["id", "date", "customer_id", "amount_minor", "currency", "billable", "note", "created_at", "updated_at"],
+        "required": [
+          "id",
+          "date",
+          "customer_id",
+          "amount_minor",
+          "currency",
+          "billable",
+          "note",
+          "created_at",
+          "updated_at"
+        ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "date": { "type": "string", "format": "date" },
-          "customer_id": { "type": "string", "format": "uuid" },
-          "project_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
-          "category_id": { "oneOf": [ { "type": "string", "format": "uuid" }, { "type": "null" } ] },
-          "amount_minor": { "type": "integer", "minimum": 0, "maximum": 100000000 },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "billable": { "type": "boolean" },
-          "note": { "type": "string", "maxLength": 500 },
-          "receipt_name": { "type": ["string", "null"] },
-          "receipt_b64": { "type": ["string", "null"] },
-          "created_at": { "type": "string", "format": "date-time" },
-          "updated_at": { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "billable": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "receipt_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "receipt_b64": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         },
         "additionalProperties": false
       },
       "ExpenseInput": {
         "type": "object",
-        "required": ["date", "customer_id", "amount_minor", "currency"],
+        "required": [
+          "date",
+          "customer_id",
+          "amount_minor",
+          "currency"
+        ],
         "properties": {
-          "date": { "type": "string", "format": "date" },
-          "customer_id": { "type": "string", "format": "uuid" },
-          "project_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] },
-          "category_id": { "oneOf": [ { "type": "string", "format": "uuid" }, { "type": "null" } ] },
-          "amount_minor": { "type": "integer", "minimum": 0, "maximum": 100000000 },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "billable": { "type": "boolean", "default": true },
-          "note": { "type": "string", "maxLength": 500, "default": "" },
-          "receipt_name": { "type": ["string", "null"] },
-          "receipt_b64": { "type": ["string", "null"] }
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "billable": {
+            "type": "boolean",
+            "default": true
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500,
+            "default": ""
+          },
+          "receipt_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "receipt_b64": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         },
         "additionalProperties": false
       },
-      "SubmissionState": { "type": "string", "enum": ["draft", "submitted", "approved", "rejected"] },
+      "SubmissionState": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "submitted",
+          "approved",
+          "rejected"
+        ]
+      },
       "Submission": {
         "type": "object",
-        "required": ["id", "user_id", "week_start", "week_end", "state", "entry_ids", "comment", "created_at"],
+        "required": [
+          "id",
+          "user_id",
+          "week_start",
+          "week_end",
+          "state",
+          "entry_ids",
+          "comment",
+          "created_at"
+        ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "user_id": { "type": "string", "format": "uuid" },
-          "week_start": { "type": "string", "format": "date" },
-          "week_end": { "type": "string", "format": "date" },
-          "state": { "$ref": "#/components/schemas/SubmissionState" },
-          "entry_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
-          "comment": { "type": "string" },
-          "created_at": { "type": "string", "format": "date-time" },
-          "submitted_at": { "type": ["string", "null"], "format": "date-time" },
-          "decided_at": { "type": ["string", "null"], "format": "date-time" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "week_start": {
+            "type": "string",
+            "format": "date"
+          },
+          "week_end": {
+            "type": "string",
+            "format": "date"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SubmissionState"
+          },
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "comment": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "submitted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "decided_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
         },
         "additionalProperties": false
       },
       "SubmitInput": {
         "type": "object",
-        "required": ["week_start"],
-        "properties": { "week_start": { "type": "string", "format": "date" } },
+        "required": [
+          "week_start"
+        ],
+        "properties": {
+          "week_start": {
+            "type": "string",
+            "format": "date"
+          }
+        },
         "additionalProperties": false
       },
       "DecisionInput": {
         "type": "object",
-        "required": ["decision"],
+        "required": [
+          "decision"
+        ],
         "properties": {
-          "decision": { "type": "string", "enum": ["approve", "reject"] },
-          "comment": { "type": "string", "default": "" }
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          },
+          "comment": {
+            "type": "string",
+            "default": ""
+          }
         },
         "additionalProperties": false
       },
-      "ClaimState": { "type": "string", "enum": ["draft", "submitted", "approved", "rejected"] },
+      "ClaimState": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "submitted",
+          "approved",
+          "rejected"
+        ]
+      },
       "ExpenseClaim": {
         "type": "object",
-        "required": ["id", "user_id", "title", "expense_ids", "total_minor", "currency", "state", "comment", "created_at"],
+        "required": [
+          "id",
+          "user_id",
+          "title",
+          "expense_ids",
+          "total_minor",
+          "currency",
+          "state",
+          "comment",
+          "created_at"
+        ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "user_id": { "type": "string", "format": "uuid" },
-          "title": { "type": "string", "maxLength": 120 },
-          "expense_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
-          "total_minor": { "type": "integer", "minimum": 0 },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "state": { "$ref": "#/components/schemas/ClaimState" },
-          "comment": { "type": "string" },
-          "created_at": { "type": "string", "format": "date-time" },
-          "submitted_at": { "type": ["string", "null"], "format": "date-time" },
-          "decided_at": { "type": ["string", "null"], "format": "date-time" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "expense_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "total_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ClaimState"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "submitted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "decided_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
         },
         "additionalProperties": false
       },
       "ClaimInput": {
         "type": "object",
-        "required": ["title", "expense_ids"],
+        "required": [
+          "title",
+          "expense_ids"
+        ],
         "properties": {
-          "title": { "type": "string", "maxLength": 120 },
-          "expense_ids": { "type": "array", "items": { "type": "string", "format": "uuid" }, "minItems": 1 }
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "expense_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1
+          }
         },
         "additionalProperties": false
       },
       "RecurringSchedule": {
         "type": "object",
-        "required": ["id", "customer_id", "cadence", "mode", "retainer_amount_minor", "currency", "active", "created_at"],
+        "required": [
+          "id",
+          "customer_id",
+          "cadence",
+          "mode",
+          "retainer_amount_minor",
+          "currency",
+          "active",
+          "created_at"
+        ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "customer_id": { "type": "string", "format": "uuid" },
-          "cadence": { "type": "string", "enum": ["weekly", "monthly", "quarterly"] },
-          "mode": { "type": "string", "enum": ["time", "retainer"] },
-          "retainer_amount_minor": { "type": "integer", "minimum": 0 },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "active": { "type": "boolean" },
-          "last_period_end": { "type": ["string", "null"], "format": "date" },
-          "created_at": { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "weekly",
+              "monthly",
+              "quarterly"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "time",
+              "retainer"
+            ]
+          },
+          "retainer_amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "last_period_end": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         },
         "additionalProperties": false
       },
       "ScheduleInput": {
         "type": "object",
-        "required": ["customer_id", "cadence", "mode", "currency"],
+        "required": [
+          "customer_id",
+          "cadence",
+          "mode",
+          "currency"
+        ],
         "properties": {
-          "customer_id": { "type": "string", "format": "uuid" },
-          "cadence": { "type": "string", "enum": ["weekly", "monthly", "quarterly"] },
-          "mode": { "type": "string", "enum": ["time", "retainer"] },
-          "retainer_amount_minor": { "type": "integer", "minimum": 0, "default": 0 },
-          "currency": { "$ref": "#/components/schemas/Currency" },
-          "active": { "type": "boolean", "default": true }
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "weekly",
+              "monthly",
+              "quarterly"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "time",
+              "retainer"
+            ]
+          },
+          "retainer_amount_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
+          }
         },
         "additionalProperties": false
       }
     },
     "responses": {
-      "ValidationError": {        "description": "Payload failed validation before any write or side effect.",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      "ValidationError": {
+        "description": "Payload failed validation before any write or side effect.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       },
       "NotFound": {
         "description": "The resource does not exist.",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       },
       "Conflict": {
         "description": "The operation conflicts with existing state (duplicate, or referenced by entries).",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       },
       "BadRequest": {
         "description": "Malformed query or body.",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       },
       "Locked": {
         "description": "A concurrent writer holds the store lock (#62); transient — retry. Sent with Retry-After.",
-        "headers": { "Retry-After": { "schema": { "type": "integer" } } },
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     },
     "parameters": {
@@ -506,21 +1507,33 @@
         "name": "date",
         "in": "query",
         "required": false,
-        "schema": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "schema": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
         "description": "Single day, YYYY-MM-DD. Exactly one of date or from+to."
       },
       "FromParam": {
         "name": "from",
         "in": "query",
         "required": false,
-        "schema": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "schema": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
         "description": "Inclusive start of a range. Requires to; at most 400 days."
       },
       "ToParam": {
         "name": "to",
         "in": "query",
         "required": false,
-        "schema": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "schema": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
         "description": "Inclusive end of a range."
       }
     }
@@ -529,35 +1542,122 @@
     "/auth/sso/providers": {
       "get": {
         "operationId": "ssoProviders",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "Configured SSO identity providers (#32), advertised pre-session",
-        "responses": { "200": { "description": "Provider names.", "content": { "application/json": { "schema": { "type": "object", "required": ["providers"], "properties": { "providers": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": false } } } } }
+        "responses": {
+          "200": {
+            "description": "Provider names.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "providers"
+                  ],
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/auth/sso/assertion": {
       "post": {
         "operationId": "ssoAssertion",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "Assertion consumer: verifies the provider signature, JIT-provisions the user (#19 roles) and issues a session cookie alongside local login (#32)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["provider", "payload"], "properties": { "provider": { "type": "string" }, "payload": { "type": "string", "maxLength": 32768 }, "signature": { "type": "string", "maxLength": 4096, "default": "" } }, "additionalProperties": false } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "provider",
+                  "payload"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string"
+                  },
+                  "payload": {
+                    "type": "string",
+                    "maxLength": 32768
+                  },
+                  "signature": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "default": ""
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Signed in; Set-Cookie session issued.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "description": "Assertion failed verification or expired." },
-          "403": { "description": "Account deactivated." }
+          "200": {
+            "description": "Signed in; Set-Cookie session issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Assertion failed verification or expired."
+          },
+          "403": {
+            "description": "Account deactivated."
+          }
         }
       }
     },
     "/auth/status": {
       "get": {
         "operationId": "authStatus",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "Whether an administrator exists yet (drives first-run setup)",
         "security": [],
         "responses": {
           "200": {
             "description": "Initialisation state.",
-            "content": { "application/json": { "schema": { "type": "object", "required": ["initialised"], "properties": { "initialised": { "type": "boolean" } }, "additionalProperties": false } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "initialised"
+                  ],
+                  "properties": {
+                    "initialised": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -565,98 +1665,253 @@
     "/auth/bootstrap": {
       "post": {
         "operationId": "bootstrap",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "Create the first administrator (only while no users exist)",
         "security": [],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BootstrapInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BootstrapInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Admin created; session cookie set.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
-          "403": { "description": "Already initialised." },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "201": {
+            "description": "Admin created; session cookie set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUser"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Already initialised."
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/auth/login": {
       "post": {
         "operationId": "login",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "Authenticate and receive a session cookie",
         "security": [],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Authenticated; session cookie set.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
-          "401": { "description": "Invalid credentials." },
-          "429": { "description": "Too many failed attempts; try again later (#47)." }
+          "200": {
+            "description": "Authenticated; session cookie set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUser"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials."
+          },
+          "429": {
+            "description": "Too many failed attempts; try again later (#47)."
+          }
         }
       }
     },
     "/auth/logout": {
       "post": {
         "operationId": "logout",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "Clear the session cookie",
         "security": [],
-        "responses": { "204": { "description": "Logged out." } }
+        "responses": {
+          "204": {
+            "description": "Logged out."
+          }
+        }
       }
     },
     "/auth/me": {
       "get": {
         "operationId": "me",
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "The current authenticated user",
         "responses": {
-          "200": { "description": "Current user.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
-          "401": { "description": "Not authenticated." }
+          "200": {
+            "description": "Current user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUser"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated."
+          }
         }
       }
     },
     "/users": {
       "get": {
         "operationId": "listUsers",
-        "tags": ["users"],
+        "tags": [
+          "users"
+        ],
         "summary": "List users (admin only)",
         "responses": {
-          "200": { "description": "All users.", "content": { "application/json": { "schema": { "type": "object", "required": ["users"], "properties": { "users": { "type": "array", "items": { "$ref": "#/components/schemas/PublicUser" } } }, "additionalProperties": false } } } },
-          "403": { "description": "Admin role required." }
+          "200": {
+            "description": "All users.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "users"
+                  ],
+                  "properties": {
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PublicUser"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          }
         }
       },
       "post": {
         "operationId": "createUser",
-        "tags": ["users"],
+        "tags": [
+          "users"
+        ],
         "summary": "Create a user (admin only)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
-          "403": { "description": "Admin role required." },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUser"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/users/{id}": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "delete": {
         "operationId": "deleteUser",
-        "tags": ["users"],
+        "tags": [
+          "users"
+        ],
         "summary": "Delete a user (admin only)",
         "responses": {
-          "204": { "description": "Deleted." },
-          "403": { "description": "Admin role required." },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "204": {
+            "description": "Deleted."
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/healthz": {
       "get": {
         "operationId": "healthz",
-        "tags": ["meta"],
+        "tags": [
+          "meta"
+        ],
         "summary": "Liveness",
         "security": [],
         "responses": {
           "200": {
             "description": "Server is up.",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" } }, "required": ["status"], "additionalProperties": false } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -664,25 +1919,53 @@
     "/openapi.json": {
       "get": {
         "operationId": "openapi",
-        "tags": ["meta"],
+        "tags": [
+          "meta"
+        ],
         "summary": "This machine-readable contract",
         "security": [],
-        "responses": { "200": { "description": "The OpenAPI document.", "content": { "application/json": { "schema": { "type": "object" } } } } }
+        "responses": {
+          "200": {
+            "description": "The OpenAPI document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/docs": {
       "get": {
         "operationId": "docs",
-        "tags": ["meta"],
+        "tags": [
+          "meta"
+        ],
         "summary": "Interactive documentation UI (Swagger), rendered from /openapi.json",
         "security": [],
-        "responses": { "200": { "description": "HTML page.", "content": { "text/html": { "schema": { "type": "string" } } } } }
+        "responses": {
+          "200": {
+            "description": "HTML page.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/customers": {
       "get": {
         "operationId": "listCustomers",
-        "tags": ["customers"],
+        "tags": [
+          "customers"
+        ],
         "summary": "List customers, sorted by name",
         "responses": {
           "200": {
@@ -691,8 +1974,17 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["customers"],
-                  "properties": { "customers": { "type": "array", "items": { "$ref": "#/components/schemas/Customer" } } },
+                  "required": [
+                    "customers"
+                  ],
+                  "properties": {
+                    "customers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Customer"
+                      }
+                    }
+                  },
                   "additionalProperties": false
                 }
               }
@@ -702,62 +1994,142 @@
       },
       "post": {
         "operationId": "createCustomer",
-        "tags": ["customers"],
+        "tags": [
+          "customers"
+        ],
         "summary": "Create a customer",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerInput" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerInput"
+              }
+            }
+          }
         },
         "responses": {
           "201": {
             "description": "Created; server assigns the id.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            }
           },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/customers/{id}": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "get": {
         "operationId": "getCustomer",
-        "tags": ["customers"],
+        "tags": [
+          "customers"
+        ],
         "summary": "Fetch one customer",
         "responses": {
-          "200": { "description": "The customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "200": {
+            "description": "The customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       },
       "put": {
         "operationId": "updateCustomer",
-        "tags": ["customers"],
+        "tags": [
+          "customers"
+        ],
         "summary": "Full replacement of a customer (id stays fixed)",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerInput" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerInput"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "The updated customer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "200": {
+            "description": "The updated customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       },
       "delete": {
         "operationId": "deleteCustomer",
-        "tags": ["customers"],
+        "tags": [
+          "customers"
+        ],
         "summary": "Delete a customer (must own no projects or entries)",
         "responses": {
-          "204": { "description": "Deleted." },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "204": {
+            "description": "Deleted."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/customers/{cid}/projects": {
-      "parameters": [ { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "cid",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "get": {
         "operationId": "listProjects",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "List a customer's projects, sorted by code",
         "responses": {
           "200": {
@@ -766,147 +2138,376 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["projects"],
-                  "properties": { "projects": { "type": "array", "items": { "$ref": "#/components/schemas/Project" } } },
+                  "required": [
+                    "projects"
+                  ],
+                  "properties": {
+                    "projects": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Project"
+                      }
+                    }
+                  },
                   "additionalProperties": false
                 }
               }
             }
           },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       },
       "post": {
         "operationId": "createProject",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "Add a project code to a customer",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectInput" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectInput"
+              }
+            }
+          }
         },
         "responses": {
-          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/customers/{cid}/projects/{code}": {
       "parameters": [
-        { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
-        { "name": "code", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } }
+        {
+          "name": "cid",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "code",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ProjectCode"
+          }
+        }
       ],
       "get": {
         "operationId": "getProject",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "Fetch one project",
         "responses": {
-          "200": { "description": "The project.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "200": {
+            "description": "The project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       },
       "put": {
         "operationId": "updateProject",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "Full replacement; body code must match the path code",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectInput" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectInput"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Updated.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       },
       "delete": {
         "operationId": "deleteProject",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "Delete a project (must have no entries)",
         "responses": {
-          "204": { "description": "Deleted." },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "204": {
+            "description": "Deleted."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/customers/{cid}/projects/{pcode}/tasks": {
       "parameters": [
-        { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
-        { "name": "pcode", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } }
+        {
+          "name": "cid",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "pcode",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ProjectCode"
+          }
+        }
       ],
       "get": {
         "operationId": "listTasks",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "List a project's tasks",
         "responses": {
           "200": {
             "description": "Tasks of this project.",
-            "content": { "application/json": { "schema": { "type": "object", "required": ["tasks"], "properties": { "tasks": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } } }, "additionalProperties": false } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "tasks"
+                  ],
+                  "properties": {
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Task"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
           },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       },
       "post": {
         "operationId": "createTask",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "Add a task to a project",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/customers/{cid}/projects/{pcode}/tasks/{code}": {
       "parameters": [
-        { "name": "cid", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
-        { "name": "pcode", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } },
-        { "name": "code", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ProjectCode" } }
+        {
+          "name": "cid",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "pcode",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ProjectCode"
+          }
+        },
+        {
+          "name": "code",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ProjectCode"
+          }
+        }
       ],
       "get": {
         "operationId": "getTask",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "Fetch one task",
         "responses": {
-          "200": { "description": "The task.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "200": {
+            "description": "The task.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       },
       "put": {
         "operationId": "updateTask",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "Full replacement; body code must match the path code",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TaskInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Updated.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       },
       "delete": {
         "operationId": "deleteTask",
-        "tags": ["projects"],
+        "tags": [
+          "projects"
+        ],
         "summary": "Delete a task (must have no entries)",
         "responses": {
-          "204": { "description": "Deleted." },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "204": {
+            "description": "Deleted."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/entries": {
       "parameters": [
-        { "$ref": "#/components/parameters/DateParam" },
-        { "$ref": "#/components/parameters/FromParam" },
-        { "$ref": "#/components/parameters/ToParam" }
+        {
+          "$ref": "#/components/parameters/DateParam"
+        },
+        {
+          "$ref": "#/components/parameters/FromParam"
+        },
+        {
+          "$ref": "#/components/parameters/ToParam"
+        }
       ],
       "get": {
         "operationId": "listEntries",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "List entries for a day or an inclusive date range",
         "description": "Exactly one form: ?date=YYYY-MM-DD or ?from=...&to=... (span at most 400 days).",
         "responses": {
@@ -916,631 +2517,2416 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["entries"],
-                  "properties": { "entries": { "type": "array", "items": { "$ref": "#/components/schemas/Entry" } } },
+                  "required": [
+                    "entries"
+                  ],
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Entry"
+                      }
+                    }
+                  },
                   "additionalProperties": false
                 }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
         }
       },
       "post": {
         "operationId": "createEntry",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Add a time entry",
         "description": "Cross-references are validated before any write: the customer must exist and the project must belong to it.",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EntryInput" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntryInput"
+              }
+            }
+          }
         },
         "responses": {
-          "201": { "description": "Created; server assigns id and timestamps.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "201": {
+            "description": "Created; server assigns id and timestamps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entry"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/entries/{id}": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "get": {
         "operationId": "getEntry",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Fetch one entry",
         "responses": {
-          "200": { "description": "The entry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "200": {
+            "description": "The entry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entry"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       },
       "put": {
         "operationId": "updateEntry",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Full replacement of an entry (may change its day)",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EntryInput" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntryInput"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Updated.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entry"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       },
       "delete": {
         "operationId": "deleteEntry",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Delete an entry",
         "responses": {
-          "204": { "description": "Deleted." },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "204": {
+            "description": "Deleted."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       }
     },
     "/reports/summary": {
       "parameters": [
-        { "$ref": "#/components/parameters/FromParam" },
-        { "$ref": "#/components/parameters/ToParam" },        {
+        {
+          "$ref": "#/components/parameters/FromParam"
+        },
+        {
+          "$ref": "#/components/parameters/ToParam"
+        },
+        {
           "name": "group",
           "in": "query",
           "required": false,
-          "schema": { "type": "string", "enum": ["customer", "project", "person", "week"], "default": "customer" }
+          "schema": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "project",
+              "person",
+              "week"
+            ],
+            "default": "customer"
+          }
         },
         {
           "name": "billable",
           "in": "query",
           "required": false,
-          "schema": { "type": "boolean" },
+          "schema": {
+            "type": "boolean"
+          },
           "description": "Scope rows to billable (true) or non-billable (false); omit for all."
         }
       ],
       "get": {
         "operationId": "summary",
-        "tags": ["reports"],
+        "tags": [
+          "reports"
+        ],
         "summary": "Hours and amounts grouped by customer, project or ISO week",
         "description": "Amounts are computed with each entry's effective rate (project override, else customer default) at read time.",
         "responses": {
-          "200": { "description": "Aggregated rows.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Summary" } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" }
+          "200": {
+            "description": "Aggregated rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Summary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
         }
       }
     },
     "/reports/export.csv": {
       "parameters": [
-        { "$ref": "#/components/parameters/FromParam" },
-        { "$ref": "#/components/parameters/ToParam" },
+        {
+          "$ref": "#/components/parameters/FromParam"
+        },
+        {
+          "$ref": "#/components/parameters/ToParam"
+        },
         {
           "name": "customer_id",
           "in": "query",
           "required": false,
-          "schema": { "type": "string", "format": "uuid" }
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
         }
       ],
       "get": {
         "operationId": "exportCsv",
-        "tags": ["reports"],
+        "tags": [
+          "reports"
+        ],
         "summary": "One CSV row per entry: date, customer, code, hours, currency, hourly_rate, amount, note",
         "responses": {
-          "200": { "description": "CSV document (formula-injection escaped).", "content": { "text/csv": { "schema": { "type": "string" } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" }
+          "200": {
+            "description": "CSV document (formula-injection escaped).",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
         }
       }
     },
     "/reports/budgets": {
       "get": {
         "operationId": "budgetReport",
-        "tags": ["reports"],
+        "tags": [
+          "reports"
+        ],
         "summary": "Budget burn vs budget for budgeted projects (#30)",
         "responses": {
-          "200": { "description": "Budget rows.", "content": { "application/json": { "schema": { "type": "object", "required": ["rows"], "properties": { "rows": { "type": "array", "items": { "type": "object", "required": ["customer", "project", "currency", "budget_hours", "burn_hours", "hours_pct", "budget_amount_minor", "burn_amount_minor", "amount_pct", "over"], "properties": { "customer": { "type": "string" }, "project": { "type": "string" }, "currency": { "type": "string" }, "budget_hours": { "type": ["number", "null"] }, "burn_hours": { "type": "number" }, "hours_pct": { "type": ["number", "null"] }, "budget_amount_minor": { "type": ["integer", "null"] }, "burn_amount_minor": { "type": "integer" }, "amount_pct": { "type": ["number", "null"] }, "over": { "type": "boolean" } }, "additionalProperties": false } } }, "additionalProperties": false } } } }
+          "200": {
+            "description": "Budget rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rows"
+                  ],
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "customer",
+                          "project",
+                          "currency",
+                          "budget_hours",
+                          "burn_hours",
+                          "hours_pct",
+                          "budget_amount_minor",
+                          "burn_amount_minor",
+                          "amount_pct",
+                          "over"
+                        ],
+                        "properties": {
+                          "customer": {
+                            "type": "string"
+                          },
+                          "project": {
+                            "type": "string"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "budget_hours": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "burn_hours": {
+                            "type": "number"
+                          },
+                          "hours_pct": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "budget_amount_minor": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "burn_amount_minor": {
+                            "type": "integer"
+                          },
+                          "amount_pct": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "over": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
         }
       }
     },
     "/reports/profitability": {
       "parameters": [
-        { "$ref": "#/components/parameters/FromParam" },
-        { "$ref": "#/components/parameters/ToParam" }
+        {
+          "$ref": "#/components/parameters/FromParam"
+        },
+        {
+          "$ref": "#/components/parameters/ToParam"
+        }
       ],
       "get": {
         "operationId": "profitability",
-        "tags": ["reports"],
+        "tags": [
+          "reports"
+        ],
         "summary": "Revenue vs cost (expenses + labour at cost rates) per customer (#29)",
         "responses": {
-          "200": { "description": "Profitability rows.", "content": { "application/json": { "schema": { "type": "object", "required": ["rows"], "properties": { "rows": { "type": "array", "items": { "type": "object", "required": ["customer_id", "label", "currency", "revenue_minor", "cost_minor", "margin_minor"], "properties": { "customer_id": { "type": "string", "format": "uuid" }, "label": { "type": "string" }, "currency": { "type": "string" }, "revenue_minor": { "type": "integer" }, "cost_minor": { "type": "integer" }, "margin_minor": { "type": "integer" } }, "additionalProperties": false } } }, "additionalProperties": false } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" }
+          "200": {
+            "description": "Profitability rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rows"
+                  ],
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "customer_id",
+                          "label",
+                          "currency",
+                          "revenue_minor",
+                          "cost_minor",
+                          "margin_minor"
+                        ],
+                        "properties": {
+                          "customer_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "revenue_minor": {
+                            "type": "integer"
+                          },
+                          "cost_minor": {
+                            "type": "integer"
+                          },
+                          "margin_minor": {
+                            "type": "integer"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
         }
       }
     },
     "/timer": {
       "get": {
         "operationId": "getTimer",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Current running timer for the caller (with elapsed), or null (#14)",
-        "responses": { "200": { "description": "Timer state.", "content": { "application/json": { "schema": { "nullable": true, "type": "object", "properties": { "timer": { "type": "object", "required": ["user_id", "customer_id", "project_code", "started_at"], "properties": { "user_id": { "type": "string", "format": "uuid" }, "customer_id": { "type": "string", "format": "uuid" }, "project_code": { "$ref": "#/components/schemas/ProjectCode" }, "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] }, "note": { "type": "string" }, "started_at": { "type": "string", "format": "date-time" } }, "additionalProperties": false }, "elapsed_seconds": { "type": "integer" }, "elapsed_hours": { "$ref": "#/components/schemas/Hours" } }, "additionalProperties": false } } } } }
+        "responses": {
+          "200": {
+            "description": "Timer state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "nullable": true,
+                  "type": "object",
+                  "properties": {
+                    "timer": {
+                      "type": "object",
+                      "required": [
+                        "user_id",
+                        "customer_id",
+                        "project_code",
+                        "started_at"
+                      ],
+                      "properties": {
+                        "user_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "customer_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "project_code": {
+                          "$ref": "#/components/schemas/ProjectCode"
+                        },
+                        "task_code": {
+                          "oneOf": [
+                            {
+                              "$ref": "#/components/schemas/ProjectCode"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "note": {
+                          "type": "string"
+                        },
+                        "started_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "elapsed_seconds": {
+                      "type": "integer"
+                    },
+                    "elapsed_hours": {
+                      "$ref": "#/components/schemas/Hours"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
       },
       "post": {
         "operationId": "startTimer",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Start a timer (one active per user)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["customer_id", "project_code"], "properties": { "customer_id": { "type": "string", "format": "uuid" }, "project_code": { "$ref": "#/components/schemas/ProjectCode" }, "task_code": { "oneOf": [ { "$ref": "#/components/schemas/ProjectCode" }, { "type": "null" } ] }, "note": { "type": "string", "default": "" } }, "additionalProperties": false } } } },
-        "responses": { "201": { "description": "Started." }, "409": { "$ref": "#/components/responses/Conflict" }, "422": { "$ref": "#/components/responses/ValidationError" } }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "customer_id",
+                  "project_code"
+                ],
+                "properties": {
+                  "customer_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "project_code": {
+                    "$ref": "#/components/schemas/ProjectCode"
+                  },
+                  "task_code": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/ProjectCode"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "default": ""
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Started."
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
       },
       "delete": {
         "operationId": "discardTimer",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Discard the running timer without logging",
-        "responses": { "204": { "description": "Discarded." } }
+        "responses": {
+          "204": {
+            "description": "Discarded."
+          }
+        }
       }
     },
     "/timer/stop": {
       "post": {
         "operationId": "stopTimer",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Stop the timer and create a timer-sourced entry for the elapsed time",
-        "responses": { "200": { "description": "Created entry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Entry" } } } }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "responses": {
+          "200": {
+            "description": "Created entry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entry"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
       }
     },
     "/calendar/oauth/start": {
       "get": {
         "operationId": "calendarOAuthStart",
-        "tags": ["calendar"],
+        "tags": [
+          "calendar"
+        ],
         "summary": "Begin the Google/Microsoft calendar consent flow (#36); returns the provider authorize URL",
-        "parameters": [ { "name": "provider", "in": "query", "required": false, "schema": { "type": "string", "enum": ["google", "microsoft"], "default": "google" } } ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "google",
+                "microsoft"
+              ],
+              "default": "google"
+            }
+          }
+        ],
         "responses": {
-          "200": { "description": "Authorize URL.", "content": { "application/json": { "schema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string" } }, "additionalProperties": false } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "403": { "description": "Admin role required." },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "200": {
+            "description": "Authorize URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "url"
+                  ],
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/calendar/oauth/callback": {
       "get": {
         "operationId": "calendarOAuthCallback",
-        "tags": ["calendar"],
+        "tags": [
+          "calendar"
+        ],
         "summary": "OAuth callback: validates state, exchanges the code, stores tokens in the vault (#36); tokens are never echoed",
         "parameters": [
-          { "name": "code", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "state", "in": "query", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Connected.", "content": { "application/json": { "schema": { "type": "object", "required": ["connected"], "properties": { "connected": { "type": "string" } }, "additionalProperties": false } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "description": "Unknown or expired OAuth state." },
-          "403": { "description": "Admin role required." },
-          "502": { "description": "Authorization code exchange failed." },
-          "503": { "description": "Secret vault not enabled." }
+          "200": {
+            "description": "Connected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "connected"
+                  ],
+                  "properties": {
+                    "connected": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Unknown or expired OAuth state."
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "502": {
+            "description": "Authorization code exchange failed."
+          },
+          "503": {
+            "description": "Secret vault not enabled."
+          }
         }
       }
     },
     "/calendar/events": {
       "parameters": [
-        { "$ref": "#/components/parameters/FromParam" },
-        { "$ref": "#/components/parameters/ToParam" }
+        {
+          "$ref": "#/components/parameters/FromParam"
+        },
+        {
+          "$ref": "#/components/parameters/ToParam"
+        }
       ],
       "get": {
         "operationId": "calendarEvents",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Calendar events overlapping the range, from the configured ICS feed (#15)",
         "responses": {
-          "200": { "description": "Events.", "content": { "application/json": { "schema": { "type": "object", "required": ["events"], "properties": { "events": { "type": "array", "items": { "type": "object", "required": ["uid", "start", "end", "title", "location"], "properties": { "uid": { "type": "string" }, "start": { "type": "string", "format": "date-time" }, "end": { "type": "string", "format": "date-time" }, "title": { "type": "string" }, "location": { "type": "string" } }, "additionalProperties": false } } }, "additionalProperties": false } } } },
-          "404": { "description": "No calendar feed configured." },
-          "502": { "description": "Feed fetch failed." }
+          "200": {
+            "description": "Events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "events"
+                  ],
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "uid",
+                          "start",
+                          "end",
+                          "title",
+                          "location"
+                        ],
+                        "properties": {
+                          "uid": {
+                            "type": "string"
+                          },
+                          "start": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "end": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "location": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No calendar feed configured."
+          },
+          "502": {
+            "description": "Feed fetch failed."
+          }
         }
       }
     },
     "/notifications": {
       "get": {
         "operationId": "listNotifications",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "The caller's notifications, newest first, with unread count (#22)",
-        "responses": { "200": { "description": "Notifications.", "content": { "application/json": { "schema": { "type": "object", "required": ["notifications", "unread"], "properties": { "notifications": { "type": "array", "items": { "type": "object", "required": ["id", "kind", "title", "body", "created_at", "read"], "properties": { "id": { "type": "string", "format": "uuid" }, "kind": { "type": "string" }, "title": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string", "format": "date-time" }, "read": { "type": "boolean" } }, "additionalProperties": false } }, "unread": { "type": "integer" } }, "additionalProperties": false } } } } }
+        "responses": {
+          "200": {
+            "description": "Notifications.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "notifications",
+                    "unread"
+                  ],
+                  "properties": {
+                    "notifications": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "kind",
+                          "title",
+                          "body",
+                          "created_at",
+                          "read"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "read": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "unread": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/notifications/read": {
       "post": {
         "operationId": "markNotificationsRead",
-        "tags": ["entries"],
+        "tags": [
+          "entries"
+        ],
         "summary": "Mark the caller's notifications read",
-        "responses": { "204": { "description": "Marked." } }
+        "responses": {
+          "204": {
+            "description": "Marked."
+          }
+        }
       }
     },
     "/schedules": {
       "get": {
         "operationId": "listSchedules",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "List recurring invoice schedules (admin)",
-        "responses": { "200": { "description": "Schedules.", "content": { "application/json": { "schema": { "type": "object", "required": ["schedules"], "properties": { "schedules": { "type": "array", "items": { "$ref": "#/components/schemas/RecurringSchedule" } } }, "additionalProperties": false } } } }, "403": { "description": "Admin role required." } }
+        "responses": {
+          "200": {
+            "description": "Schedules.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "schedules"
+                  ],
+                  "properties": {
+                    "schedules": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RecurringSchedule"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          }
+        }
       },
       "post": {
         "operationId": "createSchedule",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Create a recurring schedule (time or retainer) (#26)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ScheduleInput" } } } },
-        "responses": { "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RecurringSchedule" } } } }, "403": { "description": "Admin role required." }, "422": { "$ref": "#/components/responses/ValidationError" } }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringSchedule"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
       }
     },
     "/schedules/{id}": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "delete": {
         "operationId": "deleteSchedule",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Delete a schedule (admin)",
-        "responses": { "204": { "description": "Deleted." }, "403": { "description": "Admin role required." }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
       }
     },
     "/invoices": {
       "get": {
         "operationId": "listInvoices",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "List invoices",
         "responses": {
-          "200": { "description": "All invoices.", "content": { "application/json": { "schema": { "type": "object", "required": ["invoices"], "properties": { "invoices": { "type": "array", "items": { "$ref": "#/components/schemas/Invoice" } } }, "additionalProperties": false } } } }
+          "200": {
+            "description": "All invoices.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "invoices"
+                  ],
+                  "properties": {
+                    "invoices": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Invoice"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
         }
       },
       "post": {
         "operationId": "createInvoice",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Generate a draft invoice from billable, not-yet-invoiced work in a period",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvoiceInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Draft invoice.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "201": {
+            "description": "Draft invoice.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/invoices/{id}": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "get": {
         "operationId": "getInvoice",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Fetch one invoice",
         "responses": {
-          "200": { "description": "The invoice.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "200": {
+            "description": "The invoice.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       },
       "delete": {
         "operationId": "deleteInvoice",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Delete a draft invoice",
         "responses": {
-          "204": { "description": "Deleted." },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "204": {
+            "description": "Deleted."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/invoices/{id}/issue": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "post": {
         "operationId": "issueInvoice",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Issue a draft invoice, locking its entries from edits/deletes",
         "responses": {
-          "200": { "description": "Issued invoice.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "200": {
+            "description": "Issued invoice.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/invoices/{id}/email": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "post": {
         "operationId": "sendInvoiceEmail",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Email an issued invoice to the customer's billing address (#35)",
         "responses": {
-          "200": { "description": "Sent.", "content": { "application/json": { "schema": { "type": "object", "required": ["sent_to"], "properties": { "sent_to": { "type": "string" } }, "additionalProperties": false } } } },
-          "403": { "description": "Admin role required." },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "422": { "$ref": "#/components/responses/ValidationError" },
-          "502": { "description": "The email transport failed." }
+          "200": {
+            "description": "Sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sent_to"
+                  ],
+                  "properties": {
+                    "sent_to": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "502": {
+            "description": "The email transport failed."
+          }
         }
       }
     },
     "/invoices/{id}/pay": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "post": {
         "operationId": "payInvoice",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Mark an issued invoice as paid",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": [], "properties": { "reference": { "type": "string", "maxLength": 200 } }, "additionalProperties": false } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "reference": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Paid invoice.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "200": {
+            "description": "Paid invoice.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/invoices/{id}/checkout": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "post": {
         "operationId": "createCheckout",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Create a hosted checkout link for an issued invoice (#34)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["provider"], "properties": { "provider": { "type": "string", "enum": ["stripe", "paypal"] } }, "additionalProperties": false } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "stripe",
+                      "paypal"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Checkout session.", "content": { "application/json": { "schema": { "type": "object", "required": ["invoice_id", "provider", "reference", "url"], "properties": { "invoice_id": { "type": "string", "format": "uuid" }, "provider": { "type": "string" }, "reference": { "type": "string" }, "url": { "type": "string" } }, "additionalProperties": false } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "403": { "description": "Admin role required." },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "201": {
+            "description": "Checkout session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "invoice_id",
+                    "provider",
+                    "reference",
+                    "url"
+                  ],
+                  "properties": {
+                    "invoice_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "reference": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/payments/webhook/{provider}": {
-      "parameters": [ { "name": "provider", "in": "path", "required": true, "schema": { "type": "string", "enum": ["stripe", "paypal"] } } ],
+      "parameters": [
+        {
+          "name": "provider",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "stripe",
+              "paypal"
+            ]
+          }
+        }
+      ],
       "post": {
         "operationId": "paymentWebhook",
-        "tags": ["invoices"],
-        "summary": "Provider webhook (public; authenticated by HMAC signature) — marks the invoice paid (#34)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Provider webhook (public; authenticated by HMAC signature) — verifies amount/currency against the invoice and marks it paid (#34, review A11)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Processed (paid / already_paid / ignored).", "content": { "application/json": { "schema": { "type": "object" } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "description": "Webhook signature verification failed." },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "200": {
+            "description": "Processed (paid / already_paid / ignored).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Webhook signature verification failed."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Amount below invoice total, currency mismatch, or invoice not issued."
+          }
         }
       }
     },
     "/invoices/{id}/sync": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "post": {
         "operationId": "syncInvoice",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Copy an issued invoice (and later its payment) to an accounting provider (#33). Idempotent; failures are recorded, not fatal.",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["provider"], "properties": { "provider": { "type": "string", "enum": ["qbo", "xero"] } }, "additionalProperties": false } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "qbo",
+                      "xero"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Sync record (status synced/failed; noop when already synced).", "content": { "application/json": { "schema": { "type": "object" } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "403": { "description": "Admin role required." },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "200": {
+            "description": "Sync record (status synced/failed; noop when already synced).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/sync/accounting": {
       "get": {
         "operationId": "accountingSyncStatus",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Visible accounting sync status: provider records + enabled providers (#33)",
         "responses": {
-          "200": { "description": "Status.", "content": { "application/json": { "schema": { "type": "object", "required": ["records", "providers"], "properties": { "records": { "type": "array", "items": { "type": "object", "required": ["provider", "kind", "invoice_id", "invoice_number", "remote_id", "status", "error", "attempts", "updated_at"], "properties": { "provider": { "type": "string" }, "kind": { "type": "string" }, "invoice_id": { "type": "string", "format": "uuid" }, "invoice_number": { "type": "string" }, "remote_id": { "type": "string" }, "status": { "type": "string", "enum": ["synced", "failed"] }, "error": { "type": "string" }, "attempts": { "type": "integer" }, "updated_at": { "type": "string", "format": "date-time" } }, "additionalProperties": false } }, "providers": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": false } } } },
-          "403": { "description": "Admin role required." }
+          "200": {
+            "description": "Status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "records",
+                    "providers"
+                  ],
+                  "properties": {
+                    "records": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "provider",
+                          "kind",
+                          "invoice_id",
+                          "invoice_number",
+                          "remote_id",
+                          "status",
+                          "error",
+                          "attempts",
+                          "updated_at"
+                        ],
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "invoice_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "invoice_number": {
+                            "type": "string"
+                          },
+                          "remote_id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "synced",
+                              "failed"
+                            ]
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "updated_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          }
         }
       }
     },
     "/invoices/summary": {
       "get": {
         "operationId": "invoiceSummary",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Invoice status counts and outstanding totals for the dashboard",
-        "responses": { "200": { "description": "Summary.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvoiceSummary" } } } } }
+        "responses": {
+          "200": {
+            "description": "Summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceSummary"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/invoices/report": {
       "parameters": [
-        { "$ref": "#/components/parameters/FromParam" },
-        { "$ref": "#/components/parameters/ToParam" }
+        {
+          "$ref": "#/components/parameters/FromParam"
+        },
+        {
+          "$ref": "#/components/parameters/ToParam"
+        }
       ],
       "get": {
         "operationId": "invoiceReport",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "Revenue by customer + status counts (#31)",
-        "responses": { "200": { "description": "Report.", "content": { "application/json": { "schema": { "type": "object", "required": ["rows", "draft", "issued", "paid", "overdue", "total_revenue_minor"], "properties": { "rows": { "type": "array", "items": { "type": "object", "required": ["customer_id", "label", "currency", "revenue_minor", "invoices"], "properties": { "customer_id": { "type": "string", "format": "uuid" }, "label": { "type": "string" }, "currency": { "type": "string" }, "revenue_minor": { "type": "integer" }, "invoices": { "type": "integer" } }, "additionalProperties": false } }, "draft": { "type": "integer" }, "issued": { "type": "integer" }, "paid": { "type": "integer" }, "overdue": { "type": "integer" }, "total_revenue_minor": { "type": "integer" } }, "additionalProperties": false } } } } }
+        "responses": {
+          "200": {
+            "description": "Report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rows",
+                    "draft",
+                    "issued",
+                    "paid",
+                    "overdue",
+                    "total_revenue_minor"
+                  ],
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "customer_id",
+                          "label",
+                          "currency",
+                          "revenue_minor",
+                          "invoices"
+                        ],
+                        "properties": {
+                          "customer_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "revenue_minor": {
+                            "type": "integer"
+                          },
+                          "invoices": {
+                            "type": "integer"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "draft": {
+                      "type": "integer"
+                    },
+                    "issued": {
+                      "type": "integer"
+                    },
+                    "paid": {
+                      "type": "integer"
+                    },
+                    "overdue": {
+                      "type": "integer"
+                    },
+                    "total_revenue_minor": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/invoices/export.csv": {
       "get": {
         "operationId": "invoiceExportCsv",
-        "tags": ["invoices"],
+        "tags": [
+          "invoices"
+        ],
         "summary": "CSV export of all invoices (#31)",
-        "responses": { "200": { "description": "CSV.", "content": { "text/csv": { "schema": { "type": "string" } } } } }
+        "responses": {
+          "200": {
+            "description": "CSV.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/categories": {
       "get": {
         "operationId": "listCategories",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "List expense categories",
-        "responses": { "200": { "description": "All categories.", "content": { "application/json": { "schema": { "type": "object", "required": ["categories"], "properties": { "categories": { "type": "array", "items": { "$ref": "#/components/schemas/Category" } } }, "additionalProperties": false } } } } }
+        "responses": {
+          "200": {
+            "description": "All categories.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "categories"
+                  ],
+                  "properties": {
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Category"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
       },
       "post": {
         "operationId": "createCategory",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "Create a category",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CategoryInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Category" } } } },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/categories/{id}": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "delete": {
         "operationId": "deleteCategory",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "Delete a category (must be unused)",
-        "responses": { "204": { "description": "Deleted." }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" } }
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
       }
     },
     "/expenses": {
       "get": {
         "operationId": "listExpenses",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "List expenses (optional customer_id / from / to filters)",
         "parameters": [
-          { "name": "customer_id", "in": "query", "required": false, "schema": { "type": "string", "format": "uuid" } },
-          { "$ref": "#/components/parameters/FromParam" },
-          { "$ref": "#/components/parameters/ToParam" }
+          {
+            "name": "customer_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/FromParam"
+          },
+          {
+            "$ref": "#/components/parameters/ToParam"
+          }
         ],
-        "responses": { "200": { "description": "Matching expenses.", "content": { "application/json": { "schema": { "type": "object", "required": ["expenses"], "properties": { "expenses": { "type": "array", "items": { "$ref": "#/components/schemas/Expense" } } }, "additionalProperties": false } } } } }
+        "responses": {
+          "200": {
+            "description": "Matching expenses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "expenses"
+                  ],
+                  "properties": {
+                    "expenses": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Expense"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
       },
       "post": {
         "operationId": "createExpense",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "Record an expense",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExpenseInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpenseInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Expense" } } } },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Expense"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/expenses/{id}": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "get": {
         "operationId": "getExpense",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "Fetch one expense",
-        "responses": { "200": { "description": "The expense.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Expense" } } } }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "responses": {
+          "200": {
+            "description": "The expense.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Expense"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
       },
       "delete": {
         "operationId": "deleteExpense",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "Delete an expense",
-        "responses": { "204": { "description": "Deleted." }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
       }
     },
     "/audit": {
       "get": {
         "operationId": "auditLog",
-        "tags": ["users"],
+        "tags": [
+          "users"
+        ],
         "summary": "Recent security audit events (admin only, #52)",
         "responses": {
-          "200": { "description": "Newest-first events.", "content": { "application/json": { "schema": { "type": "object", "required": ["events"], "properties": { "events": { "type": "array", "items": { "type": "object" } } }, "additionalProperties": false } } } },
-          "403": { "description": "Admin role required." }
+          "200": {
+            "description": "Newest-first events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "events"
+                  ],
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          }
         }
       }
     },
     "/admin/config": {
       "get": {
         "operationId": "adminConfig",
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "Effective externalised configuration: whitelist of non-secret knobs with value, source (env/file/default) and default (#94)",
         "responses": {
-          "200": { "description": "Effective config.", "content": { "application/json": { "schema": { "type": "object", "required": ["config", "path", "vault_enabled"], "properties": { "config": { "type": "array", "items": { "type": "object", "required": ["key", "value", "source", "default", "description"], "properties": { "key": { "type": "string" }, "value": {}, "source": { "type": "string", "enum": ["env", "file", "default"] }, "default": {}, "description": { "type": "string" } }, "additionalProperties": false } }, "path": { "type": "string" }, "vault_enabled": { "type": "boolean" } }, "additionalProperties": false } } } },
-          "403": { "description": "Admin role required." }
+          "200": {
+            "description": "Effective config.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "config",
+                    "path",
+                    "vault_enabled"
+                  ],
+                  "properties": {
+                    "config": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "key",
+                          "value",
+                          "source",
+                          "default",
+                          "description"
+                        ],
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "value": {},
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "env",
+                              "file",
+                              "default"
+                            ]
+                          },
+                          "default": {},
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "vault_enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          }
         }
       },
       "put": {
         "operationId": "updateAdminConfig",
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "Patch whitelisted keys into <data>/config.json; unknown or secret-shaped keys are refused (#94)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Persisted.", "content": { "application/json": { "schema": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } }, "additionalProperties": false } } } },
-          "403": { "description": "Admin role required." },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "200": {
+            "description": "Persisted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/admin/secrets": {
       "get": {
         "operationId": "listSecrets",
-        "tags": ["users"],
+        "tags": [
+          "users"
+        ],
         "summary": "List configured integration secrets with masked hints (admin only, #77)",
         "responses": {
-          "200": { "description": "Secrets (names + masked hints, never values).", "content": { "application/json": { "schema": { "type": "object", "required": ["secrets"], "properties": { "secrets": { "type": "array", "items": { "type": "object", "required": ["key", "hint"], "properties": { "key": { "type": "string" }, "hint": { "type": "string" } }, "additionalProperties": false } } }, "additionalProperties": false } } } },
-          "403": { "description": "Admin role required." },
-          "503": { "description": "Vault not configured (no TUCANO_SECRET_KEY)." }
+          "200": {
+            "description": "Secrets (names + masked hints, never values).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "secrets"
+                  ],
+                  "properties": {
+                    "secrets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "key",
+                          "hint"
+                        ],
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "hint": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "503": {
+            "description": "Vault not configured (no TUCANO_SECRET_KEY)."
+          }
         }
       }
     },
     "/admin/secrets/{key}": {
-      "parameters": [ { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } } ],
+      "parameters": [
+        {
+          "name": "key",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
       "put": {
         "operationId": "setSecret",
-        "tags": ["users"],
+        "tags": [
+          "users"
+        ],
         "summary": "Store/overwrite a secret (encrypted at rest; never echoed back)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["value"], "properties": { "value": { "type": "string" } }, "additionalProperties": false } } } },
-        "responses": { "204": { "description": "Stored." }, "403": { "description": "Admin role required." }, "422": { "$ref": "#/components/responses/ValidationError" }, "503": { "description": "Vault not configured." } }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Stored."
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "description": "Vault not configured."
+          }
+        }
       },
       "delete": {
         "operationId": "deleteSecret",
-        "tags": ["users"],
+        "tags": [
+          "users"
+        ],
         "summary": "Delete a secret",
-        "responses": { "204": { "description": "Deleted." }, "403": { "description": "Admin role required." }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "description": "Vault not configured." } }
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "description": "Vault not configured."
+          }
+        }
       }
     },
     "/submissions": {
       "get": {
         "operationId": "listSubmissions",
-        "tags": ["submissions"],
+        "tags": [
+          "submissions"
+        ],
         "summary": "List timesheet submissions",
-        "responses": { "200": { "description": "All submissions.", "content": { "application/json": { "schema": { "type": "object", "required": ["submissions"], "properties": { "submissions": { "type": "array", "items": { "$ref": "#/components/schemas/Submission" } } }, "additionalProperties": false } } } } }
+        "responses": {
+          "200": {
+            "description": "All submissions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "submissions"
+                  ],
+                  "properties": {
+                    "submissions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Submission"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
       },
       "post": {
         "operationId": "createSubmission",
-        "tags": ["submissions"],
+        "tags": [
+          "submissions"
+        ],
         "summary": "Submit the current user's timesheet for a week (locks its entries)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SubmitInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Submitted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Submission" } } } },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "201": {
+            "description": "Submitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Submission"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/submissions/{id}/decision": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "post": {
         "operationId": "decideSubmission",
-        "tags": ["submissions"],
+        "tags": [
+          "submissions"
+        ],
         "summary": "Approve or reject a submitted timesheet (rejecting releases its locks)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DecisionInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Updated submission.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Submission" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "200": {
+            "description": "Updated submission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Submission"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/claims": {
       "get": {
         "operationId": "listClaims",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "List reimbursement claims (own, or all for admin)",
-        "responses": { "200": { "description": "Claims.", "content": { "application/json": { "schema": { "type": "object", "required": ["claims"], "properties": { "claims": { "type": "array", "items": { "$ref": "#/components/schemas/ExpenseClaim" } } }, "additionalProperties": false } } } } }
+        "responses": {
+          "200": {
+            "description": "Claims.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "claims"
+                  ],
+                  "properties": {
+                    "claims": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ExpenseClaim"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
       },
       "post": {
         "operationId": "createClaim",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "Create a draft claim over a set of the caller's expenses (#24)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ClaimInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Draft claim.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExpenseClaim" } } } },
-          "422": { "$ref": "#/components/responses/ValidationError" }
+          "201": {
+            "description": "Draft claim.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpenseClaim"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
         }
       }
     },
     "/claims/{id}/submit": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "post": {
         "operationId": "submitClaim",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "Submit a draft claim (locks its expenses)",
         "responses": {
-          "200": { "description": "Submitted claim.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExpenseClaim" } } } },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "200": {
+            "description": "Submitted claim.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpenseClaim"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     },
     "/claims/{id}/decision": {
-      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
       "post": {
         "operationId": "decideClaim",
-        "tags": ["expenses"],
+        "tags": [
+          "expenses"
+        ],
         "summary": "Approve or reject a submitted claim (admin only)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DecisionInput" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionInput"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Updated claim.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExpenseClaim" } } } },
-          "403": { "description": "Admin role required." },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" }
+          "200": {
+            "description": "Updated claim.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpenseClaim"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
         }
       }
     }

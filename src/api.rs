@@ -491,16 +491,32 @@ pub async fn sso_assertion(
     let Some(idp) = app.sso.get(&input.provider) else {
         return Err(ApiError::bad_request("unknown or disabled SSO provider"));
     };
-    let identity = idp
-        .verify(&input.payload, &input.signature)
-        .map_err(|e| match e {
+    // Review A12: assertion verification gets the same lockout treatment as
+    // login, so repeated forged/failed assertions cannot be brute-forced.
+    let rate_key = format!("sso:{provider}", provider = input.provider);
+    if app.rate.is_locked(&rate_key) {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "too many failed attempts; try again later",
+        ));
+    }
+    let identity = idp.verify(&input.payload, &input.signature).map_err(|e| {
+        app.rate.record_failure(&rate_key);
+        match e {
             crate::sso::SsoError::BadSignature | crate::sso::SsoError::Expired => ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "sso_invalid",
                 "assertion failed verification",
             ),
-            other => ApiError::bad_request(other.to_string()),
-        })?;
+            other => {
+                tracing::warn!(error = %other, "SSO assertion rejected");
+                app.rate.reset(&rate_key); // well-formed-but-invalid is not an attack signal
+                ApiError::bad_request("assertion rejected")
+            }
+        }
+    })?;
+    app.rate.reset(&rate_key);
 
     let existing = app.store.get_user_by_email(&identity.email)?;
     let user = match existing {
@@ -1070,28 +1086,65 @@ pub async fn payment_webhook(
             "bad_signature",
             "webhook signature verification failed",
         ),
-        other => ApiError::bad_request(other.to_string()),
+        // Review A12: provider-facing messages stay generic; details are logged.
+        other => {
+            tracing::warn!(error = %other, "webhook payload rejected");
+            ApiError::bad_request("invalid webhook payload")
+        }
     })?;
     let Some(event) = event else {
         return Ok(Json(serde_json::json!({ "ignored": true })).into_response());
     };
-    let Some(mut invoice) = app.store.find_invoice_by_number(&event.invoice_number)? else {
+    let Some(invoice) = app.store.find_invoice_by_number(&event.invoice_number)? else {
         return Err(ApiError::not_found("invoice"));
     };
     if invoice.status == crate::domain::InvoiceStatus::Paid {
         // Replay-safe: the provider can deliver the same event more than once.
         return Ok(Json(serde_json::json!({ "status": "already_paid" })).into_response());
     }
-    if invoice.status != crate::domain::InvoiceStatus::Issued {
-        return Err(ApiError::conflict("invoice is not issued"));
+    // Review A11: a signed event must carry what was ACTUALLY collected and
+    // match the invoice, or a partial/refund event could settle in full.
+    if event.currency != invoice.currency.0.to_ascii_uppercase() {
+        app.audit.record(
+            "payment_currency_mismatch",
+            &format!("{}:{}", invoice.number, event.currency),
+            app.clock.now(),
+        );
+        return Err(ApiError::conflict("payment currency mismatch"));
     }
-    invoice.status = crate::domain::InvoiceStatus::Paid;
-    invoice.paid_at = Some(app.clock.now());
-    invoice.payment_reference = format!("{}:{}", event.provider, event.reference);
-    app.store.put_invoice(&invoice)?;
-    app.audit
-        .record("payment_received", &invoice.number, app.clock.now());
-    Ok(Json(serde_json::json!({ "status": "paid", "invoice": invoice.number })).into_response())
+    if event.amount_minor < invoice.total_minor {
+        app.audit.record(
+            "payment_underpaid",
+            &format!("{}:{}", invoice.number, event.amount_minor),
+            app.clock.now(),
+        );
+        return Err(ApiError::conflict("payment amount is below invoice total"));
+    }
+    let reference = format!("{}:{}", event.provider, event.reference);
+    match app
+        .store
+        .pay_invoice(invoice.id, app.clock.now(), reference)
+    {
+        Ok(paid) => {
+            app.audit
+                .record("payment_received", &paid.number, app.clock.now());
+            Ok(
+                Json(serde_json::json!({ "status": "paid", "invoice": paid.number }))
+                    .into_response(),
+            )
+        }
+        // Draft or concurrently settled: re-read tells the provider which.
+        Err(crate::store::StoreError::Conflict(_)) => {
+            let fresh = app.store.get_invoice(invoice.id)?;
+            match fresh.map(|i| i.status) {
+                Some(crate::domain::InvoiceStatus::Paid) => {
+                    Ok(Json(serde_json::json!({ "status": "already_paid" })).into_response())
+                }
+                _ => Err(ApiError::conflict("invoice is not issued")),
+            }
+        }
+        Err(other) => Err(other.into()),
+    }
 }
 
 /// Body for `POST /invoices/{id}/sync`.
@@ -2549,20 +2602,10 @@ pub async fn profitability(
 /// Budget burn vs budget for budgeted projects (#30).
 pub async fn budget_report(State(app): State<AppState>) -> ApiResult {
     let customers = app.store.list_customers()?;
-    let mut projects = Vec::new();
-    let mut tasks = Vec::new();
-    for c in &customers {
-        for p in app.store.list_projects(c.id)? {
-            tasks.extend(app.store.list_tasks(c.id, &p.code.0)?);
-            projects.push((c.id, p));
-        }
-    }
-    let today = app.clock.today();
-    let entries = app.store.list_range(
-        today - chrono::Duration::days(crate::store::MAX_RANGE_DAYS),
-        today,
-    )?;
-    let users = app.store.list_users()?;
+    // Reuse the shared hierarchy walk (review D3) and the lifetime entry scan:
+    // budgets are lifetime totals, so a date-windowed query would undercount.
+    let (projects, tasks, users) = gather_hierarchy(&app, &customers)?;
+    let entries = app.store.list_all_entries()?;
     let rows = crate::budgets::burn_report(&projects, &entries, &customers, &tasks, &users);
     Ok(Json(serde_json::json!({ "rows": rows })).into_response())
 }

@@ -730,10 +730,23 @@ pub fn generate_invoice(
         excluded_expenses,
         include_expenses,
     } = src;
+    // Review D4: index the lookups done per entry — linear finds made large
+    // billing runs O(entries × records).
+    let excluded_entry: std::collections::HashSet<Uuid> =
+        excluded_entries.iter().copied().collect();
+    let excluded_expense: std::collections::HashSet<Uuid> =
+        excluded_expenses.iter().copied().collect();
+    let project_by_code: std::collections::HashMap<&str, &Project> =
+        projects.iter().map(|p| (p.code.0.as_str(), p)).collect();
+    let task_by_key: std::collections::HashMap<(&str, &str), &Task> = tasks
+        .iter()
+        .map(|t| ((t.project_code.0.as_str(), t.code.0.as_str()), t))
+        .collect();
+    let user_by_id: std::collections::HashMap<Uuid, &User> =
+        users.iter().map(|u| (u.id, u)).collect();
     let user_rate = |e: &Entry| -> Option<u64> {
         e.user_id
-            .and_then(|uid| users.iter().find(|u| u.id == uid))
-            .map(|u| u.default_rate_minor)
+            .and_then(|uid| user_by_id.get(&uid).map(|u| u.default_rate_minor))
     };
     let mut lines: Vec<InvoiceLine> = Vec::new();
     let mut currency: Option<Currency> = None;
@@ -754,14 +767,14 @@ pub fn generate_invoice(
         if e.customer_id != customer.id || !e.billable || e.date < from || e.date > to {
             continue;
         }
-        if excluded_entries.contains(&e.id) {
+        if excluded_entry.contains(&e.id) {
             continue; // already billed on an issued invoice
         }
-        let project = projects.iter().find(|p| p.code == e.project_code);
+        let project = project_by_code.get(e.project_code.0.as_str()).copied();
         let task = e.task_code.as_ref().and_then(|tc| {
-            tasks
-                .iter()
-                .find(|t| t.project_code == e.project_code && t.code == *tc)
+            task_by_key
+                .get(&(e.project_code.0.as_str(), tc.0.as_str()))
+                .copied()
         });
         let (cur, rate) = effective_rates(e, customer, project, task, user_rate(e));
         set_currency(&cur)?;
@@ -783,7 +796,7 @@ pub fn generate_invoice(
             if x.customer_id != customer.id || !x.billable || x.date < from || x.date > to {
                 continue;
             }
-            if excluded_expenses.contains(&x.id) {
+            if excluded_expense.contains(&x.id) {
                 continue;
             }
             set_currency(&x.currency)?;

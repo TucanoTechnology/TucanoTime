@@ -38,12 +38,21 @@ pub fn burn_report(
     tasks: &[Task],
     users: &[User],
 ) -> Vec<BudgetRow> {
+    // Review D4: index once, then per-entry lookups are O(1).
+    let customer_by_id: std::collections::HashMap<uuid::Uuid, &Customer> =
+        customers.iter().map(|c| (c.id, c)).collect();
+    let task_by_key: std::collections::HashMap<(&str, &str), &Task> = tasks
+        .iter()
+        .map(|t| ((t.project_code.0.as_str(), t.code.0.as_str()), t))
+        .collect();
+    let user_by_id: std::collections::HashMap<uuid::Uuid, &User> =
+        users.iter().map(|u| (u.id, u)).collect();
     let mut rows = Vec::new();
     for (cid, p) in projects {
         if p.budget_hours.is_none() && p.budget_amount_minor.is_none() {
             continue;
         }
-        let customer = customers.iter().find(|c| c.id == *cid);
+        let customer = customer_by_id.get(cid).copied();
         let mut burn_h = 0u64;
         let mut burn_amt = 0u64;
         for e in entries
@@ -53,14 +62,13 @@ pub fn burn_report(
             burn_h += u64::from(e.hours.0);
             if let Some(cust) = customer {
                 let task = e.task_code.as_ref().and_then(|tc| {
-                    tasks
-                        .iter()
-                        .find(|t| t.project_code == e.project_code && t.code == *tc)
+                    task_by_key
+                        .get(&(e.project_code.0.as_str(), tc.0.as_str()))
+                        .copied()
                 });
                 let urate = e
                     .user_id
-                    .and_then(|uid| users.iter().find(|u| u.id == uid))
-                    .map(|u| u.default_rate_minor);
+                    .and_then(|uid| user_by_id.get(&uid).map(|u| u.default_rate_minor));
                 let (_, rate) = effective_rates(e, cust, Some(p), task, urate);
                 burn_amt += e.hours.amount_minor(rate);
             }

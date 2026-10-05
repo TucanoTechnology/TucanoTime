@@ -2555,8 +2555,10 @@ async fn checkout_then_signed_webhook_marks_invoice_paid() {
 
     // Unsigned / badly signed webhook rejected (and CSRF-exempt, since no
     // x-csrf header was sent at all).
+    // Amount/currency ride the normalized event and must match the invoice
+    // (3h @ 60.00 = 18000 EUR) — review A11.
     let payload = format!(
-        "{{\"type\":\"checkout.session.completed\",\"payment_status\":\"paid\",\"client_reference_id\":\"{reference}\",\"metadata\":{{\"invoice_number\":\"{number}\"}}}}"
+        "{{\"type\":\"checkout.session.completed\",\"payment_status\":\"paid\",\"amount_minor\":18000,\"currency\":\"EUR\",\"client_reference_id\":\"{reference}\",\"metadata\":{{\"invoice_number\":\"{number}\"}}}}"
     );
     let (sbad, _) = webhook_post(&app.router, "stripe", &payload, Some("sha256=deadbeef")).await;
     assert_eq!(sbad, StatusCode::UNAUTHORIZED);
@@ -2579,6 +2581,85 @@ async fn checkout_then_signed_webhook_marks_invoice_paid() {
     let (sre, re) = webhook_post(&app.router, "stripe", &payload, Some(&sig)).await;
     assert_eq!(sre, StatusCode::OK, "{re}");
     assert_eq!(re["status"], "already_paid");
+}
+
+#[tokio::test]
+async fn webhook_amount_mismatch_does_not_settle() {
+    // Review A11: a validly signed partial payment (or wrong currency) must
+    // not mark the invoice paid in full.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let stripe: Arc<dyn tucano_time::payments::PaymentProvider> = Arc::new(
+        tucano_time::payments::StripeProvider::with_secret("whsec_mismatch"),
+    );
+    let app = Client::with_payments(
+        store,
+        tucano_time::payments::PaymentRegistry::new(vec![stripe]),
+    )
+    .await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    let number = inv["number"].as_str().unwrap().to_string();
+    json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{iid}/checkout"),
+        Some(json!({"provider":"stripe"})),
+    )
+    .await; // draft -> 409 ok
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (_s2, session) = json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{iid}/checkout"),
+        Some(json!({"provider":"stripe"})),
+    )
+    .await;
+    let reference = session["reference"].as_str().unwrap().to_string();
+
+    let make = |amount: u64, currency: &str| {
+        format!(
+            "{{\"type\":\"checkout.session.completed\",\"payment_status\":\"paid\",\"amount_minor\":{amount},\"currency\":\"{currency}\",\"client_reference_id\":\"{reference}\",\"metadata\":{{\"invoice_number\":\"{number}\"}}}}"
+        )
+    };
+    // Partial payment: signed and valid, but under the total.
+    let partial = make(5000, "EUR");
+    let sig = tucano_time::payments::sign("whsec_mismatch", &partial);
+    let (sp, _) = webhook_post(&app.router, "stripe", &partial, Some(&sig)).await;
+    assert_eq!(sp, StatusCode::CONFLICT, "partial must not settle");
+    // Wrong currency.
+    let wrongc = make(18000, "USD");
+    let sig2 = tucano_time::payments::sign("whsec_mismatch", &wrongc);
+    let (sw, _) = webhook_post(&app.router, "stripe", &wrongc, Some(&sig2)).await;
+    assert_eq!(
+        sw,
+        StatusCode::CONFLICT,
+        "currency mismatch must not settle"
+    );
+    let (_s3, mid) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    assert_eq!(mid["status"], "issued", "invoice must still be issued");
+    // Exact total settles.
+    let exact = make(18000, "EUR");
+    let sig3 = tucano_time::payments::sign("whsec_mismatch", &exact);
+    let (se, body) = webhook_post(&app.router, "stripe", &exact, Some(&sig3)).await;
+    assert_eq!(se, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "paid");
 }
 
 /// Stub transport for accounting tests: returns deterministic ids, optionally

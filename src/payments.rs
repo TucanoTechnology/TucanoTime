@@ -45,6 +45,10 @@ pub struct WebhookPayment {
     pub provider: String,
     pub reference: String,
     pub invoice_number: String,
+    /// What the provider actually collected, in minor units — the handler
+    /// refuses to settle when it disagrees with the invoice (review A11).
+    pub amount_minor: u64,
+    pub currency: String,
 }
 
 pub trait PaymentProvider: Send + Sync {
@@ -259,10 +263,22 @@ fn decode(
         .and_then(|n| n.as_str())
         .ok_or(PaymentError::BadPayload)?
         .to_string();
+    let amount_minor = v
+        .get("amount_minor")
+        .and_then(|a| a.as_u64())
+        .ok_or(PaymentError::BadPayload)?;
+    let currency = v
+        .get("currency")
+        .and_then(|c| c.as_str())
+        .filter(|c| (3..=10).contains(&c.len()))
+        .ok_or(PaymentError::BadPayload)?
+        .to_ascii_uppercase();
     Ok(Some(WebhookPayment {
         provider: provider.into(),
         reference,
         invoice_number,
+        amount_minor,
+        currency,
     }))
 }
 
@@ -329,7 +345,7 @@ mod tests {
 
     fn payload(refid: &str, inv: &str) -> String {
         format!(
-            "{{\"type\":\"checkout.session.completed\",\"payment_status\":\"paid\",\"client_reference_id\":\"{refid}\",\"metadata\":{{\"invoice_number\":\"{inv}\"}}}}"
+            "{{\"type\":\"checkout.session.completed\",\"payment_status\":\"paid\",\"amount_minor\":15000,\"currency\":\"EUR\",\"client_reference_id\":\"{refid}\",\"metadata\":{{\"invoice_number\":\"{inv}\"}}}}"
         )
     }
 
@@ -345,6 +361,8 @@ mod tests {
                 provider: "stripe".into(),
                 reference: "stripe_42".into(),
                 invoice_number: "INV-0042".into(),
+                amount_minor: 15000,
+                currency: "EUR".into(),
             })
         );
     }
@@ -369,7 +387,7 @@ mod tests {
     fn suffix_spoof_events_are_not_terminal() {
         // Review B10: "*\.checkout.completed" suffixes must not settle.
         let p = stripe("whsec");
-        let body = "{\"type\":\"evil.checkout.completed\",\"client_reference_id\":\"stripe_1\",\"metadata\":{\"invoice_number\":\"INV-1\"}}";
+        let body = "{\"type\":\"evil.checkout.completed\",\"amount_minor\":1,\"currency\":\"EUR\",\"client_reference_id\":\"stripe_1\",\"metadata\":{\"invoice_number\":\"INV-1\"}}";
         let sig = sign("whsec", body);
         assert_eq!(p.parse_webhook(body, &sig).unwrap(), None);
         // PayPal's real terminal name differs from Stripe's.
@@ -377,7 +395,7 @@ mod tests {
             signing_secret: Some("psec".into()),
             fake: false,
         };
-        let body2 = "{\"type\":\"paypal.checkout.completed\",\"payment_status\":\"COMPLETED\",\"client_reference_id\":\"paypal_1\",\"metadata\":{\"invoice_number\":\"INV-2\"}}";
+        let body2 = "{\"type\":\"paypal.checkout.completed\",\"payment_status\":\"COMPLETED\",\"amount_minor\":2,\"currency\":\"usd\",\"client_reference_id\":\"paypal_1\",\"metadata\":{\"invoice_number\":\"INV-2\"}}";
         let sig2 = sign("psec", body2);
         assert!(pp.parse_webhook(body2, &sig2).unwrap().is_some());
     }
