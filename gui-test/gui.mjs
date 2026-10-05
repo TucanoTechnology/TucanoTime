@@ -342,6 +342,12 @@ if (payBtn) {
     await tick(300);
     check('Sync without a configured provider explains itself', /no accounting provider configured/i.test(window.document.getElementById('live-region').textContent));
   }
+
+  // ---- SSO (#32): provider discovery endpoint (login screen advertises them) ----
+  const ssoRes = await fetch(BASE + '/auth/sso/providers');
+  const ssoJson = await ssoRes.json();
+  check('SSO providers endpoint responds pre-session', ssoRes.status === 200 && Array.isArray(ssoJson.providers));
+  check('login screen hides SSO box with none configured', window.document.getElementById('sso-box').hidden === true);
 }
 
 // ---- EXPENSES (#23): add a category + an expense via the forms ----

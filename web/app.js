@@ -2055,9 +2055,40 @@ async function logout() {
 document.addEventListener('DOMContentLoaded', async () => {
   $('auth-form').addEventListener('submit', onAuthSubmit);
   $('logout').addEventListener('click', logout);
+  loadSsoProviders(); // advertise configured identity providers (#32)
   try {
     if (await initAuth()) await startApp();
   } catch (err) {
     announce(`Failed to start: ${err.message}`);
   }
 });
+
+/// Shows "Sign in with …" buttons for each configured SSO provider. The IdP
+/// redirect/POST bindings land with the production adapters; until then the
+/// buttons explain the ACS endpoint (honest Beta behaviour, nothing silently
+/// fails).
+async function loadSsoProviders() {
+  try {
+    const st = await api.get('/auth/sso/providers');
+    const providers = st.providers || [];
+    if (providers.length === 0) return;
+    $('sso-box').hidden = false;
+    const box = $('sso-buttons');
+    box.textContent = '';
+    for (const name of providers) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'secondary';
+      btn.textContent = `Sign in with ${name}`;
+      btn.addEventListener('click', () => {
+        announce(
+          `Point your ${name} IdP at POST /auth/sso/assertion (provider "${name}"). ` +
+          'Local sign-in stays available.',
+        );
+      });
+      box.appendChild(btn);
+    }
+  } catch {
+    /* providers are optional */
+  }
+}

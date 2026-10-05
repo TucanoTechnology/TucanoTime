@@ -29,6 +29,7 @@ pub mod reminders;
 pub mod report;
 pub mod revoke;
 pub mod scheduler;
+pub mod sso;
 pub mod store;
 pub mod vault;
 
@@ -52,6 +53,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/logout", axum::routing::post(api::logout))
         .route("/auth/status", get(api::auth_status))
         .route("/auth/me", get(api::me))
+        // SSO (#32): pre-session; the assertion authenticates itself.
+        .route("/auth/sso/providers", get(api::sso_providers))
+        .route(
+            "/auth/sso/assertion",
+            axum::routing::post(api::sso_assertion),
+        )
         // Provider webhooks: authenticated by signature, not session (#34).
         .route(
             "/payments/webhook/{provider}",

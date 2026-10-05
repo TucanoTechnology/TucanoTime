@@ -107,6 +107,8 @@ pub struct AppState {
     pub payments: Arc<crate::payments::PaymentRegistry>,
     /// Accounting sync providers (#33). Empty registry disables the endpoints.
     pub accounting: Arc<crate::accounting::AccountingRegistry>,
+    /// Identity providers for SSO (#32). Empty registry disables SSO.
+    pub sso: Arc<crate::sso::SsoRegistry>,
 }
 
 impl AppState {
@@ -141,6 +143,8 @@ impl AppState {
         let payments = crate::payments::registry_from_vault(vault.as_deref());
         // Accounting providers (#33): enabled when an OAuth token exists.
         let accounting = crate::accounting::registry_from_vault(vault.as_deref());
+        // SSO identity providers (#32): enabled when OIDC/SAML config exists.
+        let sso = Arc::new(crate::sso::registry_from_vault(vault.as_deref()));
         Self {
             clock: Arc::new(crate::clock::SystemClock),
             locks,
@@ -156,6 +160,7 @@ impl AppState {
             email,
             payments,
             accounting,
+            sso,
             store,
         }
     }
@@ -178,6 +183,13 @@ impl AppState {
     #[must_use]
     pub fn with_accounting(mut self, registry: Arc<crate::accounting::AccountingRegistry>) -> Self {
         self.accounting = registry;
+        self
+    }
+
+    /// Swaps the SSO registry (tests inject stub identity providers).
+    #[must_use]
+    pub fn with_sso(mut self, registry: Arc<crate::sso::SsoRegistry>) -> Self {
+        self.sso = registry;
         self
     }
 }
@@ -392,6 +404,99 @@ pub async fn me(State(app): State<AppState>, req: axum::extract::Request) -> Api
 /// Public: whether an administrator exists yet (drives first-run setup UI).
 pub async fn auth_status(State(app): State<AppState>) -> ApiResult {
     Ok(Json(serde_json::json!({ "initialised": app.store.has_users()? })).into_response())
+}
+
+// --------------------------------------------------------------------- sso --
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SsoAssertionInput {
+    pub provider: String,
+    /// Raw signed assertion (compact token or base64 SAML statement).
+    pub payload: String,
+    #[serde(default)]
+    pub signature: String,
+}
+
+/// Public: which SSO providers are configured (drives the login screen).
+pub async fn sso_providers(State(app): State<AppState>) -> ApiResult {
+    Ok(Json(serde_json::json!({ "providers": app.sso.names() })).into_response())
+}
+
+/// SSO assertion consumer (#32). Verifies the provider signature, maps groups
+/// to the #19 roles, and just-in-time provisions the user, then issues the
+/// same session cookie as local login. Local login keeps working alongside.
+pub async fn sso_assertion(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<SsoAssertionInput>,
+) -> ApiResult {
+    let Some(idp) = app.sso.get(&input.provider) else {
+        return Err(ApiError::bad_request("unknown or disabled SSO provider"));
+    };
+    let identity = idp
+        .verify(&input.payload, &input.signature)
+        .map_err(|e| match e {
+            crate::sso::SsoError::BadSignature | crate::sso::SsoError::Expired => ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "sso_invalid",
+                "assertion failed verification",
+            ),
+            other => ApiError::bad_request(other.to_string()),
+        })?;
+
+    let existing = app.store.get_user_by_email(&identity.email)?;
+    let user = match existing {
+        Some(u) => {
+            if !u.active {
+                return Err(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    "inactive",
+                    "this account is deactivated",
+                ));
+            }
+            // JIT group refresh: admins follow the mapped role on every login.
+            let admin_group = std::env::var("TUCANO_SSO_ADMIN_GROUP").unwrap_or_default();
+            let role = crate::sso::map_role(&identity.groups, &admin_group);
+            if role != u.role && !admin_group.is_empty() {
+                let mut updated = u.clone();
+                updated.role = role;
+                app.store.put_user(&updated)?;
+                updated
+            } else {
+                u
+            }
+        }
+        None => {
+            // Just-in-time provisioning (#19): the IdP is the password store,
+            // so local login gets an unsusable random password.
+            let admin_group = std::env::var("TUCANO_SSO_ADMIN_GROUP").unwrap_or_default();
+            let role = crate::sso::map_role(&identity.groups, &admin_group);
+            let temp_password = Uuid::new_v4().to_string();
+            new_user(
+                if identity.name.is_empty() {
+                    identity.email.as_str()
+                } else {
+                    identity.name.as_str()
+                },
+                &identity.email,
+                &temp_password,
+                NewUser {
+                    role,
+                    active: true,
+                    default_rate_minor: 0,
+                    cost_rate_minor: 0,
+                },
+                &app,
+            )?
+        }
+    };
+    app.audit.record(
+        &format!("sso_login:{}", idp.name()),
+        &identity.email,
+        app.clock.now(),
+    );
+    let (headers, pubuser) = set_cookie(&app, &user);
+    Ok((headers, Json(pubuser)).into_response())
 }
 
 /// Recent security audit events (admin only, #52).
