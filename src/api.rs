@@ -358,18 +358,32 @@ pub async fn bootstrap(
             "required, at most 120 characters",
         )]));
     }
-    let user = new_user(
-        name,
-        &email,
-        &input.password,
-        NewUser {
-            role: Role::Admin,
-            active: true,
-            default_rate_minor: 0,
-            cost_rate_minor: 0,
-        },
-        &app,
-    )?;
+    // Hash outside the lock; the check-then-insert is atomic in the store
+    // (review A12/B4: two racing bootstraps must not mint two admins).
+    let password_hash = auth::hash_password(&input.password)
+        .map_err(|_| ApiError::internal("password hashing failed".into()))?;
+    let user = User {
+        id: Uuid::new_v4(),
+        name: name.to_owned(),
+        email: email.clone(),
+        role: Role::Admin,
+        active: true,
+        default_rate_minor: 0,
+        cost_rate_minor: 0,
+        password_hash,
+        created_at: app.clock.now(),
+    };
+    match app.store.put_user_if_none(&user) {
+        Ok(()) => {}
+        Err(crate::store::StoreError::AlreadyExists(_)) => {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "initialised",
+                "an administrator already exists",
+            ));
+        }
+        Err(other) => return Err(other.into()),
+    }
     app.rate.reset("bootstrap");
     app.audit.record("bootstrap", &email, app.clock.now());
     let (headers, pubuser) = set_cookie(&app, &user);
@@ -858,19 +872,19 @@ pub async fn get_invoice_handler(State(app): State<AppState>, Path(id): Path<Uui
 
 /// Issue a draft invoice: this locks its entries from edits/deletes (#18 seam).
 pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
-    let mut invoice = app
+    // Draft check + transition happen inside one store lock (review B4):
+    // an issue racing a pay (or another issue) cannot double-transition.
+    let invoice = app
         .store
         .get_invoice(id)?
         .ok_or_else(|| ApiError::not_found("invoice"))?;
-    if invoice.status != InvoiceStatus::Draft {
-        return Err(ApiError::conflict("only a draft invoice can be issued"));
-    }
-    let now = app.clock.now();
-    invoice.status = InvoiceStatus::Issued;
-    invoice.issued_at = Some(now);
-    invoice.due_date = invoice.period_to.checked_add_days(chrono::Days::new(14)); // net-14 terms
-    app.store.put_invoice(&invoice)?;
-    Ok(Json(invoice).into_response())
+    // net-14 terms (fallback = same day; only reachable at date extremes)
+    let due = invoice
+        .period_to
+        .checked_add_days(chrono::Days::new(14))
+        .unwrap_or(invoice.period_to);
+    let issued = app.store.issue_invoice(id, app.clock.now(), due)?;
+    Ok(Json(issued).into_response())
 }
 
 #[derive(serde::Deserialize)]
@@ -892,19 +906,13 @@ pub async fn pay_invoice(
     Path(id): Path<Uuid>,
     ValidJson(input): ValidJson<PayInput>,
 ) -> ApiResult {
-    let mut invoice = app
-        .store
+    // State check + transition under one lock (review B4).
+    app.store
         .get_invoice(id)?
         .ok_or_else(|| ApiError::not_found("invoice"))?;
-    if invoice.status != InvoiceStatus::Issued {
-        return Err(ApiError::conflict(
-            "only an issued invoice can be marked paid",
-        ));
-    }
-    invoice.status = InvoiceStatus::Paid;
-    invoice.paid_at = Some(app.clock.now());
-    invoice.payment_reference = input.reference;
-    app.store.put_invoice(&invoice)?;
+    let invoice = app
+        .store
+        .pay_invoice(id, app.clock.now(), input.reference)?;
     Ok(Json(invoice).into_response())
 }
 
@@ -1758,8 +1766,9 @@ pub async fn stop_timer(State(app): State<AppState>, actor: AuthUser) -> ApiResu
         created_at: now,
         updated_at: now,
     };
-    app.store.put_entry(&entry)?;
-    app.store.delete_timer(timer.user_id)?;
+    // Entry + timer-clear in one lock (review B4): a failure between the
+    // two left the timer running, so a retry double-logged.
+    app.store.finish_timer(timer.user_id, &entry)?;
     Ok(Json(entry_json(&entry)).into_response())
 }
 
@@ -2408,12 +2417,9 @@ pub async fn update_entry(
         created_at: existing.created_at,
         updated_at: app.clock.now(),
     };
-    // Moving an entry between days relocates its document: write the new
-    // home, then remove the old one.
-    app.store.put_entry(&updated)?;
-    if updated.date != existing.date {
-        let _ = app.store.delete_entry(&existing);
-    }
+    // Relocation across day folders is one store transaction (review B4):
+    // half-applying it would double-count the entry in every report.
+    app.store.save_entry(Some(existing.date), &updated)?;
     Ok(Json(entry_json(&updated)).into_response())
 }
 

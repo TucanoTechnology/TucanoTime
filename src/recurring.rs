@@ -24,18 +24,20 @@ impl RecurringJob {
         Self { store }
     }
 
+    /// `Ok(None)` = nothing to bill this period (legitimate advance);
+    /// `Err` = transient/structural failure, period must be retried.
     fn build_invoice(
         &self,
         schedule: &RecurringSchedule,
         from: chrono::NaiveDate,
         to: chrono::NaiveDate,
         now: DateTime<Utc>,
-    ) -> Option<Invoice> {
+    ) -> Result<Option<Invoice>, String> {
         let customer = self
             .store
             .get_customer(schedule.customer_id)
-            .ok()
-            .flatten()?;
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("customer {} missing", schedule.customer_id))?;
         match schedule.mode {
             RecurMode::Retainer => {
                 let line = InvoiceLine {
@@ -50,7 +52,7 @@ impl RecurringJob {
                     amount_minor: schedule.retainer_amount_minor,
                     note: format!("{} retainer", cadence_label(schedule.cadence)),
                 };
-                Some(Invoice {
+                Ok(Some(Invoice {
                     id: uuid::Uuid::new_v4(),
                     number: String::new(),
                     customer_id: customer.id,
@@ -65,20 +67,23 @@ impl RecurringJob {
                     due_date: None,
                     paid_at: None,
                     payment_reference: String::new(),
-                })
+                }))
             }
             RecurMode::Time => {
-                let projects = self.store.list_projects(customer.id).ok()?;
+                let projects = self
+                    .store
+                    .list_projects(customer.id)
+                    .map_err(|e| e.to_string())?;
                 let mut tasks = Vec::new();
                 for p in &projects {
                     if let Ok(ts) = self.store.list_tasks(customer.id, &p.code.0) {
                         tasks.extend(ts);
                     }
                 }
-                let users = self.store.list_users().ok()?;
-                let entries = self.store.list_range(from, to).ok()?;
-                let expenses = self.store.list_expenses().ok()?;
-                let all_invoices = self.store.list_invoices().ok()?;
+                let users = self.store.list_users().map_err(|e| e.to_string())?;
+                let entries = self.store.list_range(from, to).map_err(|e| e.to_string())?;
+                let expenses = self.store.list_expenses().map_err(|e| e.to_string())?;
+                let all_invoices = self.store.list_invoices().map_err(|e| e.to_string())?;
                 let issued: Vec<&Invoice> = all_invoices
                     .iter()
                     .filter(|i| i.status == InvoiceStatus::Issued)
@@ -103,7 +108,14 @@ impl RecurringJob {
                     excluded_expenses: &excluded_expenses,
                     include_expenses: true,
                 };
-                generate_invoice(String::new(), &customer, &sources, from, to, now).ok()
+                match generate_invoice(String::new(), &customer, &sources, from, to, now) {
+                    Ok(inv) => Ok(Some(inv)),
+                    // Nothing billable is a normal empty period: advance.
+                    Err(crate::domain::InvoiceError::NothingToInvoice) => Ok(None),
+                    // Anything else (mixed currencies, store read) must not
+                    // silently consume the period (review B2).
+                    Err(e) => Err(format!("{e:?}")),
+                }
             }
         }
     }
@@ -133,13 +145,35 @@ impl Job for RecurringJob {
             let Some((from, to)) = due_period(s.cadence, s.last_period_end, today) else {
                 continue;
             };
-            if let Some(invoice) = self.build_invoice(s, from, to, now) {
-                // Ignore errors (e.g. nothing to bill) — just advance the clock.
-                let _ = self.store.create_invoice(invoice);
-            }
+            // Review B2: advance only on outcomes we understand, and write
+            // invoice+schedule under one lock so a failure can never
+            // double-bill or silently skip a period.
             let mut advanced = s.clone();
             advanced.last_period_end = Some(to);
-            let _ = self.store.put_schedule(&advanced);
+            match self.build_invoice(s, from, to, now) {
+                Ok(invoice) => {
+                    if let Some(invoice) = invoice {
+                        match self.store.create_invoice_and_advance(invoice, &advanced) {
+                            Ok(inv) => {
+                                tracing::info!(number = %inv.number, "recurring: drafted invoice")
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, schedule = %s.id, "recurring: invoice+schedule write failed; period retried next run");
+                                continue; // do NOT advance
+                            }
+                        }
+                    } else {
+                        // Nothing to bill this period: advance alone.
+                        let _ = self.store.put_schedule(&advanced);
+                    }
+                }
+                Err(e) => {
+                    // Transient build failure (store read, mixed currency):
+                    // leave the schedule where it is so the period retries.
+                    tracing::warn!(error = %e, schedule = %s.id, "recurring: build failed; period not skipped");
+                    continue;
+                }
+            }
         }
     }
 }
