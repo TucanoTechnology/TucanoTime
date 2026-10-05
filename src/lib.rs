@@ -19,6 +19,7 @@ pub mod error;
 pub mod lock;
 pub mod notify;
 pub mod ratelimit;
+pub mod reminders;
 pub mod report;
 pub mod revoke;
 pub mod scheduler;
@@ -125,6 +126,11 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/timer/stop", axum::routing::post(api::stop_timer))
         .route("/calendar/events", get(api::calendar_events))
+        .route("/notifications", get(api::list_notifications))
+        .route(
+            "/notifications/read",
+            axum::routing::post(api::mark_notifications_read),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api::require_auth,

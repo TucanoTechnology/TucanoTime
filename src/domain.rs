@@ -554,6 +554,19 @@ pub fn elapsed_hundredths(started_at: DateTime<Utc>, now: DateTime<Utc>) -> u32 
     hundredths.clamp(1, 2400) as u32
 }
 
+// -------------------------------------------------------------- notifications --
+
+/// A user-facing notification produced by reminders (#22) or alerts (#30).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Notification {
+    pub id: Uuid,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub created_at: DateTime<Utc>,
+    pub read: bool,
+}
+
 // -------------------------------------------------------------- submissions --
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

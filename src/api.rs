@@ -1235,6 +1235,22 @@ pub async fn calendar_events(
     Ok(Json(serde_json::json!({ "events": events })).into_response())
 }
 
+// ---------------------------------------------------------- notifications --
+
+/// The caller's notifications, newest first (#22).
+pub async fn list_notifications(State(app): State<AppState>, actor: AuthUser) -> ApiResult {
+    let mut list = app.store.list_notifications(actor.0.id)?;
+    list.sort_by_key(|n| std::cmp::Reverse(n.created_at));
+    let unread = list.iter().filter(|n| !n.read).count();
+    Ok(Json(serde_json::json!({ "notifications": list, "unread": unread })).into_response())
+}
+
+/// Mark the caller's notifications read.
+pub async fn mark_notifications_read(State(app): State<AppState>, actor: AuthUser) -> ApiResult {
+    app.store.mark_notifications_read(actor.0.id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {
     chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
         .map_err(|_| ApiError::bad_request(format!("'{s}' is not a date in YYYY-MM-DD form")))

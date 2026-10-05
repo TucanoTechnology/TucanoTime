@@ -19,7 +19,8 @@ use uuid::Uuid;
 
 use crate::auth::User;
 use crate::domain::{
-    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, Project, Submission, Task, Timer,
+    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, Notification, Project, Submission,
+    Task, Timer,
 };
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
@@ -440,6 +441,43 @@ impl Store {
             std::fs::remove_file(&path)?;
         }
         Ok(())
+    }
+
+    // -------------------------------------------------------- notifications --
+
+    fn notifications_path(&self, user_id: Uuid) -> PathBuf {
+        self.root
+            .join("notifications")
+            .join(format!("{user_id}.json"))
+    }
+
+    pub fn list_notifications(&self, user_id: Uuid) -> Result<Vec<Notification>, StoreError> {
+        Ok(read_json::<Vec<Notification>>(&self.notifications_path(user_id))?.unwrap_or_default())
+    }
+
+    pub fn push_notification(&self, user_id: Uuid, n: &Notification) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let mut list: Vec<Notification> =
+            read_json(&self.notifications_path(user_id))?.unwrap_or_default();
+        list.push(n.clone());
+        // Bound the stored list (newest kept).
+        if list.len() > 200 {
+            let start = list.len() - 200;
+            list = list[start..].to_vec();
+        }
+        std::fs::create_dir_all(self.root.join("notifications"))?;
+        write_json(&self.notifications_path(user_id), &list)
+    }
+
+    pub fn mark_notifications_read(&self, user_id: Uuid) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let mut list: Vec<Notification> =
+            read_json(&self.notifications_path(user_id))?.unwrap_or_default();
+        for n in list.iter_mut() {
+            n.read = true;
+        }
+        std::fs::create_dir_all(self.root.join("notifications"))?;
+        write_json(&self.notifications_path(user_id), &list)
     }
 
     // ------------------------------------------------------------ customers --

@@ -2227,3 +2227,14 @@ async fn calendar_events_from_configured_feed() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0]["title"], "Stand-up");
 }
+
+#[tokio::test]
+async fn notifications_endpoint_empty_then_read() {
+    let (app, _d) = app().await;
+    let (s, body) = json_req(&app, "GET", "/notifications", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["notifications"].as_array().unwrap().len(), 0);
+    assert_eq!(body["unread"], 0);
+    let (s2, _) = json_req(&app, "POST", "/notifications/read", None).await;
+    assert_eq!(s2, StatusCode::NO_CONTENT);
+}

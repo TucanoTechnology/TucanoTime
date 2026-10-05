@@ -155,6 +155,10 @@ button.primary { width: 100%; }
 .cal-events { list-style: none; padding: 0; margin: 0 0 1rem; }
 .cal-event { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: .35rem; background: var(--surface); }
 
+.notif-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin: .5rem 0 .25rem; }
+.notifs { list-style: none; padding: 0; margin: 0 0 1rem; }
+.notif { padding: .5rem .7rem; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 var(--radius) var(--radius) 0; margin-bottom: .35rem; }
+
 /* ---- narrow: sidebar collapses to a top bar ---- */
 @media (max-width: 720px) {
   .app { flex-direction: column; }

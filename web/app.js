@@ -1333,6 +1333,40 @@ async function refreshCalendar(date) {
   $('calendar-section').hidden = events.length === 0;
 }
 
+// ------------------------------------------------------------ notifications --
+
+async function refreshNotifications() {
+  try {
+    const data = await api.get('/notifications');
+    const list = data.notifications || [];
+    const unread = list.filter((n) => !n.read);
+    $('notif-section').hidden = unread.length === 0;
+    const ul = $('notif-list');
+    ul.textContent = '';
+    for (const n of unread) {
+      const li = document.createElement('li');
+      li.className = 'notif';
+      const strong = document.createElement('strong');
+      strong.textContent = n.title;
+      const body = document.createElement('span');
+      body.textContent = ` ${n.body}`;
+      li.append(strong, body);
+      ul.appendChild(li);
+    }
+  } catch {
+    $('notif-section').hidden = true;
+  }
+}
+
+async function markNotificationsRead() {
+  try {
+    await api.post('/notifications/read');
+    await refreshNotifications();
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
 // ---------------------------------------------------------------- boot ---
 
 function switchTab(tabId) {
@@ -1381,6 +1415,7 @@ async function startApp() {
   $('submission-form').addEventListener('submit', submitWeek);
   $('secret-form').addEventListener('submit', addSecret);
   $('timer-start').addEventListener('click', startTimer);
+  $('notif-read').addEventListener('click', markNotificationsRead);
   $('timer-stop').addEventListener('click', stopTimer);
   $('timer-discard').addEventListener('click', discardTimer);
   $('timer-customer').addEventListener('change', async (e) => {
@@ -1404,6 +1439,7 @@ async function startApp() {
   fillCustomerSelect($('timer-customer'), '', true);
   await fillProjectSelect($('timer-project'), '', null);
   await refreshTimer();
+  await refreshNotifications();
   await fillProjectSelect($('expense-project'), '', null);
   $('expense-date').value = today;
   await refreshCategories();
