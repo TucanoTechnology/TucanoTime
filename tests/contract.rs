@@ -146,6 +146,7 @@ impl Client {
                     email: recorder.clone(),
                     payments,
                     accounting,
+                    sso: Arc::new(tucano_time::sso::SsoRegistry::default()),
                 }
             }
             None => AppState::with_session(store, session)
@@ -2119,6 +2120,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
         email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
         payments: std::sync::Arc::new(tucano_time::payments::PaymentRegistry::default()),
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
+        sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
     };
     let router = tucano_time::build_router(state);
     // bootstrap admin
@@ -2263,6 +2265,7 @@ async fn calendar_events_from_configured_feed() {
         email: std::sync::Arc::new(tucano_time::email::DisabledEmailSender),
         payments: std::sync::Arc::new(tucano_time::payments::PaymentRegistry::default()),
         accounting: std::sync::Arc::new(tucano_time::accounting::AccountingRegistry::default()),
+        sso: std::sync::Arc::new(tucano_time::sso::SsoRegistry::default()),
     };
     let router = tucano_time::build_router(state);
     raw(
@@ -2770,4 +2773,116 @@ async fn accounting_sync_failure_is_recorded_not_fatal() {
             .unwrap()
             .starts_with("remote-invoice")
     );
+}
+
+#[tokio::test]
+async fn sso_jit_provisions_and_logs_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+    let registry = Arc::new(tucano_time::sso::SsoRegistry::new(vec![Arc::new(idp)]));
+    let state = AppState::with_session(
+        store,
+        Arc::new(Session::new(
+            b"test-session-secret-0000000000000032".to_vec(),
+            3600,
+            false,
+        )),
+    )
+    .with_sso(registry);
+    let router = tucano_time::build_router(state);
+
+    // Local admin exists FIRST — SSO runs alongside local login (#32 DoD).
+    let (sa, _, _) = raw(
+        &router,
+        "POST",
+        "/auth/bootstrap",
+        Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+        None,
+    )
+    .await;
+    assert_eq!(sa, StatusCode::CREATED);
+
+    // Providers are advertised pre-session.
+    let (s, body, _) = raw(&router, "GET", "/auth/sso/providers", None, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        body["providers"].as_array().unwrap(),
+        &vec![json!("okta-test")]
+    );
+
+    let idp = tucano_time::sso::SignedTokenIdp::new("okta-test", "stub-secret", vec![]);
+
+    // A valid signed assertion JIT-creates the user (member) and logs in.
+    let claims = tucano_time::sso::TokenClaims {
+        sub: "u1".into(),
+        email: "Newbie@acme.test".into(),
+        name: "New Bie".into(),
+        groups: vec![],
+        exp: chrono::Utc::now().timestamp() + 300,
+    };
+    let token = idp.issue(&claims);
+    let (s1, user, _) = raw(
+        &router,
+        "POST",
+        "/auth/sso/assertion",
+        Some(json!({"provider":"okta-test","payload":token,"signature":""})),
+        None,
+    )
+    .await;
+    assert_eq!(s1, StatusCode::OK, "{user}");
+    assert_eq!(user["email"], "newbie@acme.test");
+    assert_eq!(user["role"], "member");
+
+    // The session cookie works like a local one.
+    let cookie = {
+        let (_s, _b, c) = raw(
+            &router,
+            "POST",
+            "/auth/sso/assertion",
+            Some(json!({"provider":"okta-test","payload":token,"signature":""})),
+            None,
+        )
+        .await;
+        c.unwrap_or_default()
+    };
+    let (sm, me, _) = raw(&router, "GET", "/auth/me", None, Some(&cookie)).await;
+    assert_eq!(sm, StatusCode::OK, "{me}");
+    assert_eq!(me["name"], "New Bie");
+
+    // Bad signature -> 401, and no user created for it.
+    let (sb, _, _) = raw(
+        &router,
+        "POST",
+        "/auth/sso/assertion",
+        Some(json!({"provider":"okta-test","payload":"aGVhZGVy.cGF5bG9hZC5mb3JnZWQ.bad","signature":""})),
+        None,
+    )
+    .await;
+    assert_eq!(sb, StatusCode::UNAUTHORIZED);
+
+    // Local login still works alongside SSO.
+    let (sl, _, _) = raw(
+        &router,
+        "POST",
+        "/auth/login",
+        Some(json!({"email":ADMIN_EMAIL,"password":ADMIN_PW})),
+        None,
+    )
+    .await;
+    assert_eq!(sl, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn sso_unknown_provider_is_400() {
+    let (app, _d) = app().await;
+    let (s, _) = json_req(
+        &app,
+        "POST",
+        "/auth/sso/assertion",
+        Some(json!({"provider":"nope","payload":"x","signature":""})),
+    )
+    .await;
+    // app() client is authenticated; endpoint is public but provider unknown.
+    assert_eq!(s, StatusCode::BAD_REQUEST);
 }

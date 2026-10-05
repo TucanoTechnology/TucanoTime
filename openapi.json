@@ -526,6 +526,28 @@
     }
   },
   "paths": {
+    "/auth/sso/providers": {
+      "get": {
+        "operationId": "ssoProviders",
+        "tags": ["auth"],
+        "summary": "Configured SSO identity providers (#32), advertised pre-session",
+        "responses": { "200": { "description": "Provider names.", "content": { "application/json": { "schema": { "type": "object", "required": ["providers"], "properties": { "providers": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": false } } } } }
+      }
+    },
+    "/auth/sso/assertion": {
+      "post": {
+        "operationId": "ssoAssertion",
+        "tags": ["auth"],
+        "summary": "Assertion consumer: verifies the provider signature, JIT-provisions the user (#19 roles) and issues a session cookie alongside local login (#32)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["provider", "payload"], "properties": { "provider": { "type": "string" }, "payload": { "type": "string", "maxLength": 32768 }, "signature": { "type": "string", "maxLength": 4096, "default": "" } }, "additionalProperties": false } } } },
+        "responses": {
+          "200": { "description": "Signed in; Set-Cookie session issued.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicUser" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "description": "Assertion failed verification or expired." },
+          "403": { "description": "Account deactivated." }
+        }
+      }
+    },
     "/auth/status": {
       "get": {
         "operationId": "authStatus",
