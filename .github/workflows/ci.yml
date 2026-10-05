@@ -57,6 +57,48 @@ jobs:
       - name: Lint workflows
         run: docker run --rm -v "$PWD:/repo:ro" --workdir /repo rhysd/actionlint:1.7.12 -color
 
+  # GUI contract (#102): the jsdom harness drives the real app against the
+  # built binary. Server and harness run in pinned images on the host network
+  # so both sides of localhost:8099 are the runner itself.
+  gui-test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build server binary
+        run: docker run --rm -v "$PWD:/repo" -w /repo rust:1.98.0-slim-trixie cargo build --release
+
+      - name: Serve on :8099 (fresh data dir)
+        run: |
+          docker rm -f tt-gui-server 2>/dev/null || true
+          docker run -d --name tt-gui-server --network host \
+            -v "$PWD:/repo:ro" -v /data \
+            -e TUCANO_DATA_DIR=/data -e TUCANO_PORT=8099 -e TUCANO_STRIPE_FAKE=1 \
+            rust:1.98.0-slim-trixie /repo/target/release/tucano-time
+
+      - name: Wait for health
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:8099/healthz >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "server did not become healthy"
+          docker logs tt-gui-server
+          exit 1
+
+      - name: Run jsdom harness
+        run: |
+          docker run --rm --network host \
+            -v "$PWD/gui-test:/gui" -v "$PWD/web:/web:ro" \
+            -w /gui node:22-slim \
+            bash -c "npm install --no-audit --no-fund && node gui.mjs"
+
+      - name: Stop server
+        if: always()
+        run: docker rm -f tt-gui-server
+
   # Secret scanning (#49): full git history via the pinned gitleaks image. The
   # digest is pinned (matching the sibling project's supply-chain discipline)
   # so a tag re-push cannot silently change the scanner.

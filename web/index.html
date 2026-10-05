@@ -353,6 +353,20 @@
     </div><!-- /content -->
   </div><!-- /app -->
 
+  <!-- One inline dialog replacing confirm/prompt/alert (#102). -->
+  <dialog id="app-dialog" aria-labelledby="dlg-title">
+    <h2 id="dlg-title"></h2>
+    <p id="dlg-message"></p>
+    <label id="dlg-input-wrap">
+      <span id="dlg-input-label"></span>
+      <input id="dlg-input" type="text" autocomplete="off" />
+    </label>
+    <div class="dlg-actions">
+      <button id="dlg-cancel" class="secondary" type="button">Cancel</button>
+      <button id="dlg-ok" class="primary" type="button">OK</button>
+    </div>
+  </dialog>
+
   <script src="/app.js"></script>
 </body>
 </html>
