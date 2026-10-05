@@ -157,6 +157,9 @@ pub struct Customer {
     pub currency: Currency,
     pub default_rate_minor: u64,
     pub active: bool,
+    /// Optional billing email for invoice delivery (#35).
+    #[serde(default)]
+    pub email: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -879,6 +882,8 @@ pub struct CustomerInput {
     pub default_rate_minor: u64,
     #[serde(default = "default_active")]
     pub active: bool,
+    #[serde(default)]
+    pub email: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -971,12 +976,17 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
         errors.push(FieldError::new("name", "required, at most 120 characters"));
     }
     validate_rate_minor(input.default_rate_minor, "default_rate_minor", &mut errors);
+    let email = input.email.trim();
+    if !email.is_empty() && !crate::email::valid_address(email) {
+        errors.push(FieldError::new("email", "not a valid email address"));
+    }
     if errors.is_empty() {
         Ok(CustomerDraft {
             name: name.unwrap(),
             currency: input.currency.0.clone(),
             default_rate_minor: input.default_rate_minor,
             active: input.active,
+            email: email.to_string(),
         })
     } else {
         Err(errors)
@@ -1044,6 +1054,7 @@ pub struct CustomerDraft {
     pub currency: String,
     pub default_rate_minor: u64,
     pub active: bool,
+    pub email: String,
 }
 
 #[derive(Debug)]
@@ -1167,6 +1178,7 @@ mod tests {
             currency: Currency::parse(currency).unwrap(),
             default_rate_minor: rate,
             active: true,
+            email: String::new(),
         }
     }
 
@@ -1226,6 +1238,7 @@ mod tests {
             currency: Currency("EUR".into()),
             default_rate_minor: 6000,
             active: true,
+            email: String::new(),
         };
         let project = Project {
             customer_id: customer.id,

@@ -927,6 +927,7 @@ mod tests {
             currency: crate::domain::Currency("EUR".into()),
             default_rate_minor: 1,
             active: true,
+            email: String::new(),
         }
     }
 

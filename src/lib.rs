@@ -16,6 +16,8 @@ pub mod budgets;
 pub mod calendar;
 pub mod clock;
 pub mod domain;
+pub mod email;
+pub mod email_reminders;
 pub mod error;
 pub mod lock;
 pub mod notify;
@@ -157,6 +159,10 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::post(api::issue_invoice),
         )
         .route("/invoices/{id}/pay", axum::routing::post(api::pay_invoice))
+        .route(
+            "/invoices/{id}/email",
+            axum::routing::post(api::send_invoice_email),
+        )
         .route("/invoices/summary", get(api::invoice_summary))
         .route("/invoices/report", get(api::invoice_report_handler))
         .route("/invoices/export.csv", get(api::invoice_export_csv))

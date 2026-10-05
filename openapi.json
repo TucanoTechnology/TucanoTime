@@ -85,13 +85,14 @@
       },
       "Customer": {
         "type": "object",
-        "required": ["id", "name", "currency", "default_rate_minor", "active"],
+        "required": ["id", "name", "currency", "default_rate_minor", "active", "email"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "name": { "type": "string", "minLength": 1, "maxLength": 120 },
           "currency": { "$ref": "#/components/schemas/Currency" },
           "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean" }
+          "active": { "type": "boolean" },
+          "email": { "type": "string", "maxLength": 200, "description": "Optional billing email for invoice delivery (#35)" }
         },
         "additionalProperties": false
       },
@@ -102,7 +103,8 @@
           "name": { "type": "string", "minLength": 1, "maxLength": 120 },
           "currency": { "$ref": "#/components/schemas/Currency" },
           "default_rate_minor": { "$ref": "#/components/schemas/RateMinor" },
-          "active": { "type": "boolean", "default": true }
+          "active": { "type": "boolean", "default": true },
+          "email": { "type": "string", "maxLength": 200, "default": "" }
         },
         "additionalProperties": false
       },
@@ -1164,6 +1166,22 @@
           "200": { "description": "Issued invoice.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } },
           "404": { "$ref": "#/components/responses/NotFound" },
           "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/invoices/{id}/email": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "post": {
+        "operationId": "sendInvoiceEmail",
+        "tags": ["invoices"],
+        "summary": "Email an issued invoice to the customer's billing address (#35)",
+        "responses": {
+          "200": { "description": "Sent.", "content": { "application/json": { "schema": { "type": "object", "required": ["sent_to"], "properties": { "sent_to": { "type": "string" } }, "additionalProperties": false } } } },
+          "403": { "description": "Admin role required." },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" },
+          "502": { "description": "The email transport failed." }
         }
       }
     },

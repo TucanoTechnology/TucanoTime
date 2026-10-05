@@ -42,6 +42,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(tucano_time::budgets::BudgetAlertJob::new(
             state.store.clone(),
         )),
+        Arc::new(tucano_time::email_reminders::EmailReminderJob::new(
+            state.store.clone(),
+            state.email.clone(),
+            std::env::var("TUCANO_REMINDER_DAYS")
+                .ok()
+                .and_then(|d| d.parse().ok())
+                .unwrap_or(7),
+            std::path::Path::new(&data_dir),
+        )),
     ];
     let scheduler = Arc::new(tucano_time::scheduler::Scheduler::new(
         std::path::Path::new(&data_dir),

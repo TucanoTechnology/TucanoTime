@@ -175,6 +175,7 @@
         <div class="field"><label for="customer-name">Name</label><input id="customer-name" maxlength="120" required></div>
         <div class="field"><label for="customer-currency">Default currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
+        <div class="field"><label for="customer-email">Billing email (optional, for invoice delivery)</label><input id="customer-email" type="email" maxlength="200" autocomplete="off"></div>
         <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
         <p class="form-error" id="customer-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="customer-save">Add customer</button><button type="button" class="secondary" id="customer-cancel" hidden>Cancel</button></div>
