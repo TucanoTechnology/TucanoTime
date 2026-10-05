@@ -62,15 +62,15 @@ function isoDate(d) {
 
 function addDays(dateStr, n) {
   const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + n);
+  const dt = new Date(y, m - 1, d); // local midnight: calendar-day math with local getters
+  dt.setDate(dt.getDate() + n);
   return isoDate(dt);
 }
 
 function mondayOf(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  const dow = dt.getUTCDay(); // 0 Sun .. 6 Sat
+  const dt = new Date(y, m - 1, d);
+  const dow = dt.getDay(); // 0 Sun .. 6 Sat
   const shift = (dow === 0 ? -6 : 1) - dow;
   return addDays(dateStr, shift);
 }
@@ -194,10 +194,83 @@ function initTabs() {
 
 // ----------------------------------------------------------------- day ---
 
+/// Hundredths of an hour as `H:MM` (e.g. 425 -> 4:15).
+function fmtHM(hundredths) {
+  const totalMin = Math.round(hundredths * 0.6);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `${h}:${String(m).padStart(2, '0')}`;
+}
+
+function dayDate() {
+  return $('day-date').value;
+}
+
+function setDayLabel() {
+  const d = dayDate();
+  const [y, m, day] = d.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, day));
+  const label = dt.toUTCString().slice(0, 16); // "Tue, 11 Nov 2026"
+  $('day-label').textContent = label;
+}
+
+// The week strip: totals per day for the week containing the selected day.
+async function refreshWeekStrip() {
+  const d = dayDate();
+  const start = mondayOf(d);
+  const end = addDays(start, 6);
+  let entries = [];
+  try {
+    const data = await api.get(`/entries?from=${start}&to=${end}`);
+    entries = data.entries || [];
+  } catch {
+    $('week-strip').textContent = '';
+    return;
+  }
+  const totals = {};
+  for (const e of entries) totals[e.date] = (totals[e.date] || 0) + Math.round(e.hours * 100);
+  const strip = $('week-strip');
+  strip.textContent = '';
+  for (let i = 0; i < 7; i += 1) {
+    const date = addDays(start, i);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ws-day' + (date === d ? ' selected' : '');
+    btn.dataset.date = date;
+    if (date === d) btn.setAttribute('aria-current', 'date');
+    const name = document.createElement('span');
+    name.className = 'ws-name';
+    const [y, m, dd] = date.split('-').map(Number);
+    name.textContent = `${new Date(Date.UTC(y, m - 1, dd)).toUTCString().slice(0, 3)} ${dd}`;
+    const tot = document.createElement('span');
+    tot.className = 'ws-total num';
+    tot.textContent = fmtHM(totals[date] || 0);
+    btn.append(name, tot);
+    btn.addEventListener('click', () => selectDay(date));
+    strip.appendChild(btn);
+  }
+  const wk = document.createElement('span');
+  wk.className = 'ws-week num';
+  const sum = Object.values(totals).reduce((a, b) => a + b, 0);
+  wk.textContent = `Week total ${fmtHM(sum)}`;
+  strip.appendChild(wk);
+}
+
+async function selectDay(date) {
+  $('day-date').value = date;
+  await refreshDay();
+}
+
+function navigateDay(delta) {
+  const next = addDays(dayDate(), delta);
+  $('day-date').value = next;
+  refreshDay();
+}
+
 async function refreshDay() {
-  const date = $('day-date').value;
+  const date = dayDate();
   if (!date) return;
-  $('day-label').textContent = date;
+  setDayLabel();
   const data = await api.get(`/entries?date=${encodeURIComponent(date)}`);
   const rows = data.entries || [];
   const tbody = $('day-table').querySelector('tbody');
@@ -207,46 +280,133 @@ async function refreshDay() {
     total += Math.round(e.hours * 100);
     const tr = document.createElement('tr');
 
-    const tdCust = document.createElement('td');
-    tdCust.textContent = customerName(e.customer_id);
-    const tdProj = document.createElement('td');
-    tdProj.textContent = e.project_code;
-    const tdHrs = document.createElement('td');
-    tdHrs.className = 'num';
-    tdHrs.textContent = e.hours.toFixed(2);
-    const tdNote = document.createElement('td');
-    tdNote.textContent = e.note || '';
+    const tdMain = document.createElement('td');
+    tdMain.className = 'entry-main';
+    const proj = document.createElement('div');
+    proj.className = 'entry-project';
+    const projName = (state.projectsByCustomer[e.customer_id] || []).find((p) => p.code === e.project_code);
+    proj.textContent = projName ? `${e.project_code} — ${projName.name}` : e.project_code;
+    const cust = document.createElement('div');
+    cust.className = 'entry-customer';
+    cust.textContent = customerName(e.customer_id);
+    const note = document.createElement('div');
+    note.className = 'entry-note';
+    note.textContent = e.note || '';
+    note.title = e.note || '';
     if (!e.billable) {
       const nb = document.createElement('span');
       nb.className = 'badge';
       nb.textContent = ' non-billable';
-      tdNote.appendChild(nb);
+      note.appendChild(nb);
     }
+    tdMain.append(proj, cust, note);
+
+    const tdHrs = document.createElement('td');
+    tdHrs.className = 'num entry-hours';
+    tdHrs.textContent = e.hours.toFixed(2);
+
     const tdAct = document.createElement('td');
     tdAct.className = 'actions-col';
-
     const edit = document.createElement('button');
-    edit.className = 'link';
+    edit.className = 'pill';
     edit.type = 'button';
     edit.textContent = 'Edit';
     edit.addEventListener('click', () => startEdit(e));
     const del = document.createElement('button');
-    del.className = 'danger';
+    del.className = 'pill danger';
     del.type = 'button';
     del.textContent = 'Delete';
     del.addEventListener('click', () => removeEntry(e));
-
     tdAct.append(edit, del);
-    tr.append(tdCust, tdProj, tdHrs, tdNote, tdAct);
+
+    tr.append(tdMain, tdHrs, tdAct);
     tbody.appendChild(tr);
   }
   $('day-total').textContent = (total / 100).toFixed(2);
   $('day-table').hidden = rows.length === 0;
   $('day-empty').hidden = rows.length !== 0;
+  $('entry-date').value = date;
+  $('entry-form-date').textContent = date ? `For ${date}` : '';
+  await refreshWeekStrip();
   await refreshCalendar(date);
 }
 
+/// Copy-forward (#12): pending rows for the previous day's projects, saved
+/// only when the user fills in hours (hours must be >= 0.01 to persist).
+async function copyPreviousDay() {
+  const target = dayDate();
+  const prev = addDays(target, -1);
+  const list = $('copy-rows');
+  list.textContent = '';
+  let rows = [];
+  try {
+    const data = await api.get(`/entries?date=${prev}`);
+    rows = data.entries || [];
+  } catch (err) {
+    announce(`Could not read ${prev}: ${err.message}`);
+    return;
+  }
+  if (rows.length === 0) {
+    announce('No entries on the previous day to copy.');
+    return;
+  }
+  const seen = new Set();
+  for (const e of rows) {
+    const key = `${e.customer_id}|${e.project_code}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const li = document.createElement('li');
+    li.className = 'copy-row';
+    const label = document.createElement('span');
+    label.className = 'copy-label';
+    label.textContent = `${customerName(e.customer_id)} / ${e.project_code}`;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0.01';
+    input.max = '24';
+    input.step = '0.01';
+    input.className = 'copy-hours';
+    input.setAttribute('aria-label', `Hours for ${e.project_code} on ${target}`);
+    input.placeholder = 'h';
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.textContent = 'Save';
+    save.addEventListener('click', async () => {
+      const hours = Number(input.value);
+      if (!(hours >= 0.01 && hours <= 24)) {
+        announce('Enter hours between 0.01 and 24.');
+        input.focus();
+        return;
+      }
+      try {
+        await api.post('/entries', {
+          date: target,
+          customer_id: e.customer_id,
+          project_code: e.project_code,
+          task_code: e.task_code || null,
+          hours,
+          note: '',
+          billable: e.billable !== false,
+        });
+        li.remove();
+        announce(`Copied ${e.project_code} to ${target}.`);
+        await refreshDay();
+      } catch (err) {
+        announce(`Copy failed: ${err.message}`);
+      }
+    });
+    li.append(label, input, save);
+    list.appendChild(li);
+  }
+  announce(`${seen.size} project row(s) ready — enter hours to copy them to ${target}.`);
+}
+
+function showEntryForm(show) {
+  $('entry-wrap').hidden = !show;
+}
+
 function startEdit(e) {
+  showEntryForm(true);
   $('entry-id').value = e.id;
   $('entry-date').value = e.date;
   $('entry-customer').value = e.customer_id;
@@ -320,8 +480,12 @@ async function saveEntry(evt) {
     $('day-date').value = body.date;
     const savedId = id || null;
     resetEntryForm();
+    if (savedId) showEntryForm(false); // editing closes the inline row
     await refreshDay();
-    if (!savedId) $('entry-hours').focus();
+    if (!savedId) {
+      $('entry-hours').focus();
+      $('entry-note').focus();
+    }
   } catch (err) {
     showFormError($('entry-error'), err);
   }
@@ -440,6 +604,8 @@ async function prefillFromCell(customerId, projectCode, date) {
   switchTab('tab-day');
   $('day-date').value = date;
   await refreshDay();
+  showEntryForm(true);
+  resetEntryForm();
   $('entry-date').value = date;
   $('entry-customer').value = customerId;
   await fillProjectSelect($('entry-project'), customerId, projectCode);
@@ -1322,7 +1488,9 @@ async function refreshCalendar(date) {
     log.className = 'link';
     log.textContent = 'Log time';
     log.addEventListener('click', () => {
+      showEntryForm(true);
       $('entry-date').value = date;
+      $('entry-hours').value = '';
       $('entry-note').value = ev.title;
       $('entry-hours').focus();
       $('entry-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1385,9 +1553,19 @@ async function startApp() {
 
   initTabs();
 
-  $('day-picker').addEventListener('submit', (e) => { e.preventDefault(); refreshDay(); });
+  $('day-add').addEventListener('click', () => {
+    resetEntryForm();
+    showEntryForm(true);
+    $('entry-customer').focus();
+  });
+  $('day-prev').addEventListener('click', () => navigateDay(-1));
+  $('day-next').addEventListener('click', () => navigateDay(1));
+  $('copy-prev').addEventListener('click', copyPreviousDay);
   $('entry-form').addEventListener('submit', saveEntry);
-  $('entry-cancel').addEventListener('click', resetEntryForm);
+  $('entry-cancel').addEventListener('click', () => {
+    resetEntryForm();
+    showEntryForm(false);
+  });
   $('entry-customer').addEventListener('change', async (e) => {
     await fillProjectSelect($('entry-project'), e.target.value, null);
     fillTaskSelect($('entry-task'), '', null, null);

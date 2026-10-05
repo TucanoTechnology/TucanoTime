@@ -1,0 +1,11 @@
+{
+  "name": "tucanotime-gui-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node gui.mjs"
+  },
+  "dependencies": {
+    "jsdom": "^26"
+  }
+}
