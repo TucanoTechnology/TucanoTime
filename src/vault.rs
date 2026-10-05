@@ -137,7 +137,12 @@ impl SecretVault {
     fn persist(&self, map: &BTreeMap<String, String>) -> Result<(), VaultError> {
         let json = serde_json::to_vec(map).map_err(|_| VaultError::Decrypt)?;
         let blob = self.encrypt(&json)?;
-        fs::write(&self.path, blob).map_err(|_| VaultError::Io)
+        // tmp+rename: a concurrent backup must never capture a half-written
+        // encrypted map (review B7).
+        let tmp = self.path.with_extension("bin.tmp");
+        fs::write(&tmp, blob)
+            .and_then(|_| fs::rename(&tmp, &self.path))
+            .map_err(|_| VaultError::Io)
     }
 
     /// Store/overwrite a secret. `key` is a provider path e.g. `stripe.secret_key`.

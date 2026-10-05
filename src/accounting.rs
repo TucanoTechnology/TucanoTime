@@ -329,33 +329,34 @@ pub fn record_sync(
         error,
         now,
     } = attempt;
-    let mut records = list_records(store)?;
-    let rec = {
-        let key_provider = provider.to_string();
-        let key_kind = kind.to_string();
-        let existing = records.iter().position(|r| {
-            r.provider == key_provider && r.kind == key_kind && r.invoice_id == invoice.id
-        });
+    // Whole read-modify-write under one store lock (review B4/D3): two
+    // concurrent syncs must never clobber each other's records.
+    let mut outcome: Option<SyncRecord> = None;
+    store.update_json_rel::<Vec<SyncRecord>, _>("sync/accounting.json", |current| {
+        let mut records = current.unwrap_or_default();
+        let existing = records
+            .iter()
+            .position(|r| r.provider == provider && r.kind == kind && r.invoice_id == invoice.id);
         let attempts = existing.map_or(1, |i| records[i].attempts + 1);
-        let r = SyncRecord {
-            provider: key_provider,
-            kind: key_kind,
+        let rec = SyncRecord {
+            provider: provider.to_string(),
+            kind: kind.to_string(),
             invoice_id: invoice.id,
             invoice_number: invoice.number.clone(),
-            remote_id,
+            remote_id: remote_id.clone(),
             status,
-            error,
+            error: error.clone(),
             attempts,
             updated_at: now,
         };
         match existing {
-            Some(i) => records[i] = r.clone(),
-            None => records.push(r.clone()),
+            Some(i) => records[i] = rec.clone(),
+            None => records.push(rec.clone()),
         }
-        r
-    };
-    put_records(store, &records)?;
-    Ok(rec)
+        outcome = Some(rec);
+        records
+    })?;
+    Ok(outcome.expect("closure always sets"))
 }
 
 pub fn list_records(store: &Store) -> Result<Vec<SyncRecord>, crate::store::StoreError> {

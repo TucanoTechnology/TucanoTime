@@ -89,6 +89,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // config.json persistence need.
     let mut store = tucano_time::store::Store::open(&root)?;
 
+    // Single-instance guard (review B6): a second server against the same
+    // volume would diverge on cached vault/revocation state and fire every
+    // scheduler job twice. Hold an exclusive lock for the process lifetime.
+    let server_lock = {
+        use fs2::FileExt;
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(root.join(".server.lock"))?;
+        match f.try_lock_exclusive() {
+            Ok(()) => f,
+            Err(_) => {
+                let msg = "another tucano-time instance is running against this data dir \
+                           (stale .server.lock?) — refusing to start a second scheduler";
+                tracing::error!(msg);
+                return Err(msg.into());
+            }
+        }
+    };
+
     // Externalised configuration (#94): env > <data>/config.json > default.
     // A corrupt config file refuses to start rather than silently reverting
     // settings — that is exactly the failure mode this ticket removes.
@@ -169,5 +190,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port.parse()?)).await?;
     tracing::info!("tucano-time listening on :{port}, data dir {root_str}");
     axum::serve(listener, app).await?;
+    drop(server_lock); // released only when we shut down
     Ok(())
 }

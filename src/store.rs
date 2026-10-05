@@ -13,14 +13,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use fs2::FileExt;
 use uuid::Uuid;
 
 use crate::auth::User;
 use crate::domain::{
-    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, Notification, Project,
-    RecurringSchedule, Submission, Task, Timer,
+    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, InvoiceStatus, Notification,
+    Project, RecurringSchedule, Submission, Task, Timer,
 };
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
@@ -43,6 +43,8 @@ pub enum StoreError {
     NotFound,
     #[error("already exists: {0}")]
     AlreadyExists(String),
+    #[error("state conflict: {0}")]
+    Conflict(String),
     #[error("range too large (max {MAX_RANGE_DAYS} days)")]
     RangeTooLarge,
     #[error("write lock busy")]
@@ -168,6 +170,26 @@ impl Store {
         rel: &str,
     ) -> Result<Option<T>, StoreError> {
         read_json(&self.root.join(rel))
+    }
+
+    /// One-locked read-modify-write of a root-relative JSON document:
+    /// `update` sees the current bytes and returns the replacement. Used for
+    /// small ledgers where list-then-put across two locks would race (review
+    /// D3/B4 — accounting sync records).
+    pub fn update_json_rel<T, F>(&self, rel: &str, update: F) -> Result<T, StoreError>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: FnOnce(Option<T>) -> T,
+    {
+        let _guard = self.write_lock()?;
+        let path = self.root.join(rel);
+        let current = read_json::<T>(&path)?;
+        let next = update(current);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        write_json(&path, &next)?;
+        Ok(next)
     }
 
     /// Generic atomic JSON write at a root-relative path, under the write lock.
@@ -307,18 +329,9 @@ impl Store {
     /// lock, so two processes never mint the same number (#62) and a deleted
     /// invoice never frees its number for reuse (review B3): the sequence is
     /// kept in `invoices/.seq.json`, never derived from the current count.
-    pub fn create_invoice(&self, mut invoice: Invoice) -> Result<Invoice, StoreError> {
+    pub fn create_invoice(&self, invoice: Invoice) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
-        std::fs::create_dir_all(self.root.join("invoices"))?;
-        let seq_path = self.root.join("invoices").join(".seq.json");
-        let stored: u64 = read_json(&seq_path)?.unwrap_or(0);
-        // max(counter, live count) so a restore of an older counter cannot
-        // reissue a number that is still in use.
-        let n = stored.max(self.list_invoices()?.len() as u64) + 1;
-        write_json(&seq_path, &n)?;
-        invoice.number = format!("INV-{n:04}");
-        write_json(&self.invoice_path(invoice.id), &invoice)?;
-        Ok(invoice)
+        self.create_invoice_inner(invoice)
     }
 
     // ----------------------------------------------------------- categories --
@@ -940,6 +953,134 @@ impl Store {
     }
 }
 
+// -------------------------------------------- multi-document transactions --
+//
+// The fs2 write lock is non-reentrant, so handlers must NOT compose
+// read-check-write across several public methods: two locked steps can
+// interleave with another writer and leave half the pair applied (review
+// B4). Each of these takes the lock once and applies the whole unit.
+
+impl Store {
+    /// Issue an invoice atomically: refuse unless the stored invoice is a
+    /// draft, then persist the transition — no issue-vs-pay race window.
+    pub fn issue_invoice(
+        &self,
+        id: Uuid,
+        now: DateTime<Utc>,
+        due: NaiveDate,
+    ) -> Result<Invoice, StoreError> {
+        let _guard = self.write_lock()?;
+        let Some(mut invoice) = read_json::<Invoice>(&self.invoice_path(id))? else {
+            return Err(StoreError::NotFound);
+        };
+        if invoice.status != InvoiceStatus::Draft {
+            return Err(StoreError::Conflict(
+                "only a draft invoice can be issued".into(),
+            ));
+        }
+        invoice.status = InvoiceStatus::Issued;
+        invoice.issued_at = Some(now);
+        invoice.due_date = Some(due);
+        write_json(&self.invoice_path(id), &invoice)?;
+        Ok(invoice)
+    }
+
+    /// Mark paid atomically with the issued-state check.
+    pub fn pay_invoice(
+        &self,
+        id: Uuid,
+        now: DateTime<Utc>,
+        reference: String,
+    ) -> Result<Invoice, StoreError> {
+        let _guard = self.write_lock()?;
+        let Some(mut invoice) = read_json::<Invoice>(&self.invoice_path(id))? else {
+            return Err(StoreError::NotFound);
+        };
+        if invoice.status != InvoiceStatus::Issued {
+            return Err(StoreError::Conflict(
+                "only an issued invoice can be marked paid".into(),
+            ));
+        }
+        invoice.status = InvoiceStatus::Paid;
+        invoice.paid_at = Some(now);
+        invoice.payment_reference = reference;
+        write_json(&self.invoice_path(id), &invoice)?;
+        Ok(invoice)
+    }
+
+    /// Create the numbered invoice **and** advance the schedule under one
+    /// lock (review B2): either both happen or neither, so a failed write
+    /// can never double-bill a period or silently skip it.
+    pub fn create_invoice_and_advance(
+        &self,
+        invoice: Invoice,
+        schedule: &RecurringSchedule,
+    ) -> Result<Invoice, StoreError> {
+        let _guard = self.write_lock()?;
+        let invoice = self.create_invoice_inner(invoice)?;
+        std::fs::create_dir_all(self.root.join("schedules"))?;
+        write_json(&self.schedule_path(schedule.id), schedule)?;
+        Ok(invoice)
+    }
+
+    /// Write an entry in one locked step; when the date moved, the old
+    /// day-folder document is removed in the same transaction (review B4:
+    /// never an entry living in two folders).
+    pub fn save_entry(
+        &self,
+        existing_date: Option<NaiveDate>,
+        updated: &Entry,
+    ) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        std::fs::create_dir_all(self.day_dir(updated.date))?;
+        write_json(&self.entry_path(updated.date, updated.id), updated)?;
+        if let Some(old_date) = existing_date
+            && old_date != updated.date
+        {
+            let old = self.entry_path(old_date, updated.id);
+            if old.exists() {
+                std::fs::remove_file(old)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Log the timer's entry and clear the timer under one lock: a failure
+    /// leaves the timer intact rather than double-logging on retry.
+    pub fn finish_timer(&self, user_id: Uuid, entry: &Entry) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        std::fs::create_dir_all(self.day_dir(entry.date))?;
+        write_json(&self.entry_path(entry.date, entry.id), entry)?;
+        let path = self.timer_path(user_id);
+        if path.exists() {
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
+    /// First-user (bootstrap) creation: the has-users check and the write
+    /// share one lock, closing the double-admin TOCTOU (review A12/B4).
+    pub fn put_user_if_none(&self, user: &User) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        if !self.list_users()?.is_empty() {
+            return Err(StoreError::AlreadyExists("initialised".into()));
+        }
+        write_json(&self.user_path(user.id), user)
+    }
+
+    /// Number + persist an invoice with the lock **already** held.
+    fn create_invoice_inner(&self, mut invoice: Invoice) -> Result<Invoice, StoreError> {
+        std::fs::create_dir_all(self.root.join("invoices"))?;
+        let seq_path = self.root.join("invoices").join(".seq.json");
+        let stored: u64 = read_json(&seq_path)?.unwrap_or(0);
+        let n = stored.max(self.list_invoices()?.len() as u64) + 1;
+        write_json(&seq_path, &n)?;
+        invoice.number = format!("INV-{n:04}");
+        write_json(&self.invoice_path(invoice.id), &invoice)?;
+        Ok(invoice)
+    }
+}
+
 fn prune_tmp_files(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -1073,5 +1214,121 @@ mod invoice_seq_tests {
         assert_eq!(c.number, "INV-0003", "numbers must not be recycled");
         // The counter file is not mistaken for an invoice document.
         assert_eq!(store.list_invoices().unwrap().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod txn_tests {
+    use super::*;
+    use crate::domain::{Currency, InvoiceLine, InvoiceStatus, LineKind};
+    use chrono::TimeZone;
+
+    fn invoice() -> Invoice {
+        Invoice {
+            id: Uuid::new_v4(),
+            number: "_".into(),
+            customer_id: Uuid::new_v4(),
+            currency: Currency("EUR".into()),
+            period_from: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            period_to: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+            lines: vec![InvoiceLine {
+                kind: LineKind::Fixed,
+                date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+                entry_id: None,
+                expense_id: None,
+                project_code: None,
+                task_code: None,
+                hours: None,
+                rate_minor: None,
+                amount_minor: 100,
+                note: String::new(),
+            }],
+            total_minor: 100,
+            status: InvoiceStatus::Draft,
+            created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+            issued_at: None,
+            due_date: None,
+            paid_at: None,
+            payment_reference: String::new(),
+        }
+    }
+
+    fn user(email: &str) -> User {
+        User {
+            id: Uuid::new_v4(),
+            name: "U".into(),
+            email: email.into(),
+            role: crate::auth::Role::Member,
+            active: true,
+            default_rate_minor: 0,
+            cost_rate_minor: 0,
+            password_hash: String::new(),
+            created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn put_user_if_none_is_atomic_first_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        store.put_user_if_none(&user("a@b.co")).unwrap();
+        let err = store.put_user_if_none(&user("c@d.co")).unwrap_err();
+        assert!(matches!(err, StoreError::AlreadyExists(_)));
+        assert_eq!(store.list_users().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn issue_then_pay_transitions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let inv = store.create_invoice(invoice()).unwrap();
+        // Cannot pay a draft.
+        let e = store
+            .pay_invoice(inv.id, Utc::now(), "ref".into())
+            .unwrap_err();
+        assert!(matches!(e, StoreError::Conflict(_)));
+        store
+            .issue_invoice(
+                inv.id,
+                Utc::now(),
+                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
+            )
+            .unwrap();
+        let paid = store
+            .pay_invoice(inv.id, Utc::now(), "stripe:1".into())
+            .unwrap();
+        assert_eq!(paid.status, InvoiceStatus::Paid);
+        assert_eq!(paid.payment_reference, "stripe:1");
+        // Double issue now conflicts.
+        assert!(matches!(
+            store.issue_invoice(
+                inv.id,
+                Utc::now(),
+                NaiveDate::from_ymd_opt(2026, 10, 21).unwrap()
+            ),
+            Err(StoreError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn update_json_rel_is_locked_rmw() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let out: Vec<u32> = store
+            .update_json_rel("counter.json", |cur: Option<Vec<u32>>| {
+                let mut v = cur.unwrap_or_default();
+                v.push(v.len() as u32 + 1);
+                v
+            })
+            .unwrap();
+        assert_eq!(out, vec![1]);
+        let out = store
+            .update_json_rel("counter.json", |cur: Option<Vec<u32>>| {
+                let mut v = cur.unwrap_or_default();
+                v.push(v.len() as u32 + 1);
+                v
+            })
+            .unwrap();
+        assert_eq!(out, vec![1, 2]);
     }
 }

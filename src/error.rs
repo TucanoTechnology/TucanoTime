@@ -72,6 +72,7 @@ impl From<StoreError> for ApiError {
         match e {
             StoreError::NotFound => ApiError::not_found("resource"),
             StoreError::AlreadyExists(m) => ApiError::conflict(m),
+            StoreError::Conflict(m) => ApiError::conflict(m),
             StoreError::RangeTooLarge => ApiError::bad_request(e.to_string()),
             StoreError::LockTimeout => ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,

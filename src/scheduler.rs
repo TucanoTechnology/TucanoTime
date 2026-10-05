@@ -41,36 +41,63 @@ impl Scheduler {
 
     /// Run every job whose interval has elapsed since its last run, then
     /// persist the updated schedule. Idempotent for a given `now`.
+    ///
+    /// Review B8: the schedule is persisted **after** the runs. Jobs that do
+    /// real work derive their own idempotency from domain state (recurring
+    /// invoices from `last_period_end`, reminders from stored notifications),
+    /// so a crash between run and persist costs one duplicate at most —
+    /// while the old mark-first order silently skipped a whole day.
     pub fn tick(&self, now: DateTime<Utc>) {
         let now_ts = now.timestamp();
         let mut fired: Vec<String> = Vec::new();
         {
-            let mut last = lock(&self.last);
+            let last = lock(&self.last);
             for job in &self.jobs {
                 let prev = last.get(job.name()).copied().unwrap_or(i64::MIN / 2);
                 if now_ts - prev >= job.interval_secs() {
-                    last.insert(job.name().to_string(), now_ts);
                     fired.push(job.name().to_string());
                 }
             }
-            let _ = fs::write(&self.path, serde_json::to_vec(&*last).unwrap_or_default());
         }
-        for name in fired {
-            if let Some(job) = self.jobs.iter().find(|j| j.name() == name) {
+        for name in &fired {
+            if let Some(job) = self.jobs.iter().find(|j| j.name() == *name) {
                 job.run(now);
             }
         }
+        {
+            let mut last = lock(&self.last);
+            for name in &fired {
+                last.insert(name.clone(), now_ts);
+            }
+            write_state(&self.path, &serde_json::to_vec(&*last).unwrap_or_default());
+        }
     }
 
-    /// Spawn the periodic loop (checks every `poll_secs`). No-op if there are
-    /// no jobs, but still cheap.
+    /// Spawn the periodic loop (checks every `poll_secs`). Jobs do blocking
+    /// filesystem + SMTP/HTTP work, so the tick runs on the blocking pool —
+    /// never on a tokio worker thread (review B5).
     pub fn spawn(self: std::sync::Arc<Self>, poll_secs: u64) {
+        if self.jobs.is_empty() {
+            return;
+        }
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(poll_secs)).await;
-                self.tick(Utc::now());
+                let me = self.clone();
+                if let Err(e) = tokio::task::spawn_blocking(move || me.tick(Utc::now())).await {
+                    tracing::warn!(error = %e, "scheduler tick failed");
+                }
             }
         });
+    }
+}
+
+/// Atomic state write (tmp+rename, review B7): the backup CLI reads the data
+/// dir concurrently and must never see a truncated scheduler.json.
+fn write_state(path: &Path, bytes: &[u8]) {
+    let tmp = path.with_extension("json.tmp");
+    if fs::write(&tmp, bytes).is_ok() {
+        let _ = fs::rename(&tmp, path);
     }
 }
 

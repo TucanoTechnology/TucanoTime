@@ -59,10 +59,12 @@ impl EmailReminderJob {
             .iter()
             .map(|(k, d)| (k.clone(), d.format("%Y-%m-%d").to_string()))
             .collect();
-        let _ = std::fs::write(
-            &self.state_path,
-            serde_json::to_vec(&serial).unwrap_or_default(),
-        );
+        // tmp+rename (review B7): concurrent backups must not see truncation.
+        let tmp = self.state_path.with_extension("json.tmp");
+        let bytes = serde_json::to_vec(&serial).unwrap_or_default();
+        if std::fs::write(&tmp, bytes).is_ok() {
+            let _ = std::fs::rename(&tmp, &self.state_path);
+        }
     }
 
     /// Pure selection: overdue invoices due for a reminder, given the map of
