@@ -146,6 +146,12 @@ await tick(250);
 const customers = (await (await fetch(BASE + '/customers')).json()).customers;
 const globex = customers.find((c) => c.name === 'Globex');
 check('customer form created Globex', !!globex);
+// C7 regression: every customer picker refreshes immediately (used to need a
+// page reload, so a new customer could not be invoiced/expensed/timed).
+const optHas = (id, name) => [...window.document.getElementById(id).options].some((o) => o.textContent.includes(name));
+check('invoice picker sees the new customer', optHas('invoice-customer', 'Globex'));
+check('expense picker sees the new customer', optHas('expense-customer', 'Globex'));
+check('timer picker sees the new customer', optHas('timer-customer', 'Globex'));
 check('currency normalised to USD', globex && globex.currency === 'USD');
 check('rate stored as 4550 minor units', globex && globex.default_rate_minor === 4550);
 
