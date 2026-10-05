@@ -267,7 +267,7 @@
         "type": "object",
         "required": ["kind", "date", "amount_minor", "note"],
         "properties": {
-          "kind": { "type": "string", "enum": ["time", "expense"] },
+          "kind": { "type": "string", "enum": ["time", "expense", "fixed"] },
           "date": { "type": "string", "format": "date" },
           "entry_id": { "type": ["string", "null"], "format": "uuid" },
           "expense_id": { "type": ["string", "null"], "format": "uuid" },
@@ -440,6 +440,35 @@
         "properties": {
           "title": { "type": "string", "maxLength": 120 },
           "expense_ids": { "type": "array", "items": { "type": "string", "format": "uuid" }, "minItems": 1 }
+        },
+        "additionalProperties": false
+      },
+      "RecurringSchedule": {
+        "type": "object",
+        "required": ["id", "customer_id", "cadence", "mode", "retainer_amount_minor", "currency", "active", "created_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "customer_id": { "type": "string", "format": "uuid" },
+          "cadence": { "type": "string", "enum": ["weekly", "monthly", "quarterly"] },
+          "mode": { "type": "string", "enum": ["time", "retainer"] },
+          "retainer_amount_minor": { "type": "integer", "minimum": 0 },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "active": { "type": "boolean" },
+          "last_period_end": { "type": ["string", "null"], "format": "date" },
+          "created_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "ScheduleInput": {
+        "type": "object",
+        "required": ["customer_id", "cadence", "mode", "currency"],
+        "properties": {
+          "customer_id": { "type": "string", "format": "uuid" },
+          "cadence": { "type": "string", "enum": ["weekly", "monthly", "quarterly"] },
+          "mode": { "type": "string", "enum": ["time", "retainer"] },
+          "retainer_amount_minor": { "type": "integer", "minimum": 0, "default": 0 },
+          "currency": { "$ref": "#/components/schemas/Currency" },
+          "active": { "type": "boolean", "default": true }
         },
         "additionalProperties": false
       }
@@ -1042,6 +1071,30 @@
         "tags": ["entries"],
         "summary": "Mark the caller's notifications read",
         "responses": { "204": { "description": "Marked." } }
+      }
+    },
+    "/schedules": {
+      "get": {
+        "operationId": "listSchedules",
+        "tags": ["invoices"],
+        "summary": "List recurring invoice schedules (admin)",
+        "responses": { "200": { "description": "Schedules.", "content": { "application/json": { "schema": { "type": "object", "required": ["schedules"], "properties": { "schedules": { "type": "array", "items": { "$ref": "#/components/schemas/RecurringSchedule" } } }, "additionalProperties": false } } } }, "403": { "description": "Admin role required." } }
+      },
+      "post": {
+        "operationId": "createSchedule",
+        "tags": ["invoices"],
+        "summary": "Create a recurring schedule (time or retainer) (#26)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ScheduleInput" } } } },
+        "responses": { "201": { "description": "Created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RecurringSchedule" } } } }, "403": { "description": "Admin role required." }, "422": { "$ref": "#/components/responses/ValidationError" } }
+      }
+    },
+    "/schedules/{id}": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+      "delete": {
+        "operationId": "deleteSchedule",
+        "tags": ["invoices"],
+        "summary": "Delete a schedule (admin)",
+        "responses": { "204": { "description": "Deleted." }, "403": { "description": "Admin role required." }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
     "/invoices": {

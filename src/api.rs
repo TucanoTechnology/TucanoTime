@@ -1251,6 +1251,57 @@ pub async fn mark_notifications_read(State(app): State<AppState>, actor: AuthUse
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+// --------------------------------------------------------------- schedules --
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleInput {
+    pub customer_id: Uuid,
+    pub cadence: crate::domain::Cadence,
+    pub mode: crate::domain::RecurMode,
+    #[serde(default)]
+    pub retainer_amount_minor: u64,
+    pub currency: Currency,
+    #[serde(default = "default_active_true")]
+    pub active: bool,
+}
+
+pub async fn list_schedules(State(app): State<AppState>) -> ApiResult {
+    let schedules = app.store.list_schedules()?;
+    Ok(Json(serde_json::json!({ "schedules": schedules })).into_response())
+}
+
+pub async fn create_schedule(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<ScheduleInput>,
+) -> ApiResult {
+    get_customer(&app.store, input.customer_id)?;
+    if input.mode == crate::domain::RecurMode::Retainer && input.retainer_amount_minor == 0 {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "retainer_amount_minor",
+            "must be > 0 for a retainer schedule",
+        )]));
+    }
+    let schedule = crate::domain::RecurringSchedule {
+        id: Uuid::new_v4(),
+        customer_id: input.customer_id,
+        cadence: input.cadence,
+        mode: input.mode,
+        retainer_amount_minor: input.retainer_amount_minor,
+        currency: input.currency,
+        active: input.active,
+        last_period_end: None,
+        created_at: app.clock.now(),
+    };
+    app.store.put_schedule(&schedule)?;
+    Ok((StatusCode::CREATED, Json(schedule)).into_response())
+}
+
+pub async fn delete_schedule(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    app.store.delete_schedule(id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 pub(crate) fn parse_date(s: &str) -> Result<chrono::NaiveDate, ApiError> {
     chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
         .map_err(|_| ApiError::bad_request(format!("'{s}' is not a date in YYYY-MM-DD form")))

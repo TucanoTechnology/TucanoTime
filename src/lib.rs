@@ -19,6 +19,7 @@ pub mod error;
 pub mod lock;
 pub mod notify;
 pub mod ratelimit;
+pub mod recurring;
 pub mod reminders;
 pub mod report;
 pub mod revoke;
@@ -165,6 +166,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/admin/secrets/{key}",
             axum::routing::put(api::set_secret).delete(api::delete_secret),
+        )
+        .route(
+            "/schedules",
+            get(api::list_schedules).post(api::create_schedule),
+        )
+        .route(
+            "/schedules/{id}",
+            axum::routing::delete(api::delete_schedule),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

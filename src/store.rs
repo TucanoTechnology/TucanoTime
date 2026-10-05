@@ -19,8 +19,8 @@ use uuid::Uuid;
 
 use crate::auth::User;
 use crate::domain::{
-    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, Notification, Project, Submission,
-    Task, Timer,
+    Category, Customer, Entry, Expense, ExpenseClaim, Invoice, Notification, Project,
+    RecurringSchedule, Submission, Task, Timer,
 };
 
 /// Hard cap on a range scan so a malformed or adversarial query cannot spin
@@ -478,6 +478,50 @@ impl Store {
         }
         std::fs::create_dir_all(self.root.join("notifications"))?;
         write_json(&self.notifications_path(user_id), &list)
+    }
+
+    // ------------------------------------------------------------- schedules --
+
+    fn schedule_path(&self, id: Uuid) -> PathBuf {
+        self.root.join("schedules").join(format!("{id}.json"))
+    }
+
+    pub fn list_schedules(&self) -> Result<Vec<RecurringSchedule>, StoreError> {
+        let dir = self.root.join("schedules");
+        let mut out = Vec::new();
+        if !dir.exists() {
+            return Ok(out);
+        }
+        for path in dir_entries(&dir, self.max_docs)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(s) = read_json::<RecurringSchedule>(&path)? {
+                out.push(s);
+            }
+        }
+        out.sort_by_key(|s| s.created_at);
+        Ok(out)
+    }
+
+    pub fn get_schedule(&self, id: Uuid) -> Result<Option<RecurringSchedule>, StoreError> {
+        read_json(&self.schedule_path(id))
+    }
+
+    pub fn put_schedule(&self, s: &RecurringSchedule) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        std::fs::create_dir_all(self.root.join("schedules"))?;
+        write_json(&self.schedule_path(s.id), s)
+    }
+
+    pub fn delete_schedule(&self, id: Uuid) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.schedule_path(id);
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        std::fs::remove_file(&path)?;
+        Ok(())
     }
 
     // ------------------------------------------------------------ customers --

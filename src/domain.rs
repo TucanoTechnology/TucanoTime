@@ -255,6 +255,7 @@ pub enum InvoiceStatus {
 pub enum LineKind {
     Time,
     Expense,
+    Fixed,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -544,6 +545,72 @@ pub struct StartTimerInput {
     pub task_code: Option<ProjectCode>,
     #[serde(default)]
     pub note: String,
+}
+
+// ------------------------------------------------------------- recurring --
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Cadence {
+    Weekly,
+    Monthly,
+    Quarterly,
+}
+
+impl Cadence {
+    pub fn interval_days(self) -> i64 {
+        match self {
+            Cadence::Weekly => 7,
+            Cadence::Monthly => 30,
+            Cadence::Quarterly => 91,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecurMode {
+    /// Bill tracked time + expenses for the period.
+    Time,
+    /// Bill a fixed retainer amount each cycle.
+    Retainer,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecurringSchedule {
+    pub id: Uuid,
+    pub customer_id: Uuid,
+    pub cadence: Cadence,
+    pub mode: RecurMode,
+    /// Retainer amount in minor units (used when mode = Retainer).
+    pub retainer_amount_minor: u64,
+    pub currency: Currency,
+    pub active: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_period_end: Option<NaiveDate>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// If a schedule is due as of `today`, return the period `(from, to)` to bill.
+pub fn due_period(
+    cadence: Cadence,
+    last_period_end: Option<NaiveDate>,
+    today: NaiveDate,
+) -> Option<(NaiveDate, NaiveDate)> {
+    let interval = cadence.interval_days();
+    match last_period_end {
+        None => {
+            let from = today - chrono::Duration::days(interval - 1);
+            Some((from, today))
+        }
+        Some(last) => {
+            if (today - last).num_days() >= interval {
+                Some((last + chrono::Duration::days(1), today))
+            } else {
+                None
+            }
+        }
+    }
 }
 
 /// Elapsed hundredths-of-an-hour for a running timer, rounded half-up and

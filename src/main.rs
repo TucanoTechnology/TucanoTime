@@ -32,9 +32,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Background scheduler (#61) with the reminder job (#22). Recurring
     // invoices (#26) and budget alerts (#30) register here too.
-    let jobs: Vec<Arc<dyn tucano_time::scheduler::Job>> = vec![Arc::new(
-        tucano_time::reminders::ReminderJob::new(state.store.clone()),
-    )];
+    let jobs: Vec<Arc<dyn tucano_time::scheduler::Job>> = vec![
+        Arc::new(tucano_time::reminders::ReminderJob::new(
+            state.store.clone(),
+        )),
+        Arc::new(tucano_time::recurring::RecurringJob::new(
+            state.store.clone(),
+        )),
+    ];
     let scheduler = Arc::new(tucano_time::scheduler::Scheduler::new(
         std::path::Path::new(&data_dir),
         jobs,
