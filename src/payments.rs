@@ -99,9 +99,11 @@ impl StripeProvider {
     }
 
     pub fn from_sources(vault: Option<&crate::vault::SecretVault>) -> Option<Self> {
-        let secret = vault
-            .and_then(|v| v.get("stripe.webhook_secret"))
-            .or_else(|| std::env::var("TUCANO_STRIPE_WEBHOOK_SECRET").ok());
+        let secret = crate::providers::resolve_secret(
+            vault,
+            "stripe.webhook_secret",
+            "TUCANO_STRIPE_WEBHOOK_SECRET",
+        );
         let fake = demo_flag("TUCANO_STRIPE_FAKE", secret.is_some());
         if fake || secret.is_some() {
             Some(Self {
@@ -133,9 +135,11 @@ fn demo_flag(env: &str, has_real_secret: bool) -> bool {
 
 impl PayPalProvider {
     pub fn from_sources(vault: Option<&crate::vault::SecretVault>) -> Option<Self> {
-        let secret = vault
-            .and_then(|v| v.get("paypal.webhook_secret"))
-            .or_else(|| std::env::var("TUCANO_PAYPAL_WEBHOOK_SECRET").ok());
+        let secret = crate::providers::resolve_secret(
+            vault,
+            "paypal.webhook_secret",
+            "TUCANO_PAYPAL_WEBHOOK_SECRET",
+        );
         let fake = demo_flag("TUCANO_PAYPAL_FAKE", secret.is_some());
         if fake || secret.is_some() {
             Some(Self {
@@ -161,21 +165,13 @@ pub fn registry_from_vault(vault: Option<&crate::vault::SecretVault>) -> Arc<Pay
     Arc::new(PaymentRegistry::new(providers))
 }
 
-/// Provider registry consulted by the endpoints.
-#[derive(Default)]
-pub struct PaymentRegistry {
-    providers: Vec<Arc<dyn PaymentProvider>>,
-}
+/// Provider registry consulted by the endpoints (#101: the shared generic
+/// `Registry`, no longer a payments-only copy).
+pub type PaymentRegistry = crate::providers::Registry<dyn PaymentProvider>;
 
-impl PaymentRegistry {
-    pub fn new(providers: Vec<Arc<dyn PaymentProvider>>) -> Self {
-        Self { providers }
-    }
-    pub fn get(&self, name: &str) -> Option<Arc<dyn PaymentProvider>> {
-        self.providers.iter().find(|p| p.name() == name).cloned()
-    }
-    pub fn enabled(&self) -> bool {
-        !self.providers.is_empty()
+impl crate::providers::NamedProvider for dyn PaymentProvider {
+    fn name(&self) -> &str {
+        PaymentProvider::name(self)
     }
 }
 

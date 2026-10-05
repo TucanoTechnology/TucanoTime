@@ -333,9 +333,7 @@ pub fn exchange_code(
 #[must_use]
 pub fn configured_provider(vault: Option<&crate::vault::SecretVault>) -> Option<String> {
     let get = |key: &str, env: &str| -> Option<String> {
-        vault
-            .and_then(|v| v.get(key))
-            .or_else(|| std::env::var(env).ok())
+        crate::providers::resolve_secret(vault, key, env)
     };
     get("calendar.provider", "TUCANO_CALENDAR_PROVIDER")
         .map(|p| p.trim().to_ascii_lowercase())
@@ -350,9 +348,7 @@ pub fn source_for(
     vault: Option<&crate::vault::SecretVault>,
 ) -> Option<Arc<dyn CalendarSource>> {
     let get = |key: &str, env: &str| -> Option<String> {
-        vault
-            .and_then(|v| v.get(key))
-            .or_else(|| std::env::var(env).ok())
+        crate::providers::resolve_secret(vault, key, env)
     };
     match provider {
         "google" => {

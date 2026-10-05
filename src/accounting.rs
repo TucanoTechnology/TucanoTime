@@ -58,23 +58,12 @@ pub trait AccountingSync: Send + Sync {
 
 // ---------------------------------------------------------------- registry --
 
-/// Registry of enabled providers.
-#[derive(Default)]
-pub struct AccountingRegistry {
-    providers: Vec<Arc<dyn AccountingSync>>,
-}
+/// Registry of enabled providers (#101: shared generic `Registry`).
+pub type AccountingRegistry = crate::providers::Registry<dyn AccountingSync>;
 
-impl AccountingRegistry {
-    #[must_use]
-    pub fn new(providers: Vec<Arc<dyn AccountingSync>>) -> Self {
-        Self { providers }
-    }
-    pub fn get(&self, name: &str) -> Option<Arc<dyn AccountingSync>> {
-        self.providers.iter().find(|p| p.name() == name).cloned()
-    }
-    #[must_use]
-    pub fn names(&self) -> Vec<&'static str> {
-        self.providers.iter().map(|p| p.name()).collect()
+impl crate::providers::NamedProvider for dyn AccountingSync {
+    fn name(&self) -> &str {
+        AccountingSync::name(self)
     }
 }
 
@@ -86,28 +75,31 @@ pub fn registry_from_vault(
     vault: Option<&crate::vault::SecretVault>,
     cfg: &crate::appconfig::AppConfig,
 ) -> Arc<AccountingRegistry> {
-    let get = |key: &str, env: &str| -> Option<String> {
-        vault
-            .and_then(|v| v.get(key))
-            .or_else(|| std::env::var(env).ok())
-    };
-    let env_fn = crate::appconfig::process_env;
     let mut providers: Vec<Arc<dyn AccountingSync>> = Vec::new();
-    if let Some(token) = get("qbo.token", "TUCANO_QBO_TOKEN") {
-        let base = cfg
-            .get_optional_str("qbo_base_url", &env_fn)
-            .or_else(|| get("qbo.base_url", "TUCANO_QBO_BASE_URL"))
-            .unwrap_or_else(|| "https://quickbooks.api.intuit.com/v3/company/default".into());
+    if let Some(token) = crate::providers::resolve_secret(vault, "qbo.token", "TUCANO_QBO_TOKEN") {
+        let base = crate::providers::resolve_setting(
+            cfg,
+            vault,
+            "qbo_base_url",
+            "qbo.base_url",
+            "TUCANO_QBO_BASE_URL",
+        )
+        .unwrap_or_else(|| "https://quickbooks.api.intuit.com/v3/company/default".into());
         providers.push(Arc::new(QboProvider::new(Arc::new(HttpTransport {
             base_url: base,
             bearer: token,
         }))));
     }
-    if let Some(token) = get("xero.token", "TUCANO_XERO_TOKEN") {
-        let base = cfg
-            .get_optional_str("xero_base_url", &env_fn)
-            .or_else(|| get("xero.base_url", "TUCANO_XERO_BASE_URL"))
-            .unwrap_or_else(|| "https://api.xero.com/api.xro/4.0".into());
+    if let Some(token) = crate::providers::resolve_secret(vault, "xero.token", "TUCANO_XERO_TOKEN")
+    {
+        let base = crate::providers::resolve_setting(
+            cfg,
+            vault,
+            "xero_base_url",
+            "xero.base_url",
+            "TUCANO_XERO_BASE_URL",
+        )
+        .unwrap_or_else(|| "https://api.xero.com/api.xro/4.0".into());
         providers.push(Arc::new(XeroProvider::new(Arc::new(HttpTransport {
             base_url: base,
             bearer: token,
