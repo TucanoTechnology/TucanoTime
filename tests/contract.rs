@@ -2238,3 +2238,37 @@ async fn notifications_endpoint_empty_then_read() {
     let (s2, _) = json_req(&app, "POST", "/notifications/read", None).await;
     assert_eq!(s2, StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn schedule_crud_admin_only() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (s, sched) = json_req(&app, "POST", "/schedules", Some(json!({"customer_id":cid,"cadence":"monthly","mode":"retainer","retainer_amount_minor":150000,"currency":"EUR"}))).await;
+    assert_eq!(s, StatusCode::CREATED, "{sched}");
+    let sid = sched["id"].as_str().unwrap().to_string();
+    let (sl, list) = json_req(&app, "GET", "/schedules", None).await;
+    assert_eq!(sl, StatusCode::OK);
+    assert_eq!(list["schedules"].as_array().unwrap().len(), 1);
+    // Retainer with 0 amount rejected.
+    let (sz, _) = json_req(&app, "POST", "/schedules", Some(json!({"customer_id":cid,"cadence":"monthly","mode":"retainer","retainer_amount_minor":0,"currency":"EUR"}))).await;
+    assert_eq!(sz, StatusCode::UNPROCESSABLE_ENTITY);
+    // Member forbidden (admin tier).
+    json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(json!({"name":"N","email":"n@t.local","password":"memberpass1","role":"member"})),
+    )
+    .await;
+    let member = login_cookie(&app.router, "n@t.local", "memberpass1").await;
+    let (sm, _, _) = raw(&app.router, "GET", "/schedules", None, Some(&member)).await;
+    assert_eq!(sm, StatusCode::FORBIDDEN);
+    // Delete.
+    assert_eq!(
+        json_req(&app, "DELETE", &format!("/schedules/{sid}"), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+}
