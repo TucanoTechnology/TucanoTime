@@ -1649,6 +1649,36 @@
           }
         },
         "additionalProperties": false
+      },
+      "Cadence": {
+        "type": "string",
+        "enum": [
+          "weekly",
+          "monthly",
+          "quarterly"
+        ],
+        "description": "Recurring billing cadence (#26)."
+      },
+      "RecurMode": {
+        "type": "string",
+        "enum": [
+          "time",
+          "retainer"
+        ],
+        "description": "Bill tracked work or a fixed retainer (#26)."
+      },
+      "SchedulePatch": {
+        "type": "object",
+        "required": [
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "false pauses generation; the billing cursor (last_period_end) is kept (#136)."
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -3661,6 +3691,45 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateSchedule",
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Pause or resume a recurring schedule (#136)",
+        "description": "Admin only. Identity, cadence and last_period_end are preserved: resuming continues where billing stopped and never re-bills a period.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchedulePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated schedule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringSchedule"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }

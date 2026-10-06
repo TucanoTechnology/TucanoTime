@@ -230,7 +230,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/schedules/{id}",
-            axum::routing::delete(api::delete_schedule),
+            axum::routing::delete(api::delete_schedule).put(api::update_schedule),
         )
         .route("/calendar/oauth/start", get(api::calendar_oauth_start))
         .route(

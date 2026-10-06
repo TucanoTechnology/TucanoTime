@@ -483,9 +483,9 @@ pub use self::people::{
     update_project, update_task,
 };
 pub use self::timer_calendar::{
-    ScheduleInput, calendar_events, calendar_oauth_callback, calendar_oauth_start, create_schedule,
-    delete_schedule, discard_timer, get_timer, list_notifications, list_schedules,
-    mark_notifications_read, start_timer, stop_timer,
+    ScheduleInput, SchedulePatch, calendar_events, calendar_oauth_callback, calendar_oauth_start,
+    create_schedule, delete_schedule, discard_timer, get_timer, list_notifications, list_schedules,
+    mark_notifications_read, start_timer, stop_timer, update_schedule,
 };
 pub use self::vault_config::{
     SecretInput, admin_config, delete_secret, list_secrets, set_secret, update_config,

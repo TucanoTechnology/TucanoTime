@@ -582,6 +582,50 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 }
 
+// ---- RECURRING SCHEDULE MANAGEMENT (#136) ----
+{
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(350);
+  window.document.getElementById('rec-customer').value = acmeOpt.value;
+  window.document.getElementById('rec-mode').value = 'retainer';
+  window.document.getElementById('rec-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(300);
+  check('retainer schedule with 0 amount shows inline error (#136)',
+    !window.document.getElementById('rec-error').hidden
+    && /retainer/i.test(window.document.getElementById('rec-error').textContent));
+  check('rejected schedule persisted nothing (#136)',
+    (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules.length === 0);
+  window.document.getElementById('rec-mode').value = 'time';
+  window.document.getElementById('rec-cadence').value = 'quarterly';
+  window.document.getElementById('rec-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(400);
+  const recs = (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules;
+  check('schedule created via the form (#136)', recs.length === 1 && recs[0].cadence === 'quarterly' && recs[0].active === true);
+  const pauseBtn = [...window.document.querySelectorAll('#rec-table tbody button')].find((b) => b.textContent === 'Pause');
+  check('active schedule offers Pause (#136)', !!pauseBtn);
+  pauseBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  check('pause persists and announces (#136)',
+    (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules[0].active === false
+    && /paused/i.test(window.document.getElementById('live-region').textContent));
+  const row = window.document.querySelector('#rec-table tbody tr');
+  check('paused badge + Last billed cursor render (#136)',
+    /paused/i.test(row.textContent) && /never/i.test(row.textContent));
+  const resumeBtn = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Resume');
+  resumeBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  check('resume works (#136)',
+    (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules[0].active === true);
+  const delBtn = [...window.document.querySelectorAll('#rec-table tbody button')].find((b) => b.textContent === 'Delete');
+  delBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(200);
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  check('delete removes the schedule (#136)',
+    (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules.length === 0
+    && !window.document.getElementById('rec-empty').hidden);
+}
+
 
 // ---- EMAIL (#35): set a billing email, then email the issued invoice ----
 const custObj = (await (await fetch(BASE + `/customers/${acmeOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
