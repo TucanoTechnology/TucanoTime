@@ -1,0 +1,26 @@
+{
+  "framework": "vanilla-framework",
+  "version": "4.59.0",
+  "source": "https://www.npmjs.com/package/vanilla-framework/v/4.59.0",
+  "fontLicenseUrl": "https://raw.githubusercontent.com/google/fonts/main/ufl/ubuntu/UFL.txt",
+  "gplLicenseUrl": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/GPL-3.0-only.txt",
+  "sourceUrl": "https://registry.npmjs.org/vanilla-framework/-/vanilla-framework-4.59.0.tgz",
+  "assets": [
+    {
+      "filename": "f1ea362b-Ubuntu-wdth-wght--latin-v0.896a.woff2",
+      "source": "https://assets.ubuntu.com/v1/f1ea362b-Ubuntu%5Bwdth,wght%5D-latin-v0.896a.woff2",
+      "sha256": "333b2025d99e9e6ad7645bff8ca751050293f184553c7e52a82da4b6a526ad62"
+    },
+    {
+      "filename": "90b59210-Ubuntu-Italic-wdth-wght--latin-v0.896a.woff2",
+      "source": "https://assets.ubuntu.com/v1/90b59210-Ubuntu-Italic%5Bwdth,wght%5D-latin-v0.896a.woff2",
+      "sha256": "16eeb4ea10c3c89e4cef8079dcf38d7bca9e7b278816ca0e441d196a150531b5"
+    },
+    {
+      "filename": "d5fc1819-UbuntuMono-wght--latin-v0.869.woff2",
+      "source": "https://assets.ubuntu.com/v1/d5fc1819-UbuntuMono%5Bwght%5D-latin-v0.869.woff2",
+      "sha256": "cfcdd5b4765715dff619673d3cd3c8a026ae51c65423e0fc708e290a06274871"
+    }
+  ],
+  "cssSha256": "11748bcbaaa9f393c44c4825815dcabecc9ec71dbe87788f2ae7c8487bf6183c"
+}

@@ -103,7 +103,7 @@ jobs:
             -v "$PWD/gui-test:/gui" -v "$PWD/web:/web:ro" \
             -e TT_GUI_BASE="http://localhost:$TT_PORT" \
             -w /gui node:22-slim \
-            bash -c "npm install --no-audit --no-fund && node contrast.mjs && node --test users.test.mjs theme.test.mjs && node gui.mjs"
+            bash -c "npm ci --no-audit --no-fund && node contrast.mjs && node --test users.test.mjs theme.test.mjs ubuntu.test.mjs && node gui.mjs"
 
       - name: Stop server
         if: always()

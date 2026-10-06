@@ -76,7 +76,41 @@ function el(tag, opts = {}, children = []) {
     for (const [evt, fn] of Object.entries(opts.on)) node.addEventListener(evt, fn);
   }
   for (const child of [].concat(children)) if (child) node.appendChild(child);
+  if (tag === 'button') decorateUbuntuButton(node);
   return node;
+}
+
+function ubuntuIcon(name) {
+  const icon = document.createElement('i');
+  icon.className = `p-icon--${name}`;
+  icon.setAttribute('aria-hidden', 'true');
+  return icon;
+}
+
+function decorateUbuntuButton(button) {
+  if (button.getAttribute('role') === 'tab') return;
+  const positive = button.type === 'submit' || button.classList.contains('primary')
+    || ['customer-new', 'expense-new', 'user-new', 'iw-save', 'ed-save'].includes(button.id);
+  if (!button.classList.contains('link') && !button.classList.contains('danger')) {
+    button.classList.add(positive ? 'p-button--positive' : 'p-button');
+  }
+  if (button.querySelector('[class*="p-icon--"]')) return;
+  const text = button.textContent.trim();
+  const icon = text.startsWith('+') ? 'plus'
+    : text === 'Edit' ? 'edit'
+    : text === 'Delete' ? 'delete'
+    : text.startsWith('Copy') ? 'copy'
+    : text === 'Start timer' ? 'play'
+    : text === 'Stop' ? 'stop' : null;
+  if (icon) {
+    if (text.startsWith('+')) {
+      const label = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().startsWith('+'));
+      if (label) label.textContent = label.textContent.replace(/^\s*\+\s*/, '');
+    }
+    const graphic = ubuntuIcon(icon);
+    if (positive) graphic.classList.add('is-dark');
+    button.prepend(graphic);
+  }
 }
 
 // The shared select-refill pattern: clear, then append options described as
@@ -181,11 +215,34 @@ function showFormError(el, err) {
   }
   el.textContent = text;
   el.hidden = false;
+  const form = el.closest('form');
+  if (form && Array.isArray(fields)) {
+    const prefix = el.id.replace(/-error$/, '');
+    const aliases = { default_rate_minor: 'default-rate', cost_rate_minor: 'cost-rate', rate_minor: 'rate' };
+    for (const field of fields) {
+      const suffix = aliases[field.field] || field.field.replaceAll('_', '-');
+      const input = [...form.elements].find((control) => control.name === field.field || control.id === `${prefix}-${suffix}`);
+      if (!input) continue;
+      input.setAttribute('aria-invalid', 'true');
+      const descriptions = new Set((input.getAttribute('aria-describedby') || '').split(' ').filter(Boolean));
+      descriptions.add(el.id);
+      input.setAttribute('aria-describedby', [...descriptions].join(' '));
+      input.dataset.errorMessage = el.id;
+    }
+  }
 }
 
 function clearFormError(el) {
   el.textContent = '';
   el.hidden = true;
+  for (const input of el.closest('form')?.elements || []) {
+    if (input.dataset?.errorMessage !== el.id) continue;
+    input.removeAttribute('aria-invalid');
+    const descriptions = (input.getAttribute('aria-describedby') || '').split(' ').filter((id) => id && id !== el.id);
+    if (descriptions.length) input.setAttribute('aria-describedby', descriptions.join(' '));
+    else input.removeAttribute('aria-describedby');
+    delete input.dataset.errorMessage;
+  }
 }
 
 function isoDate(d) {
@@ -571,7 +628,7 @@ async function refreshWeekStrip() {
             text: `${new Date(Date.UTC(y, m - 1, dd)).toUTCString().slice(0, 3)} ${dd}`,
           }),
           el('span', { cls: 'ws-total num', text: fmtHM(totals[date] || 0) }),
-          el('span', { cls: 'ws-clock', text: '◷', attrs: { 'aria-hidden': 'true' } }),
+          el('span', { cls: 'ws-clock', attrs: { 'aria-hidden': 'true' } }, [ubuntuIcon('history')]),
         ],
       ),
     );
@@ -613,12 +670,12 @@ async function refreshDay() {
       locked.has(e.id)
         ? el('span', {
             cls: 'lock',
-            text: '🔒',
             attrs: {
+              role: 'img',
               'aria-label': 'locked',
               title: 'On an issued invoice or submitted week — editing is blocked',
             },
-          })
+          }, [ubuntuIcon('lock-locked')])
         : null,
     ]);
     const tr = el(
@@ -967,7 +1024,7 @@ async function refreshWeek() {
           data: { date: d },
         },
         [
-          el('span', { cls: 'wk-clock', text: '◷', attrs: { 'aria-hidden': 'true' } }),
+          el('span', { cls: 'wk-clock', attrs: { 'aria-hidden': 'true' } }, [ubuntuIcon('history')]),
           el('span', { cls: 'wk-dow', text: new Date(d).toUTCString().slice(0, 3) }),
           el('span', { cls: 'wk-date', text: `${dd} ${MONTH_NAMES[mm - 1]}` }),
         ],
@@ -1030,7 +1087,6 @@ async function refreshWeek() {
           el('button', {
             type: 'button',
             cls: hasNote ? 'note-flag' : 'note-flag note-empty',
-            text: hasNote ? '¶' : '✎',
             attrs: {
               title: row.notes[d] || 'Add a note',
               'aria-label': hasNote
@@ -1038,7 +1094,7 @@ async function refreshWeek() {
                 : `Add a note for ${row.project_code} on ${d}`,
             },
             on: { click: () => editCellNote(ids[0], isLocked) },
-          }),
+          }, [ubuntuIcon(hasNote ? 'comments' : 'edit')]),
         );
       }
       return el(
@@ -1065,9 +1121,8 @@ async function refreshWeek() {
           anyLocked
             ? el('span', {
                 cls: 'lock',
-                text: '🔒',
-                attrs: { 'aria-label': 'locked', title: 'This row holds locked entries' },
-              })
+                attrs: { role: 'img', 'aria-label': 'locked', title: 'This row holds locked entries' },
+              }, [ubuntuIcon('lock-locked')])
             : null,
         ]),
       ],
@@ -4081,6 +4136,7 @@ async function startApp() {
   $('report-to').value = addDays(mondayOf(today), 6);
 
   initTabs();
+  document.querySelectorAll('button').forEach(decorateUbuntuButton);
   initSegTabs(); // Day | Week inside the Timesheets section (#107)
   initSettingsTabs();
   initWizard(); // first-run setup wizard (#111)

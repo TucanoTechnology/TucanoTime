@@ -420,6 +420,7 @@ fn content_type(path: &str) -> &'static str {
         "svg" => "image/svg+xml",
         "json" => "application/json",
         "ico" => "image/x-icon",
+        "woff2" => "font/woff2",
         _ => "application/octet-stream",
     }
 }

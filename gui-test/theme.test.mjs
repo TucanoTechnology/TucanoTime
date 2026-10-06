@@ -30,6 +30,7 @@ test('default follows system until manual selection', () => {
   const { dom, changeSystem } = setup({ dark: true });
   const document = dom.window.document;
   assert.equal(document.documentElement.dataset.theme, 'dark');
+  assert.equal(document.body.classList.contains('is-dark'), true);
   changeSystem(false);
   assert.equal(document.documentElement.dataset.theme, 'light');
   const dark = document.querySelector('input[value="dark"]');

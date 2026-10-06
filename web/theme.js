@@ -10,6 +10,10 @@
   } catch {}
   function apply(mode) {
     document.documentElement.dataset.theme = mode;
+    document.documentElement.classList.toggle('is-dark', mode === 'dark');
+    document.documentElement.classList.toggle('is-light', mode === 'light');
+    document.body?.classList.toggle('is-dark', mode === 'dark');
+    document.body?.classList.toggle('is-light', mode === 'light');
     document.documentElement.style.colorScheme = mode;
     document.querySelectorAll('input[name="colour-mode"]').forEach((input) => {
       input.checked = input.value === mode;
