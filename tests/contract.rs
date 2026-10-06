@@ -5020,3 +5020,108 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     .await;
     assert_eq!(s3, StatusCode::CONFLICT);
 }
+
+// ------------------------------------------------------------------ #147 ---
+
+#[tokio::test]
+async fn item_type_catalog_crud_and_editor_prefill_contract() {
+    let (app, _d) = app().await;
+    let (s, item) = json_req(
+        &app,
+        "POST",
+        "/admin/item-types",
+        Some(
+            json!({"name":"Support hour","kind":"service","description":"Extended support block",
+                    "default_price_minor":9500,"currency":"EUR"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{item}");
+    let tid = item["id"].as_str().unwrap().to_string();
+    assert_eq!(item["active"], true);
+    for bad in [
+        json!({"name":"","kind":"service"}),
+        json!({"name":"X","kind":"product","default_price_minor":100_000_001}),
+    ] {
+        let (sb, _) = json_req(&app, "POST", "/admin/item-types", Some(bad)).await;
+        assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    let (_sl, list) = json_req(&app, "GET", "/admin/item-types", None).await;
+    assert_eq!(list["item_types"].as_array().unwrap().len(), 1);
+    let (sa, archived) = json_req(
+        &app,
+        "PUT",
+        &format!("/admin/item-types/{tid}"),
+        Some(json!({"name":"Support hour","kind":"service","default_price_minor":9500,"currency":"EUR","active":false})),
+    )
+    .await;
+    assert_eq!(sa, StatusCode::OK, "{archived}");
+    assert_eq!(archived["active"], false);
+    assert_eq!(archived["id"], tid);
+    let (s4, _) = json_req(
+        &app,
+        "PUT",
+        "/admin/item-types/00000000-0000-0000-0000-000000000000",
+        Some(json!({"name":"X","kind":"service"})),
+    )
+    .await;
+    assert_eq!(s4, StatusCode::NOT_FOUND);
+    json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(
+            json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
+        ),
+    )
+    .await;
+    let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
+    let (sm, _, _) = raw(&app.router, "GET", "/admin/item-types", None, Some(&cookie)).await;
+    assert_eq!(sm, StatusCode::FORBIDDEN);
+    let (sd, _) = json_req(&app, "DELETE", &format!("/admin/item-types/{tid}"), None).await;
+    assert_eq!(sd, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn document_labels_reach_the_pdf_and_validation_binds() {
+    let (app, _d) = app().await;
+    let (sb, _) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"","body":"","footer":"","labels":{"total":"a very long label that goes over the forty character bound"}})),
+    )
+    .await;
+    assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY);
+    let (s, saved) = json_req(
+        &app,
+        "PUT",
+        "/admin/invoice-template",
+        Some(json!({"subject":"","body":"","footer":"","labels":{"description":"Service delivered","total":"Amount due"}})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{saved}");
+    assert_eq!(saved["labels"]["total"], "Amount due");
+    let (issued, iid) = seed_issued_invoice(&app).await;
+    assert_eq!(issued["status"], "issued");
+    let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let joined: String = String::from_utf8_lossy(&pdf)
+        .split('(')
+        .skip(1)
+        .map(|x| x.split(')').next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        joined.contains("Amount due"),
+        "custom total label on the PDF"
+    );
+    assert!(
+        joined.contains("Service delivered"),
+        "custom description column label"
+    );
+    let (_sg, got) = json_req(&app, "GET", "/admin/invoice-template", None).await;
+    assert_eq!(
+        got["template"]["labels"]["description"],
+        "Service delivered"
+    );
+}

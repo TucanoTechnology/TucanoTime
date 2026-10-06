@@ -2156,6 +2156,7 @@ function edTotals(subtotal, taxH, discH) {
 
 function edLineRow(line = null) {
   const desc = el('input', { attrs: { type: 'text', maxlength: 500, placeholder: 'Description', value: line ? line.note : '' } });
+  const itemSel = el('select', { attrs: { 'aria-label': 'Catalog item type (prefills this line)' } });
   const kind = el('select', {}, [
     el('option', { attrs: { value: 'product', selected: !line || line.item_kind !== 'service' ? '' : null }, text: 'Product' }),
     el('option', { attrs: { value: 'service' }, text: 'Service' }),
@@ -2173,7 +2174,7 @@ function edLineRow(line = null) {
   });
   const amount = el('td', { cls: 'num' });
   const row = el('tr', {}, [
-    el('td', {}, [desc]),
+    el('td', {}, [itemSel, desc]),
     el('td', {}, [kind]),
     el('td', {}, [qty]),
     el('td', {}, [price]),
@@ -2193,6 +2194,27 @@ function edLineRow(line = null) {
       amount_minor: Number.isFinite(q) && Number.isFinite(p) ? edAmount(q, p) : NaN,
     };
   };
+  row.__attachItemSelect = () => {
+    const keep = itemSel.value;
+    itemSel.textContent = '';
+    itemSel.appendChild(el('option', { attrs: { value: '' }, text: '— custom —' }));
+    for (const it of catalogItems.filter((x) => x.active)) {
+      itemSel.appendChild(
+        el('option', { attrs: { value: it.id }, text: `${it.name} (${it.currency} ${formatMoney(it.default_price_minor)})` }),
+      );
+    }
+    if (keep) itemSel.value = keep;
+  };
+  row.__attachItemSelect();
+  itemSel.addEventListener('change', () => {
+    const it = catalogItems.find((x) => x.id === itemSel.value);
+    if (!it) return;
+    // Prefill only — every field stays editable (#147).
+    if (!desc.value.trim()) desc.value = it.description || it.name;
+    kind.value = it.kind;
+    if (!Number(price.value)) price.value = (it.default_price_minor / 100).toFixed(2);
+    edRecalc();
+  });
   row.__read = read;
   row.__render = () => {
     const r = read();
@@ -2518,6 +2540,115 @@ function iwInit() {
   iwShow();
 }
 
+// ------------------------------------------------ product/service catalog --
+
+let catalogItems = [];
+
+async function refreshCatalog() {
+  try {
+    catalogItems = (await api.get('/admin/item-types')).item_types || [];
+  } catch {
+    catalogItems = [];
+    return; // members: section is hidden anyway
+  }
+  const tbody = $('item-table').querySelector('tbody');
+  tbody.textContent = '';
+  for (const it of catalogItems) {
+    const actions = [
+      el('button', {
+        type: 'button', cls: 'link', text: 'Edit',
+        on: {
+          click: () => {
+            $('item-id').value = it.id;
+            $('item-name').value = it.name;
+            $('item-kind').value = it.kind;
+            $('item-desc').value = it.description || '';
+            $('item-price').value = (it.default_price_minor / 100).toFixed(2);
+            $('item-currency').value = it.currency;
+            $('item-save').textContent = 'Update item';
+            $('item-cancel').hidden = false;
+          },
+        },
+      }),
+      el('button', {
+        type: 'button', cls: 'link', text: it.active ? 'Archive' : 'Restore',
+        on: {
+          click: async () => {
+            try {
+              await api.put(`/admin/item-types/${it.id}`, {
+                name: it.name, kind: it.kind, description: it.description || '',
+                default_price_minor: it.default_price_minor, currency: it.currency,
+                active: !it.active,
+              });
+              announce(it.active ? 'Item archived.' : 'Item restored.');
+              await refreshCatalog();
+            } catch (err) {
+              announce(`Catalog change failed: ${err.message}`);
+            }
+          },
+        },
+      }),
+      el('button', {
+        type: 'button', cls: 'danger', text: 'Delete',
+        on: {
+          click: async () => {
+            if (!(await askConfirm(`Delete catalog item "${it.name}"? Existing invoice lines keep their snapshot.`))) return;
+            try {
+              await api.del(`/admin/item-types/${it.id}`);
+              announce('Item deleted.');
+              await refreshCatalog();
+            } catch (err) {
+              announce(`Delete failed: ${err.message}`);
+            }
+          },
+        },
+      }),
+    ];
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: it.name }),
+        el('td', { text: it.kind }),
+        el('td', { cls: 'num', text: `${it.currency} ${formatMoney(it.default_price_minor)}` }),
+        el('td', {}, [el('span', { cls: it.active ? 'badge on' : 'badge', text: it.active ? 'active' : 'archived' })]),
+        el('td', { cls: 'actions-col' }, actions),
+      ]),
+    );
+  }
+  $('item-table').hidden = catalogItems.length === 0;
+  $('item-empty').hidden = catalogItems.length !== 0;
+  for (const row of $('ed-lines').querySelectorAll('tbody tr')) {
+    row.__attachItemSelect?.();
+  }
+}
+
+async function saveCatalogItem(evt) {
+  evt.preventDefault();
+  clearFormError($('item-error'));
+  const id = $('item-id').value;
+  const body = {
+    name: $('item-name').value.trim(),
+    kind: $('item-kind').value,
+    description: $('item-desc').value.trim(),
+    default_price_minor: parseHundredths($('item-price').value) || 0,
+    currency: $('item-currency').value.trim().toUpperCase() || null,
+    active: true,
+  };
+  try {
+    if (id) await api.put(`/admin/item-types/${id}`, body);
+    else await api.post('/admin/item-types', body);
+    announce(id ? 'Catalog item updated.' : 'Catalog item added.');
+    $('item-id').value = '';
+    $('item-form').reset();
+    $('item-price').value = '0';
+    $('item-currency').value = 'EUR';
+    $('item-save').textContent = 'Save item';
+    $('item-cancel').hidden = true;
+    await refreshCatalog();
+  } catch (err) {
+    showFormError($('item-error'), err);
+  }
+}
+
 // ------------------------------------------------- recurring schedules ----
 //
 // #136: management UI for the Phase-4 recurring engine (#26). The backend
@@ -2826,6 +2957,7 @@ async function refreshSettings() {
   }
   await refreshConfig();
   await refreshOrgProfile();
+  await refreshCatalog();
   await refreshInvoiceTemplate();
 }
 
@@ -2958,6 +3090,10 @@ async function refreshInvoiceTemplate() {
     $('template-subject').value = t.subject || '';
     $('template-body').value = t.body || '';
     $('template-footer').value = t.footer || '';
+    const lb = t.labels || {};
+    for (const k of ['description', 'quantity', 'unit_price', 'subtotal', 'discount', 'tax', 'total']) {
+      $(`lb-${k.replace('_', '-')}`).value = lb[k] || '';
+    }
     const terms = t.payment_terms || null;
     $('template-terms').value = terms ? terms.kind : '';
     $('template-terms-days').value = terms && terms.days != null ? terms.days : '';
@@ -3018,6 +3154,16 @@ async function saveInvoiceTemplate(evt) {
       body: $('template-body').value,
       footer: $('template-footer').value,
       payment_terms,
+      // #147 display labels ride the same template store (no parallel truth).
+      labels: {
+        description: $('lb-description').value.trim(),
+        quantity: $('lb-quantity').value.trim(),
+        unit_price: $('lb-unit-price').value.trim(),
+        subtotal: $('lb-subtotal').value.trim(),
+        discount: $('lb-discount').value.trim(),
+        tax: $('lb-tax').value.trim(),
+        total: $('lb-total').value.trim(),
+      },
     });
     announce('Invoice template saved.');
     await refreshInvoiceTemplate();
@@ -3415,6 +3561,19 @@ async function startApp() {
   $('ed-save').addEventListener('click', edSave);
   $('ed-tax').addEventListener('input', edRecalc);
   $('ed-discount').addEventListener('input', edRecalc);
+  $('item-form').addEventListener('submit', saveCatalogItem);
+  $('item-cancel').addEventListener('click', () => {
+    $('item-id').value = '';
+    $('item-form').reset();
+    $('item-price').value = '0';
+    $('item-currency').value = 'EUR';
+    $('item-save').textContent = 'Save item';
+    $('item-cancel').hidden = true;
+  });
+  $('lb-reset').addEventListener('click', () => {
+    for (const k of ['lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal', 'lb-discount', 'lb-tax', 'lb-total']) $(k).value = '';
+    announce('Built-in labels restored (save the template to apply).');
+  });
   $('rec-form').addEventListener('submit', addRecurring);
   $('contact-add').addEventListener('click', () => {
     if ($('contact-rows').children.length >= 10) {
@@ -3465,6 +3624,7 @@ async function startApp() {
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
   refreshSchedules().catch?.(() => {});
+  refreshCatalog().catch?.(() => {});
   // First-run trigger (#111): zero customers after a successful login opens
   // the wizard as a modal. Once a customer exists it never auto-opens — the
   // sidebar entry reopens it manually.

@@ -219,6 +219,15 @@ pub fn build_router(state: AppState) -> Router {
         )
         // Company identity (#138).
         .route("/admin/org", get(api::org_get).put(api::org_put))
+        // Product/Service catalog (#147).
+        .route(
+            "/admin/item-types",
+            get(api::list_item_types).post(api::create_item_type),
+        )
+        .route(
+            "/admin/item-types/{id}",
+            axum::routing::put(api::update_item_type).delete(api::delete_item_type),
+        )
         .route("/invoices/{id}/document", get(api::invoice_document))
         .route("/invoices/summary", get(api::invoice_summary))
         .route("/invoices/report", get(api::invoice_report_handler))

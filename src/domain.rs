@@ -372,6 +372,89 @@ pub struct OrgProfile {
     pub address: Option<Address>,
 }
 
+/// Display-label overrides for invoice documents (#147). Empty = built-in
+/// label; only DISPLAY changes — API/JSON field names are untouched.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LabelOverrides {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub quantity: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit_price: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subtotal: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub discount: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tax: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub total: String,
+}
+
+impl LabelOverrides {
+    /// Resolve a label, falling back to the built-in (trimmed).
+    #[must_use]
+    pub fn label<'a>(&'a self, value: &'a str, fallback: &'a str) -> &'a str {
+        let v = value.trim();
+        if v.is_empty() { fallback } else { v }
+    }
+
+    pub fn validate(&self, errors: &mut Vec<FieldError>) {
+        for (field, v) in [
+            ("labels.description", &self.description),
+            ("labels.quantity", &self.quantity),
+            ("labels.unit_price", &self.unit_price),
+            ("labels.subtotal", &self.subtotal),
+            ("labels.discount", &self.discount),
+            ("labels.tax", &self.tax),
+            ("labels.total", &self.total),
+        ] {
+            if v.chars().count() > 40 {
+                errors.push(FieldError::new(field, "label too long (max 40 characters)"));
+            }
+        }
+    }
+}
+
+/// A reusable Product/Service line type (#147), stored `items/<id>.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemType {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub kind: LineItemKind,
+    /// Default unit price in minor units (0 = ask at invoice time).
+    pub default_price_minor: u64,
+    #[serde(default = "default_currency_eur")]
+    pub currency: Currency,
+    #[serde(default = "default_active")]
+    pub active: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+fn default_currency_eur() -> Currency {
+    Currency("EUR".to_string())
+}
+
+/// Create/update payload for item types (#147).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ItemTypeInput {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub kind: LineItemKind,
+    #[serde(default)]
+    pub default_price_minor: u64,
+    #[serde(default)]
+    pub currency: Option<Currency>,
+    #[serde(default = "default_active")]
+    pub active: bool,
+}
+
 /// The org-wide invoice document template (#116), stored as the singleton
 /// `invoice_template.json` next to `scheduler.json`. Every field is optional:
 /// an unset template keeps the hard-coded legacy behaviour byte-for-byte.
@@ -390,6 +473,9 @@ pub struct InvoiceTemplate {
     /// Default terms for customers that carry none.
     #[serde(default)]
     pub payment_terms: Option<PaymentTerms>,
+    /// Document display labels (#147); empty = built-in.
+    #[serde(default)]
+    pub labels: LabelOverrides,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
