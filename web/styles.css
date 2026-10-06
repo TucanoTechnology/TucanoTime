@@ -331,3 +331,25 @@ td.cell.locked .cell-input { opacity: .6; }
   .nav-group { flex-direction: row; flex-wrap: wrap; margin-bottom: 0; }
   .nav-label { width: 100%; padding-left: 0; }
 }
+/* ---- calendar timesheet view (#140) ---- */
+.cal-nav { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.cal-nav h2 { margin: 0; font-size: 1.1rem; min-width: 9ch; text-align: center; }
+#cal-grid { width: 100%; table-layout: fixed; border-collapse: collapse; }
+#cal-grid th { font-size: .75rem; color: var(--muted); padding: .3rem 0; text-align: left; }
+#cal-grid td.cal-cell { border: 1px solid var(--line); vertical-align: top; height: 5.2rem;
+  padding: 0; transition: background .12s; }
+#cal-grid td.cal-out { border: 1px dashed var(--line); opacity: .4; }
+#cal-grid td.cal-cell.today { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cal-day { display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; width: 100%;
+  height: 100%; padding: .3rem .4rem; background: none; border: 0; font: inherit; color: inherit;
+  cursor: pointer; text-align: left; }
+.cal-day.cal-plain { cursor: default; }
+.cal-cell.has:hover { background: var(--row-alt); }
+.cal-num { font-weight: 700; }
+.cal-hours { font-size: .78rem; color: var(--brand-deep); font-variant-numeric: tabular-nums; }
+.cal-chip { font-size: .68rem; background: var(--accent-soft); color: var(--brand-deep);
+  border-radius: .6rem; padding: 0 .4rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.cal-cell:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (prefers-color-scheme: dark) {
+  .cal-chip { color: var(--brand-deep); }
+}

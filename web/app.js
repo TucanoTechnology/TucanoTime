@@ -293,7 +293,7 @@ async function fillTaskSelect(select, customerId, projectCode, selectedCode) {
 let segActiveId = 'ts-day';
 
 function activateSeg(segId, refresh = true) {
-  for (const id of ['ts-day', 'ts-week']) {
+  for (const id of ['ts-day', 'ts-week', 'ts-cal']) {
     const on = id === segId;
     const tab = $(id);
     tab.setAttribute('aria-selected', String(on));
@@ -305,11 +305,15 @@ function activateSeg(segId, refresh = true) {
 }
 
 function refreshTimesheetView() {
-  (segActiveId === 'ts-day' ? refreshDay() : refreshWeek()).catch?.(() => {});
+  const run =
+    segActiveId === 'ts-day' ? refreshDay()
+      : segActiveId === 'ts-cal' ? refreshTimeCal()
+        : refreshWeek();
+  run.catch?.(() => {});
 }
 
 function initSegTabs() {
-  const segs = [$('ts-day'), $('ts-week')];
+  const segs = [$('ts-day'), $('ts-week'), $('ts-cal')];
   segs.forEach((t, i) => {
     t.addEventListener('click', () => activateSeg(t.id));
     t.addEventListener('keydown', (e) => {
@@ -335,6 +339,101 @@ function showTimesheet(segId) {
     suppressPanelRefresh = false;
   }
   activateSeg(segId, false);
+}
+
+// ------------------------------------------------------ calendar view ----
+//
+// #140: a month grid of LOGGED time inside the Timesheets segment group.
+// Read-only by design — a day click hands over to the Day view (and its
+// dialog, #145) where editing and locks already live. The imported Google/MS
+// calendar events (#36) keep their own section; this never touches them.
+
+const calState = { month: '' }; // 'YYYY-MM'; empty = follow the displayed day
+
+function shiftMonth(month, delta) {
+  const [yy, mm] = month.split('-').map(Number);
+  return new Date(Date.UTC(yy, mm - 1 + delta, 1)).toISOString().slice(0, 7);
+}
+
+function monthName(month) {
+  const [yy, mm] = month.split('-').map(Number);
+  return `${MONTH_NAMES[mm - 1]} ${yy}`;
+}
+
+async function refreshTimeCal() {
+  const today = isoDate(new Date());
+  if (!calState.month) calState.month = (($('day-date').value || today).slice(0, 7));
+  const month = calState.month;
+  const [yy, mm] = month.split('-').map(Number);
+  const last = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+  const monthStart = `${month}-01`;
+  const monthEnd = `${month}-${String(last).padStart(2, '0')}`;
+  $('cal-label').textContent = monthName(month);
+  const data = await api.get(`/entries?from=${monthStart}&to=${monthEnd}`);
+  const entries = data.entries || [];
+  const byDate = new Map();
+  let totalHundredths = 0;
+  for (const e of entries) {
+    const h = Math.round(Number(e.hours) * 100);
+    totalHundredths += h;
+    if (!byDate.has(e.date)) byDate.set(e.date, []);
+    byDate.get(e.date).push({ ...e, hundredths: h });
+  }
+  $('cal-total').textContent = totalHundredths
+    ? `${monthName(month)}: ${fmtHM(totalHundredths)} logged`
+    : `${monthName(month)}: nothing logged yet`;
+  const tbody = $('cal-grid').querySelector('tbody');
+  tbody.textContent = '';
+  const lead = (new Date(`${monthStart}T00:00:00Z`).getUTCDay() + 6) % 7;
+  let row = el('tr');
+  for (let i = 0; i < lead; i += 1) row.appendChild(el('td', { cls: 'cal-out' }));
+  for (let d = 1; d <= last; d += 1) {
+    const date = `${month}-${String(d).padStart(2, '0')}`;
+    const dayEntries = byDate.get(date) || [];
+    const kids = [el('span', { cls: 'cal-num', text: String(d) })];
+    if (dayEntries.length) {
+      const sum = dayEntries.reduce((a, e) => a + e.hundredths, 0);
+      kids.push(el('span', { cls: 'cal-hours', text: fmtHM(sum) }));
+      const names = dayEntries.map((e) => e.project_code);
+      const uniq = [...new Set(names)];
+      for (const code of uniq.slice(0, 3)) kids.push(el('span', { cls: 'cal-chip', text: code }));
+      if (uniq.length > 3) kids.push(el('span', { cls: 'cal-chip', text: `+${uniq.length - 3}` }));
+    }
+    const cell = el(
+      'td',
+      { cls: `cal-cell${dayEntries.length ? ' has' : ''}${date === today ? ' today' : ''}` },
+      [
+        dayEntries.length
+          ? el('button', {
+              type: 'button',
+              cls: 'cal-day',
+              on: {
+                click: () => {
+                  activateSeg('ts-day');
+                  $('day-date').value = date;
+                  refreshDay().catch?.(() => {});
+                  announce(`Opened ${date} in the Day view.`);
+                },
+              },
+              attrs: {
+                'aria-label': `${d} ${monthName(month)}: ${fmtHM(
+                  dayEntries.reduce((a, e) => a + e.hundredths, 0),
+                )} across ${dayEntries.length} entr${dayEntries.length === 1 ? 'y' : 'ies'} — open Day view`,
+              },
+            }, kids)
+          : el('div', { cls: 'cal-day cal-plain' }, kids),
+      ],
+    );
+    row.appendChild(cell);
+    if ((lead + d) % 7 === 0) {
+      tbody.appendChild(row);
+      row = el('tr');
+    }
+  }
+  if (row.children.length) {
+    while (row.children.length < 7) row.appendChild(el('td', { cls: 'cal-out' }));
+    tbody.appendChild(row);
+  }
 }
 
 // ---------------------------------------------------------------- tabs ---
@@ -2603,6 +2702,19 @@ async function startApp() {
   $('copy-days').addEventListener('change', () =>
     copyPreviousDay(Number($('copy-days').value) || 1),
   );
+  // #140: calendar navigation.
+  $('cal-prev').addEventListener('click', () => {
+    calState.month = shiftMonth(calState.month || $('day-date').value.slice(0, 7), -1);
+    refreshTimeCal().catch?.(() => {});
+  });
+  $('cal-next').addEventListener('click', () => {
+    calState.month = shiftMonth(calState.month || $('day-date').value.slice(0, 7), 1);
+    refreshTimeCal().catch?.(() => {});
+  });
+  $('cal-today').addEventListener('click', () => {
+    calState.month = isoDate(new Date()).slice(0, 7);
+    refreshTimeCal().catch?.(() => {});
+  });
   $('entry-form').addEventListener('submit', saveEntry);
   $('entry-cancel').addEventListener('click', () => {
     resetEntryForm();

@@ -91,6 +91,7 @@
         <div class="seg" role="tablist" aria-label="Timesheet view" id="ts-seg">
           <button type="button" role="tab" id="ts-day" aria-controls="panel-day" aria-selected="true">Day</button>
           <button type="button" role="tab" id="ts-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
+          <button type="button" role="tab" id="ts-cal" aria-controls="panel-calendar" aria-selected="false" tabindex="-1">Calendar</button>
         </div>
       </div>
 
@@ -213,6 +214,24 @@
     </section>
 
     </section><!-- /panel-timesheet -->
+
+    <!-- CALENDAR VIEW (#140): month overview of LOGGED time; distinct from
+         the imported-calendar events list further down. -->
+    <section id="panel-calendar" role="tabpanel" aria-labelledby="ts-cal" tabindex="0" hidden>
+      <div class="cal-nav">
+        <button type="button" id="cal-prev" aria-label="Previous month">&larr;</button>
+        <h2 id="cal-label">Calendar</h2>
+        <button type="button" id="cal-next" aria-label="Next month">&rarr;</button>
+        <button type="button" id="cal-today" class="secondary">Today</button>
+        <span id="cal-total" class="hint" role="status" aria-live="polite"></span>
+      </div>
+      <table id="cal-grid">
+        <caption class="sr-only">Logged hours by day</caption>
+        <thead><tr><th scope="col">Mon</th><th scope="col">Tue</th><th scope="col">Wed</th><th scope="col">Thu</th><th scope="col">Fri</th><th scope="col">Sat</th><th scope="col">Sun</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="hint">Click a day with entries to open it in the Day view. This calendar shows your logged time; the Calendar events section below lists imported calendar items (#36).</p>
+    </section>
 
     <!-- CUSTOMERS -->
     <section id="panel-customers" role="tabpanel" aria-labelledby="tab-customers" tabindex="0" hidden>
