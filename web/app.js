@@ -847,14 +847,23 @@ async function refreshWeek() {
         },
       });
       const children = [input];
-      if (row.notes[d]) {
+      // #126: cells that hold an entry always show the note affordance —
+      // filled ¶ with a note, faint ✎ to add one — editing IN the grid via
+      // the #102 dialog instead of jumping to the day view.
+      if (ids.length > 0) {
+        const hasNote = Boolean(row.notes[d]);
         children.push(
           el('button', {
             type: 'button',
-            cls: 'note-flag',
-            text: '¶',
-            attrs: { title: row.notes[d], 'aria-label': `Note: ${row.notes[d]}. Open to edit.` },
-            on: { click: () => jumpToEntry(ids[0]) },
+            cls: hasNote ? 'note-flag' : 'note-flag note-empty',
+            text: hasNote ? '¶' : '✎',
+            attrs: {
+              title: row.notes[d] || 'Add a note',
+              'aria-label': hasNote
+                ? `Note: ${row.notes[d]}. Activate to edit.`
+                : `Add a note for ${row.project_code} on ${d}`,
+            },
+            on: { click: () => editCellNote(ids[0], isLocked) },
           }),
         );
       }
@@ -1035,6 +1044,42 @@ function addWeekRow(customerId, projectCode, week) {
 /// Copy the source week's PROJECT LINES into the displayed week — never the
 /// time entries (#128). Rows are week-scoped, re-copying is idempotent, and
 /// the announcement reports what actually happened.
+/// In-place note editing for week-grid cells (#126). The dialog pre-fills
+/// the current note; save PUTs the entry with its hours untouched; cancel
+/// leaves the record unchanged (never a partial write). Locked entries are
+/// read-only — the note is shown, not edited, matching the cell's lock.
+async function editCellNote(id, isLocked) {
+  try {
+    const e = await api.get(`/entries/${id}`);
+    if (isLocked) {
+      await askAlert(
+        e.note
+          ? `Locked entry note (${e.project_code}, ${e.date}): ${e.note}`
+          : `This entry is locked (issued invoice or submitted week), so no note can be added.`,
+      );
+      return;
+    }
+    const note = await askPrompt(`Note for ${e.project_code} on ${e.date}:`, e.note || '');
+    if (note === null) {
+      announce('Note unchanged.');
+      return;
+    }
+    await api.put(`/entries/${id}`, {
+      date: e.date,
+      customer_id: e.customer_id,
+      project_code: e.project_code,
+      task_code: e.task_code || null,
+      hours: e.hours,
+      note: note.trim(),
+      billable: e.billable !== false,
+    });
+    announce('Note saved.');
+    await refreshWeek();
+  } catch (err) {
+    announce(`Note failed: ${err.message}`);
+  }
+}
+
 async function copyLastWeek(weeksAgo = 1) {
   const targetWeek = $('week-date').value; // Monday of the displayed week
   const start = addDays(targetWeek, -7 * weeksAgo);

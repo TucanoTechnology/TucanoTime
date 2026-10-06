@@ -331,12 +331,18 @@ await tick(400);
 const sep9b = await (await fetch(BASE + '/entries?date=2026-11-09')).json();
 check('clearing the cell deleted the entry', sep9b.entries.every((e) => e.hours !== 2.5));
 
-// Note indicator on the cell carrying 'gui-test entry' -> opens the Day editor.
+// #126: the note affordance edits IN the grid — dialog opens, cancel is safe.
 const flag = window.document.querySelector('#week-table .note-flag');
-check('note indicator shown for cells with notes', !!flag);
+check('note affordance shown on entry cells', !!flag);
 flag.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(400);
-check('note indicator opens the entry for editing', window.document.getElementById('entry-id').value !== '');
+await tick(250);
+const noteDlgOpen = window.document.getElementById('app-dialog').open === true
+  || window.document.getElementById('app-dialog').hasAttribute('open');
+check('note editor opens in the grid (#126)', noteDlgOpen);
+window.document.getElementById('dlg-cancel').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(200);
+check('cancel leaves the note unchanged (#126)',
+  /Note unchanged/i.test(window.document.getElementById('live-region').textContent));
 window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 
 // Add row + copy-last-week controls exist.
@@ -645,6 +651,44 @@ if (second) {
   const rows = [...window.document.querySelectorAll('#week-table tbody tr')].map((r) => r.textContent);
   check('consecutive adds keep every project line (#127)',
     rows.some((t) => t.includes('P-9')) && rows.some((t) => t.includes(second.split('|')[1])));
+}
+
+// ---- WEEK-GRID NOTE EDITING (#126): edit in place, no jump to Day ----
+{
+  const noteEntry = await (await fetch(BASE + '/entries', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
+    body: JSON.stringify({ date: '2026-12-08', customer_id: acmeOpt.value, project_code: 'P-9', hours: 2, note: 'api note' }),
+  })).json();
+  await fetch(BASE + '/entries', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
+    body: JSON.stringify({ date: '2026-12-09', customer_id: acmeOpt.value, project_code: 'P-9', hours: 1 }),
+  });
+  weekDateEl.value = '2026-12-07';
+  weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(350);
+  const cell08 = window.document.querySelector('#week-table input[data-date="2026-12-08"][data-project="P-9"]');
+  const flag126 = cell08 && cell08.closest('td').querySelector('.note-flag');
+  check('cell with a note shows the filled ¶ affordance (#126)', !!flag126 && flag126.textContent === '\u00b6');
+  const cell11 = window.document.querySelector('#week-table input[data-date="2026-12-11"][data-project="P-9"]');
+  check('empty cell (no entry) offers no fake note button (#126)', !!cell11 && !cell11.closest('td').querySelector('.note-flag'));
+  const cell09 = window.document.querySelector('#week-table input[data-date="2026-12-09"][data-project="P-9"]');
+  const addFlag = cell09 && cell09.closest('td').querySelector('.note-flag.note-empty');
+  check('entry without a note offers a faint add-note ✎ (#126)', !!addFlag && addFlag.textContent === '\u270e');
+  if (flag126) {
+    flag126.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(250);
+    const dlgIn = window.document.getElementById('dlg-input');
+    check('note dialog prefills the current note (#126)', dlgIn.value === 'api note');
+    dlgIn.value = 'edited in week';
+    window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(400);
+    const after126 = await (await fetch(BASE + `/entries/${noteEntry.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
+    check('note edited in place, hours untouched (#126)',
+      after126.note === 'edited in week' && after126.hours === 2);
+    check('note save announced', /Note saved\./i.test(window.document.getElementById('live-region').textContent));
+  }
 }
 
 // Lock column: the submitted 2027-01 week renders its cell disabled.

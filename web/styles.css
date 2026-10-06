@@ -209,6 +209,7 @@ td.cell.has { background: var(--accent-soft); }
 td.cell.locked { background: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(174, 167, 159, .18) 6px, rgba(174, 167, 159, .18) 12px); }
 td.cell.locked .cell-input { opacity: .6; }
 .note-flag { border: 0; background: none; color: var(--brand-deep); cursor: pointer; padding: 0 .35rem; font-weight: 700; }
+.note-flag.note-empty { color: var(--muted); opacity: 0.55; } /* faint add-note (#126) */
 .row-total { font-weight: 700; padding: .4rem .6rem; white-space: nowrap; }
 #week-table tfoot th, #week-table tfoot td { padding: .45rem .6rem; font-weight: 700; border-top: 2px solid var(--line); font-variant-numeric: tabular-nums; }
 .week-controls { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; flex-wrap: wrap; }
