@@ -41,13 +41,15 @@
         <div class="tabs" role="tablist" id="tabs" aria-orientation="vertical">
           <button role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true">Timesheets</button>
           <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
-          <!-- #111: action button, not a tab — opens the setup wizard modal. -->
-          <button type="button" id="wizard-open" title="Setup wizard — add your first customer and project" aria-haspopup="dialog">🚀 Setup wizard</button>
           <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
           <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
           <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
           <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Approvals</button>
           <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button>
+          <!-- #111/#125: utility action (not a tab), pinned to the bottom of
+               the rail, visually separated from the section tabs. -->
+          <div class="tab-sep" role="separator" aria-hidden="true"></div>
+          <button type="button" id="wizard-open" title="Setup wizard — add your first customer and project" aria-haspopup="dialog">🚀 Setup wizard</button>
         </div>
       </nav>
       <div id="account" class="account" hidden>
