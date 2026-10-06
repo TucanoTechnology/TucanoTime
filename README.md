@@ -128,6 +128,11 @@ The REST surface is defined by [`openapi.json`](openapi.json) and served at
 `/openapi.json`; change both together. See [`AGENTS.md`](AGENTS.md) for the
 rules AI agents follow in this repository.
 
+## Architecture decision records
+
+- [ADR-001 — Filesystem storage, entity ownership, and integration seams](docs/architecture/adr-001-filesystem-and-seams.md)
+- [ADR-002 — E-invoicing standard and provider scope](docs/architecture/adr-002-einvoicing-scope.md) (decision record for #148: EN 16931 core; Peppol BIS 3.0 UBL + Factur-X generation at v1; transport only through a provider port — state-clearance schemes and PDP certification are explicitly out of scope)
+
 ## License
 
 [GNU Affero General Public License v3.0](LICENSE).
