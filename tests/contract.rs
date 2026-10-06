@@ -993,12 +993,26 @@ async fn entry_task_must_belong_to_project() {
 }
 
 #[tokio::test]
-async fn report_uses_task_rate_override() {
-    let (app, _d) = app().await;
+async fn reports_and_invoices_use_project_rates_for_legacy_tasks() {
+    let (app, dir) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await; // 60/h default
     let cid = c["id"].as_str().unwrap();
-    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
-    new_task(&app, cid, "P1", "PREM", json!({"rate_minor": 9500})).await; // 95/h
+    new_project(
+        &app,
+        cid,
+        "P1",
+        json!({"currency": "USD", "rate_minor": 7500}),
+    )
+    .await;
+    let mut task = new_task(&app, cid, "P1", "PREM", json!({})).await;
+    task["currency"] = json!("GBP");
+    task["rate_minor"] = json!(9500);
+    std::fs::write(
+        dir.path()
+            .join(format!("data/customers/{cid}/projects/P1/tasks/PREM.json")),
+        serde_json::to_vec(&task).unwrap(),
+    )
+    .unwrap();
 
     let body = json!({
         "date": "2026-10-02", "customer_id": cid, "project_code": "P1",
@@ -1022,8 +1036,59 @@ async fn report_uses_task_rate_override() {
     )
     .await;
     assert_eq!(s, StatusCode::OK);
-    // 2h * 95 + 1h * 60 = 190 + 60 = 250.00 = 25000 minor.
-    assert_eq!(summary["rows"][0]["amount_minor"], 25000);
+    assert_eq!(summary["rows"][0]["amount_minor"], 22500);
+    assert_eq!(summary["rows"][0]["currency"], "USD");
+    let (status, invoice) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({
+            "customer_id": cid, "from": "2026-10-01", "to": "2026-10-07"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice}");
+    assert_eq!(invoice["total_minor"], 22500);
+    assert_eq!(invoice["currency"], "USD");
+    assert!(
+        invoice["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|line| line["rate_minor"] == 7500)
+    );
+}
+
+#[tokio::test]
+async fn tasks_reject_billing_overrides_without_persistence() {
+    let (app, _dir) = app().await;
+    let customer = new_customer(&app, "Task rates", "EUR", 6000).await;
+    let cid = customer["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    let task = new_task(&app, cid, "P1", "T1", json!({"name": "Original"})).await;
+    let base = format!("/customers/{cid}/projects/P1/tasks");
+    for field in ["rate_minor", "currency"] {
+        for method in ["POST", "PUT"] {
+            let mut payload =
+                json!({"code": if method == "POST" { "NEW" } else { "T1" }, "name": "Changed"});
+            payload[field] = if field == "rate_minor" {
+                json!(9500)
+            } else {
+                json!("GBP")
+            };
+            let path = if method == "POST" {
+                base.clone()
+            } else {
+                format!("{base}/T1")
+            };
+            let (status, _) = json_req(&app, method, &path, Some(payload)).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            let (_, saved) = json_req(&app, "GET", &format!("{base}/T1"), None).await;
+            assert_eq!(saved, task);
+            let (missing, _) = json_req(&app, "GET", &format!("{base}/NEW"), None).await;
+            assert_eq!(missing, StatusCode::NOT_FOUND);
+        }
+    }
 }
 
 // ------------------------------------------------------------------- auth --

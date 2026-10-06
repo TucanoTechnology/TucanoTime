@@ -417,6 +417,7 @@
       },
       "Task": {
         "type": "object",
+        "description": "A task under a project. Tasks have no billing overrides; legacy stored currency/rate fields are ignored.",
         "required": [
           "customer_id",
           "project_code",
@@ -440,12 +441,6 @@
             "minLength": 1,
             "maxLength": 120
           },
-          "currency": {
-            "$ref": "#/components/schemas/Currency"
-          },
-          "rate_minor": {
-            "$ref": "#/components/schemas/RateMinor"
-          },
           "active": {
             "type": "boolean"
           }
@@ -454,6 +449,7 @@
       },
       "TaskInput": {
         "type": "object",
+        "description": "Task billing overrides are not supported. currency and rate_minor are rejected as unknown fields.",
         "required": [
           "code"
         ],
@@ -465,12 +461,6 @@
             "type": "string",
             "maxLength": 120,
             "default": ""
-          },
-          "currency": {
-            "$ref": "#/components/schemas/Currency"
-          },
-          "rate_minor": {
-            "$ref": "#/components/schemas/RateMinor"
           },
           "active": {
             "type": "boolean",

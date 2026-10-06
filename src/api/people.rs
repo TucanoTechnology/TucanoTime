@@ -260,8 +260,6 @@ fn build_task(cid: Uuid, pcode: &ProjectCode, draft: &crate::domain::TaskDraft) 
         project_code: pcode.clone(),
         code: ProjectCode(draft.code.clone()),
         name: draft.name.clone(),
-        currency: draft.currency.as_ref().map(|c| Currency(c.clone())),
-        rate_minor: draft.rate_minor,
         active: draft.active,
     }
 }

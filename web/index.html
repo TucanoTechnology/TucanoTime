@@ -315,7 +315,7 @@
       </table></div>
 
       <h2>Tasks for <span id="task-project-label">— select a project —</span></h2>
-      <p id="tasks-empty-state" class="workspace-empty">Select a project to manage its task codes and rates.</p>
+      <p id="tasks-empty-state" class="workspace-empty">Select a project to manage its tasks.</p>
       <dialog id="task-dialog" aria-labelledby="task-dialog-title" aria-describedby="task-dialog-parent">
       <h2 id="task-dialog-title">Add task</h2>
       <p id="task-dialog-parent" class="hint"></p>
@@ -325,8 +325,6 @@
         <div class="field"><label for="task-parent-project">Project</label><select id="task-parent-project" required></select></div>
         <div class="field"><label for="task-code">Task code</label><input id="task-code" maxlength="24" required></div>
         <div class="field"><label for="task-name">Name</label><input id="task-name" maxlength="120"></div>
-        <div class="field"><label for="task-currency">Currency override (optional)</label><input id="task-currency" maxlength="3" placeholder="(project)"></div>
-        <div class="field"><label for="task-rate">Rate override (optional, minor/h)</label><input id="task-rate" type="number" min="0" step="0.01" placeholder="(project default)" inputmode="decimal"></div>
         <div class="field checkbox"><label for="task-active"><input type="checkbox" id="task-active" checked> Active</label></div>
         <p class="form-error" id="task-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="task-save">Add task</button><button type="button" class="secondary" id="task-cancel">Cancel</button></div>
@@ -334,7 +332,7 @@
       </dialog>
       <div class="table-scroll"><table id="task-table" hidden>
         <caption class="sr-only">Tasks for the selected project</caption>
-        <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table></div>
       </section>

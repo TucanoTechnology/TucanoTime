@@ -1694,8 +1694,6 @@ async function refreshTaskTable() {
       el('tr', {}, [
         el('th', { attrs: { scope: 'row' }, text: t.code }),
         el('td', { text: t.name }),
-        el('td', { text: t.currency || 'project' }),
-        el('td', { cls: 'num', text: t.rate_minor != null ? formatMoney(t.rate_minor) : 'project' }),
         el('td', {}, [
           el('span', {
             cls: t.active ? 'badge on' : 'badge',
@@ -1726,8 +1724,6 @@ async function startTaskEdit(t) {
   $('task-original-code').value = t.code;
   $('task-code').value = t.code;
   $('task-name').value = t.name;
-  $('task-currency').value = t.currency || '';
-  $('task-rate').value = t.rate_minor != null ? formatMoney(t.rate_minor) : '';
   $('task-active').checked = t.active;
   $('task-save').textContent = 'Update task';
   $('task-dialog-title').textContent = 'Edit task';
@@ -1759,10 +1755,6 @@ async function saveTask(evt) {
   }
   const code = $('task-code').value.trim().toUpperCase();
   const body = { code, name: $('task-name').value.trim(), active: $('task-active').checked };
-  const currency = $('task-currency').value.trim().toUpperCase();
-  if (currency) body.currency = currency;
-  const rate = $('task-rate').value.trim();
-  if (rate) body.rate_minor = Math.round(Number(rate) * 100);
   const base = `/customers/${cid}/projects/${encodeURIComponent(pcode)}/tasks`;
   try {
     if (original) await api.put(`${base}/${encodeURIComponent(original)}`, body);
