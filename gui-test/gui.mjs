@@ -182,6 +182,38 @@ check('day total reflects 4.25h as H:MM', totals.trim() === '4:15');
 const live = window.document.getElementById('live-region').textContent;
 check('aria-live region announced an add', /added|updated/i.test(live));
 
+// ---- DAY-ENTRY DIALOG (#145) ----
+{
+  const edlg = window.document.getElementById('entry-dialog');
+  const isOpen = () => edlg.open === true || edlg.hasAttribute('open');
+  check('create re-opens the dialog for the next entry (#145)', isOpen());
+  check('dialog kept the day just logged (#145)', window.document.getElementById('entry-date').value === '2026-11-11');
+  edlg.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await tick(150);
+  check('Escape cancels and closes the dialog (#145)', !isOpen());
+  check('cancel announces nothing was saved (#145)',
+    /Entry cancelled . nothing was saved/i.test(window.document.getElementById('live-region').textContent));
+  const before = (await (await fetch(BASE + '/entries?date=2026-11-11', { headers: { Cookie: SESSION_COOKIE } })).json()).entries.length;
+  window.document.getElementById('entry-hours').value = '7';
+  window.document.getElementById('entry-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(200);
+  const after = (await (await fetch(BASE + '/entries?date=2026-11-11', { headers: { Cookie: SESSION_COOKIE } })).json()).entries.length;
+  check('cancelling then not submitting saved nothing (#145)', after === before);
+  // Edit opens the dialog pre-filled with the Update label.
+  const editBtn = [...window.document.querySelectorAll('#day-table tbody button')].find((b) => /edit/i.test(b.textContent));
+  if (editBtn) {
+    editBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(200);
+    check('edit opens the dialog pre-filled (#145)',
+      isOpen() && window.document.getElementById('entry-save').textContent === 'Update entry'
+      && window.document.getElementById('entry-hours').value !== '');
+    window.document.getElementById('entry-cancel').dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(150);
+    check('cancel edit returns to the timesheet (#145)', !isOpen());
+  }
+}
+
+
 // ---- inline <dialog> (#102): delete confirms through it, cancel keeps ----
 const dlgNode = window.document.getElementById('app-dialog');
 const isOpen = () => dlgNode.open === true || dlgNode.hasAttribute('open');

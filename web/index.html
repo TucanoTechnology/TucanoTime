@@ -126,7 +126,9 @@
         <ul id="calendar-list" class="cal-events"></ul>
       </div>
 
-      <div id="entry-wrap" hidden>
+      <!-- #145: the Day entry form is a focused dialog (Harvest-style):
+           Track time / Edit open it over the timesheet, Escape cancels. -->
+      <dialog id="entry-dialog" aria-labelledby="entry-form-title">
       <h2 id="entry-form-title">Add an entry</h2>
       <p class="hint" id="entry-form-date"></p>
       <form id="entry-form" class="card">
@@ -161,7 +163,7 @@
           <button type="button" class="secondary" id="entry-cancel" hidden>Cancel edit</button>
         </div>
       </form>
-      </div>
+      </dialog>
     </section>
 
     <!-- WEEK -->
