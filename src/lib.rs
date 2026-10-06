@@ -162,7 +162,14 @@ pub fn build_router(state: AppState) -> Router {
     // Admin-only: user management and invoicing (#51).
     let admin = Router::new()
         .route("/users", get(api::list_users).post(api::create_user))
-        .route("/users/{id}", axum::routing::delete(api::delete_user))
+        .route(
+            "/users/{id}",
+            axum::routing::put(api::update_user).delete(api::delete_user),
+        )
+        .route(
+            "/users/{id}/password",
+            axum::routing::put(api::change_user_password),
+        )
         .route("/audit", get(api::audit_log))
         // Retainer balances (#144): admin tier like invoices.
         .route(

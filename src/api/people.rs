@@ -19,6 +19,23 @@ pub struct UserInput {
     cost_rate_minor: u64,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserUpdateInput {
+    name: Option<String>,
+    email: Option<String>,
+    role: Option<Role>,
+    active: Option<bool>,
+    default_rate_minor: Option<u64>,
+    cost_rate_minor: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserPasswordInput {
+    password: String,
+}
+
 pub async fn list_users(State(app): State<AppState>) -> ApiResult {
     let users: Vec<PublicUser> = app
         .store
@@ -44,8 +61,15 @@ pub async fn create_user(
             "must be at least 8 characters",
         )]));
     }
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 120 {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "name",
+            "required, at most 120 characters",
+        )]));
+    }
     let user = new_user(
-        input.name.trim(),
+        name,
         &email,
         &input.password,
         NewUser {
@@ -60,6 +84,104 @@ pub async fn create_user(
     Ok((StatusCode::CREATED, Json(PublicUser::from(&user))).into_response())
 }
 
+pub async fn update_user(
+    State(app): State<AppState>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<UserUpdateInput>,
+) -> ApiResult {
+    let mut user = app
+        .store
+        .get_user(id)?
+        .ok_or_else(|| ApiError::not_found("user"))?;
+    if actor.0.id == id
+        && ((input.role.is_some_and(|role| role != Role::Admin)) || input.active == Some(false))
+    {
+        return Err(ApiError::conflict(
+            "you cannot deactivate or demote your own account",
+        ));
+    }
+    if let Some(name) = input.name.as_deref() {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 120 {
+            return Err(ApiError::validation(vec![FieldError::new(
+                "name",
+                "required, at most 120 characters",
+            )]));
+        }
+        user.name = name.to_owned();
+    }
+    if let Some(email) = input.email.as_deref() {
+        let email = normalise_email(email)
+            .ok_or_else(|| ApiError::validation(vec![FieldError::new("email", "invalid email")]))?;
+        if app
+            .store
+            .get_user_by_email(&email)?
+            .is_some_and(|other| other.id != id)
+        {
+            return Err(ApiError::conflict("a user with that email exists"));
+        }
+        user.email = email;
+    }
+    if let Some(role) = input.role {
+        user.role = role;
+    }
+    if let Some(active) = input.active {
+        user.active = active;
+    }
+    if let Some(rate) = input.default_rate_minor {
+        user.default_rate_minor = rate;
+    }
+    if let Some(rate) = input.cost_rate_minor {
+        user.cost_rate_minor = rate;
+    }
+    let active_admins = app
+        .store
+        .list_users()?
+        .into_iter()
+        .filter(|u| {
+            (u.id != id && u.active && u.role == Role::Admin)
+                || (u.id == id && user.active && user.role == Role::Admin)
+        })
+        .count();
+    if active_admins == 0 {
+        return Err(ApiError::conflict(
+            "at least one active administrator is required",
+        ));
+    }
+    if input.role.is_some() || input.active.is_some() {
+        user.session_version += 1;
+    }
+    app.store.put_user(&user)?;
+    app.audit
+        .record("user_updated", &user.email, app.clock.now());
+    Ok(Json(PublicUser::from(&user)).into_response())
+}
+
+pub async fn change_user_password(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<UserPasswordInput>,
+) -> ApiResult {
+    let mut user = app
+        .store
+        .get_user(id)?
+        .ok_or_else(|| ApiError::not_found("user"))?;
+    if !valid_password(&input.password) {
+        return Err(ApiError::validation(vec![FieldError::new(
+            "password",
+            "must be at least 8 characters",
+        )]));
+    }
+    user.password_hash = crate::auth::hash_password(&input.password)
+        .map_err(|_| ApiError::internal("password hashing failed".into()))?;
+    user.session_version += 1;
+    app.store.put_user(&user)?;
+    app.audit
+        .record("user_password_changed", &user.email, app.clock.now());
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 pub async fn delete_user(
     State(app): State<AppState>,
     actor: AuthUser,
@@ -68,7 +190,46 @@ pub async fn delete_user(
     if actor.0.id == id {
         return Err(ApiError::conflict("you cannot delete your own account"));
     }
+    let target = app
+        .store
+        .get_user(id)?
+        .ok_or_else(|| ApiError::not_found("user"))?;
+    if target.role == Role::Admin {
+        let active_admins = app
+            .store
+            .list_users()?
+            .into_iter()
+            .filter(|u| u.active && u.role == Role::Admin && u.id != id)
+            .count();
+        if active_admins == 0 {
+            return Err(ApiError::conflict(
+                "at least one active administrator is required",
+            ));
+        }
+    }
+    if app
+        .store
+        .list_all_entries()?
+        .iter()
+        .any(|entry| entry.user_id == Some(id))
+        || app
+            .store
+            .list_expenses()?
+            .iter()
+            .any(|expense| expense.user_id == Some(id))
+        || app
+            .store
+            .list_submissions()?
+            .iter()
+            .any(|submission| submission.user_id == id)
+    {
+        return Err(ApiError::conflict(
+            "user has recorded history and cannot be deleted; deactivate instead",
+        ));
+    }
     app.store.delete_user(id)?;
+    app.audit
+        .record("user_deleted", &target.email, app.clock.now());
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

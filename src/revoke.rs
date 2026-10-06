@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 struct Revoked {
     jti: String,
     exp: i64,
+    #[serde(default)]
+    user_id: Option<uuid::Uuid>,
 }
 
 pub struct Revocations {
@@ -43,6 +45,23 @@ impl Revocations {
             list.push(Revoked {
                 jti: jti.to_string(),
                 exp,
+                user_id: None,
+            });
+        }
+        write_atomic(&self.path, &serde_json::to_vec(&*list).unwrap_or_default());
+    }
+
+    /// Revoke every current session belonging to a user. This is used after
+    /// password, role or active-state changes, without exposing session tokens.
+    pub fn revoke_user(&self, user_id: uuid::Uuid, now: DateTime<Utc>) {
+        let now_ts = now.timestamp();
+        let mut list = lock(&self.inner);
+        list.retain(|r| r.exp > now_ts);
+        if !list.iter().any(|r| r.user_id == Some(user_id)) {
+            list.push(Revoked {
+                jti: format!("user:{user_id}"),
+                exp: i64::MAX,
+                user_id: Some(user_id),
             });
         }
         write_atomic(&self.path, &serde_json::to_vec(&*list).unwrap_or_default());
@@ -66,6 +85,26 @@ impl Revocations {
         // fall back to the in-memory view if the file read failed entirely
         let list = lock(&self.inner);
         list.iter().any(|r| r.jti == jti && r.exp > now_ts)
+    }
+
+    /// Check a user-scoped revocation marker, used after role, active-state or
+    /// password changes. The marker is persisted with an impossible JTI so it
+    /// cannot collide with a real session token.
+    pub fn is_user_revoked(&self, user_id: uuid::Uuid, now: DateTime<Utc>) -> bool {
+        let now_ts = now.timestamp();
+        let fresh: Vec<Revoked> = fs::read_to_string(&self.path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Vec<Revoked>>(&s).ok())
+            .unwrap_or_default();
+        if fresh
+            .iter()
+            .any(|r| r.user_id == Some(user_id) && r.exp > now_ts)
+        {
+            return true;
+        }
+        let list = lock(&self.inner);
+        list.iter()
+            .any(|r| r.user_id == Some(user_id) && r.exp > now_ts)
     }
 }
 

@@ -211,6 +211,7 @@ mod tests {
             cost_rate_minor: 0,
             password_hash: String::new(),
             created_at: Utc::now(),
+            session_version: 1,
         };
         store.put_user(&admin).unwrap();
         let (cid, project) = proj(Some(1000)); // 10h budget

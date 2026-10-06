@@ -721,12 +721,17 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 {
   window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(350);
-  check('Settings tab bar has Security, Invoice documents, Products & services',
+  check('Settings tab bar includes Users, Security, Invoice documents, and Products & services',
     [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
-    'settings-tab-security,settings-tab-invoice,settings-tab-catalog,settings-tab-expenses');
+    'settings-tab-security,settings-tab-users,settings-tab-invoice,settings-tab-catalog,settings-tab-expenses');
   check('Settings opens on Security & runtime by default',
     window.document.getElementById('settings-tab-security').getAttribute('aria-selected') === 'true'
     && !window.document.getElementById('settings-panel-security').hidden);
+  window.document.getElementById('settings-tab-users').dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('Users tab shows the admin-management table',
+    window.document.getElementById('settings-tab-users').getAttribute('aria-selected') === 'true'
+    && !window.document.getElementById('settings-panel-users').hidden
+    && window.document.querySelector('#user-table tbody tr') !== null);
   window.document.getElementById('settings-tab-catalog').dispatchEvent(new window.Event('click', { bubbles: true }));
   check('Products & services tab shows the catalog only',
     window.document.getElementById('settings-tab-catalog').getAttribute('aria-selected') === 'true'

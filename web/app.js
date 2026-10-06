@@ -3382,7 +3382,126 @@ async function decideSubmission(id, decision) {
 
 // --------------------------------------------------------------- settings --
 
+async function refreshUsers() {
+  const data = await api.get('/users');
+  const users = data.users || [];
+  const tbody = $('user-table').querySelector('tbody');
+  tbody.textContent = '';
+  for (const user of users) {
+    const row = el('tr', {}, [
+      el('th', { attrs: { scope: 'row' }, text: user.name }),
+      el('td', { text: user.email }),
+      el('td', { text: user.role }),
+      el('td', { text: user.active ? 'active' : 'inactive' }),
+      el('td', { text: `${formatMoney(user.default_rate_minor)} / ${formatMoney(user.cost_rate_minor)}` }),
+      el('td', { cls: 'actions-col' }, [
+        el('button', { cls: 'link', type: 'button', text: 'Edit', on: { click: () => editUser(user) } }),
+        el('button', { cls: 'link', type: 'button', text: user.active ? 'Deactivate' : 'Activate', on: { click: () => toggleUserActive(user.id, !user.active) } }),
+        el('button', { cls: 'link', type: 'button', text: 'Change password', on: { click: () => changeUserPassword(user) } }),
+        el('button', { cls: 'link danger', type: 'button', text: 'Delete', on: { click: () => deleteUser(user) } }),
+      ]),
+    ]);
+    tbody.appendChild(row);
+  }
+  $('user-empty').hidden = users.length !== 0;
+}
+
+function editUser(user) {
+  $('user-id').value = user.id;
+  $('user-name').value = user.name;
+  $('user-email').value = user.email;
+  $('user-role').value = user.role;
+  $('user-active').checked = user.active;
+  $('user-default-rate').value = user.default_rate_minor;
+  $('user-cost-rate').value = user.cost_rate_minor;
+  $('user-password').value = '';
+  $('user-password').required = false;
+  $('user-password-label').textContent = 'Leave blank to keep the current password';
+  $('user-save').textContent = 'Save user';
+  $('user-cancel').hidden = false;
+  $('user-error').hidden = true;
+  $('user-name').focus();
+}
+
+function newUserForm() {
+  $('user-form').reset();
+  $('user-id').value = '';
+  $('user-active').checked = true;
+  $('user-password').required = true;
+  $('user-password-label').textContent = 'required for new users';
+  $('user-save').textContent = 'Add user';
+  $('user-cancel').hidden = true;
+  $('user-error').hidden = true;
+}
+
+async function saveUser(evt) {
+  evt.preventDefault();
+  const id = $('user-id').value;
+  const body = {
+    name: $('user-name').value.trim(),
+    email: $('user-email').value.trim(),
+    role: $('user-role').value,
+    active: $('user-active').checked,
+    default_rate_minor: Number($('user-default-rate').value || 0),
+    cost_rate_minor: Number($('user-cost-rate').value || 0),
+  };
+  const password = $('user-password').value;
+  if (!id) {
+    body.password = password;
+    if (!password) {
+      showFormError($('user-error'), new Error('Password is required for a new user.'));
+      return;
+    }
+  }
+  try {
+    if (id) await api.put(`/users/${id}`, body);
+    else await api.post('/users', body);
+    announce(id ? 'User updated.' : 'User added.');
+    newUserForm();
+    await refreshUsers();
+  } catch (err) {
+    showFormError($('user-error'), err);
+  }
+}
+
+async function toggleUserActive(id, active) {
+  try {
+    await api.put(`/users/${id}`, { active });
+    await refreshUsers();
+    announce(active ? 'User activated.' : 'User deactivated.');
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
+async function changeUserPassword(user) {
+  const value = await askPrompt('New password', '');
+  if (value === null) return;
+  if (value.length < 8) {
+    announce('Password must be at least 8 characters.');
+    return;
+  }
+  try {
+    await api.put(`/users/${user.id}/password`, { password: value });
+    announce(`Password changed for ${user.name}; current sessions were revoked.`);
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
+async function deleteUser(user) {
+  if (!await askConfirm(`Delete ${user.name}? This is permanent and cannot be undone.`)) return;
+  try {
+    await api.del(`/users/${user.id}`);
+    await refreshUsers();
+    announce(`${user.name} was deleted.`);
+  } catch (err) {
+    announce(err.message);
+  }
+}
+
 async function refreshSettings() {
+  await refreshUsers();
   try {
     const data = await api.get('/admin/secrets');
     $('vault-status').textContent = 'Credential vault: enabled (encrypted at rest).';
@@ -4172,6 +4291,8 @@ async function startApp() {
   $('expense-category-cancel').addEventListener('click', () => $('expense-category-dialog').close());
   $('expense-form').addEventListener('submit', addExpense);
   $('submission-form').addEventListener('submit', submitWeek);
+  $('user-form').addEventListener('submit', saveUser);
+  $('user-cancel').addEventListener('click', newUserForm);
   $('secret-form').addEventListener('submit', addSecret);
   $('config-form').addEventListener('submit', saveConfig);
   $('timer-open').addEventListener('click', () => {
