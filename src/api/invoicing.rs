@@ -758,12 +758,9 @@ pub async fn payment_webhook(
     } else {
         format!("{}:evt-{}", event.provider, event.event_id)
     };
-    if invoice.payments.iter().any(|p| p.reference == reference) {
-        return Ok(Json(
-            serde_json::json!({ "status": "already_processed", "invoice": invoice.number }),
-        )
-        .into_response());
-    }
+    // #185: the replay/idempotency check no longer runs on this unlocked
+    // snapshot — it happens inside `record_payment_once`'s write lock, so two
+    // concurrent deliveries of the same event cannot both post.
     let balance = invoice.balance_minor();
     if event.amount_minor > balance {
         app.audit.record(
@@ -775,14 +772,18 @@ pub async fn payment_webhook(
             "payment amount exceeds the remaining invoice balance",
         ));
     }
-    match app.store.record_payment(
+    match app.store.record_payment_once(
         invoice.id,
         Some(event.amount_minor),
         reference,
         event.provider.clone(),
         app.clock.now(),
     ) {
-        Ok(settled) => {
+        Ok(None) => Ok(Json(
+            serde_json::json!({ "status": "already_processed", "invoice": invoice.number }),
+        )
+        .into_response()),
+        Ok(Some(settled)) => {
             app.audit
                 .record("payment_received", &settled.number, app.clock.now());
             let status = if settled.status == crate::domain::InvoiceStatus::Paid {

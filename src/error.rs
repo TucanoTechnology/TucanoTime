@@ -55,6 +55,17 @@ impl ApiError {
         Self::new(StatusCode::BAD_REQUEST, "bad_request", message)
     }
 
+    /// The entry-lock state could not be verified (#185). Fail closed: the
+    /// write is refused with a retry hint, never allowed because the check
+    /// was inconclusive.
+    pub fn lock_unavailable() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "lock_unavailable",
+            "could not verify entry lock state; retry shortly",
+        )
+    }
+
     /// A corrupt or unreadable stored document: server-side 500, logged with
     /// detail, generic message out.
     pub fn internal(context: String) -> Self {
@@ -98,8 +109,9 @@ impl IntoResponse for ApiError {
             body["error"]["fields"] = serde_json::to_value(&self.fields).unwrap_or_default();
         }
         let mut resp = (self.status, axum::Json(body)).into_response();
-        // A busy write lock is transient; tell the client when to retry (#62).
-        if self.code == "write_lock_busy"
+        // A busy write lock or an unverifiable lock state is transient; tell
+        // the client when to retry (#62, #185).
+        if matches!(self.code, "write_lock_busy" | "lock_unavailable")
             && let Ok(v) = "1".parse()
         {
             resp.headers_mut()
