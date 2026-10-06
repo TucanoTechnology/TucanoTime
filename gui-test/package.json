@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node gui.mjs"
+    "test": "node gui.mjs",
+    "test:contrast": "node contrast.mjs"
   },
   "dependencies": {
     "jsdom": "^26"
