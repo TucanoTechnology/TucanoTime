@@ -1170,6 +1170,10 @@ pub struct InvoiceSources<'a> {
     /// Expense ids already on an issued invoice (excluded).
     pub excluded_expenses: &'a [Uuid],
     pub include_expenses: bool,
+    /// #134: when true the `projects` list is the billable SCOPE — entries
+    /// whose project is absent were deliberately deselected by the staged
+    /// wizard and must not bill via the customer-rate fallback.
+    pub restrict_projects: bool,
 }
 
 /// Build a draft invoice from the billable entries (and, if enabled, billable
@@ -1194,6 +1198,7 @@ pub fn generate_invoice(
         excluded_entries,
         excluded_expenses,
         include_expenses,
+        restrict_projects,
     } = src;
     // Review D4: index the lookups done per entry — linear finds made large
     // billing runs O(entries × records).
@@ -1236,6 +1241,9 @@ pub fn generate_invoice(
             continue; // already billed on an issued invoice
         }
         let project = project_by_code.get(e.project_code.0.as_str()).copied();
+        if *restrict_projects && project.is_none() {
+            continue; // deselected project (#134)
+        }
         let task = e.task_code.as_ref().and_then(|tc| {
             task_by_key
                 .get(&(e.project_code.0.as_str(), tc.0.as_str()))
@@ -1266,6 +1274,13 @@ pub fn generate_invoice(
             }
             if excluded_expense.contains(&x.id) {
                 continue;
+            }
+            if *restrict_projects
+                && x.project_code
+                    .as_ref()
+                    .is_none_or(|pc| !project_by_code.contains_key(pc.0.as_str()))
+            {
+                continue; // deselected project (#134)
             }
             set_currency(&x.currency)?;
             lines.push(InvoiceLine {
