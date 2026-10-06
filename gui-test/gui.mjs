@@ -79,7 +79,7 @@ window.document.getElementById('wz-later').dispatchEvent(new window.Event('click
 check('"Set up later" dismisses the wizard cleanly', !wzOpen());
 // The sidebar icon sits directly under "Customers & projects" and reopens it.
 const wzOrder = [...window.document.querySelectorAll('#tabs button')].map((b) => b.id);
-check('wizard entry is directly under Customers & projects', wzOrder.indexOf('wizard-open') === wzOrder.indexOf('tab-customers') + 1);
+check('wizard entry is the last item in the sidebar (#125)', wzOrder[wzOrder.length - 1] === 'wizard-open');
 window.document.getElementById('wizard-open').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('the icon reopens the wizard fresh', wzOpen() && !window.document.getElementById('wz-step-0').hidden);
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));

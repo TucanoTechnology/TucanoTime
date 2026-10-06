@@ -291,8 +291,10 @@ td.cell.locked .cell-input { opacity: .6; }
 #wizard-dialog .field { margin: 0 0 .7rem; }
 #wizard-dialog .wz-step p:first-child { margin-top: 0; }
 #wz-status { min-height: 1.2em; margin: .2rem 0 .4rem; }
+.tab-sep { height: 1px; background: var(--line); margin: .45rem .5rem .35rem; }
 /* The wizard entry sits among the tabs but is an action, not a tab (#111):
-   same chrome as .tabs [role="tab"], minus the selected state. */
+   same chrome as .tabs [role="tab"], minus the selected state; #125 pins it
+   to the bottom of the rail behind a separator. */
 #tabs #wizard-open {
   font: inherit; text-align: left; cursor: pointer; width: 100%;
   padding: .55rem .7rem; border: none; border-left: 3px solid transparent;
