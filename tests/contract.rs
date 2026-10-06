@@ -2502,7 +2502,7 @@ async fn invoice_report_and_export() {
     .await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(rep["issued"], 1);
-    assert_eq!(rep["total_revenue_minor"], 18000); // 3h * 60
+    assert_eq!(rep["revenue_by_currency"]["EUR"], 18000); // 3h * 60
     let row = &rep["rows"][0];
     assert_eq!(row["label"], "ACME");
     assert_eq!(row["revenue_minor"], 18000);
@@ -2512,6 +2512,115 @@ async fn invoice_report_and_export() {
     let text = csv.as_str().unwrap();
     assert!(text.starts_with("number,customer,"), "csv header: {text}");
     assert!(text.contains("INV-0001") && text.contains("ACME"));
+}
+
+#[tokio::test]
+async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
+    // #186: a customer may hold projects in different currencies (#11), so
+    // every grouping level must produce per-currency rows — previously the
+    // EUR and USD cents were added into a single number.
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P-EUR", json!({"rate_minor": 6000})).await;
+    new_project(
+        &app,
+        &cid,
+        "P-USD",
+        json!({"rate_minor": 5000, "currency": "USD"}),
+    )
+    .await;
+    for (proj, hours) in [("P-EUR", 2), ("P-USD", 3)] {
+        let (s, e) = json_req(
+            &app,
+            "POST",
+            "/entries",
+            Some(entry_body(&cid, proj, json!(hours), "2026-10-02")),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "{e}");
+    }
+
+    for group in ["customer", "project", "person", "week"] {
+        let (s, rep) = json_req(
+            &app,
+            "GET",
+            &format!("/reports/summary?from=2026-10-01&to=2026-10-07&group={group}"),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        let rows = rep["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "{group}: one row per currency, got {rows:?}");
+        let eur = rows
+            .iter()
+            .find(|r| r["currency"] == "EUR")
+            .expect("EUR row");
+        let usd = rows
+            .iter()
+            .find(|r| r["currency"] == "USD")
+            .expect("USD row");
+        assert_eq!(eur["amount_minor"], 12000, "{group}"); // 2h * 60.00
+        assert_eq!(usd["amount_minor"], 15000, "{group}"); // 3h * 50.00
+        // Week rows no longer smuggle the currency into the key.
+        assert!(
+            !rows
+                .iter()
+                .any(|r| r["key"].as_str().unwrap().contains('|')),
+            "{group}: keys are labels, currency rides its own field"
+        );
+    }
+
+    // Invoice report + profitability partition the same way.
+    for (proj, amount) in [("P-EUR", 12000u64), ("P-USD", 15000)] {
+        let (_, inv) = json_req(
+            &app,
+            "POST",
+            "/invoices",
+            Some(json!({
+                "customer_id": cid,
+                "from": "2026-10-01",
+                "to": "2026-10-07",
+                "project_codes": [proj],
+                "include_expenses": false,
+            })),
+        )
+        .await;
+        assert_eq!(inv["total_minor"], amount);
+        json_req(
+            &app,
+            "POST",
+            &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+    }
+    let (_s, rep) = json_req(
+        &app,
+        "GET",
+        "/invoices/report?from=2026-10-01&to=2026-10-31",
+        None,
+    )
+    .await;
+    let rows = rep["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "one row per (customer, currency): {rows:?}");
+    assert_eq!(rep["revenue_by_currency"]["EUR"], 12000);
+    assert_eq!(rep["revenue_by_currency"]["USD"], 15000);
+
+    let (_s, prof) = json_req(
+        &app,
+        "GET",
+        "/reports/profitability?from=2026-10-01&to=2026-10-31",
+        None,
+    )
+    .await;
+    let rows = prof["rows"].as_array().unwrap();
+    let acme: Vec<&Value> = rows.iter().filter(|r| r["label"] == "ACME").collect();
+    assert_eq!(acme.len(), 2, "profitability splits by currency: {rows:?}");
+    let eur = acme.iter().find(|r| r["currency"] == "EUR").unwrap();
+    let usd = acme.iter().find(|r| r["currency"] == "USD").unwrap();
+    assert_eq!(eur["revenue_minor"], 12000);
+    assert_eq!(usd["revenue_minor"], 15000);
 }
 
 #[tokio::test]

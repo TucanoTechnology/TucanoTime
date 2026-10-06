@@ -169,13 +169,12 @@ impl XeroProvider {
     }
 }
 
-/// QBO money is a plain decimal string.
+/// QBO money is a plain decimal string — the exact encoding for BOTH invoice
+/// totals and payments (#186: `doc_amount` used to send `TotalAmt` as a JSON
+/// float while payments sent a string, so the two could not both be right).
+/// Two-decimal minor-unit math, no accumulated float error at real sizes.
 fn qbo_amount(minor: u64) -> String {
     format!("{:.2}", minor as f64 / 100.0)
-}
-
-fn doc_amount(inv: &Invoice) -> f64 {
-    inv.total_minor as f64 / 100.0
 }
 
 impl AccountingSync for QboProvider {
@@ -190,10 +189,10 @@ impl AccountingSync for QboProvider {
                 "DocNumber": doc.invoice.number,
                 "CustomerRef": { "name": doc.customer.name },
                 "CurrencyRef": { "value": doc.invoice.currency.0 },
-                "TotalAmt": doc_amount(doc.invoice),
+                "TotalAmt": qbo_amount(doc.invoice.total_minor),
             },
             "Line": doc.invoice.lines.iter().map(|l| serde_json::json!({
-                "Amount": l.amount_minor as f64 / 100.0,
+                "Amount": qbo_amount(l.amount_minor),
                 "Description": if l.note.is_empty() { l.project_code.as_ref().map(|c| c.0.clone()).unwrap_or_default() } else { l.note.clone() },
             })).collect::<Vec<_>>(),
             "synchronized_id": suggested_id,
@@ -234,7 +233,7 @@ impl AccountingSync for XeroProvider {
                 "Date": doc.invoice.period_to.format("%Y-%m-%d").to_string(),
                 "DueDate": doc.invoice.due_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default(),
                 "CurrencyCode": doc.invoice.currency.0,
-                "Total": doc_amount(doc.invoice),
+                "Total": doc.invoice.total_minor as f64 / 100.0,
                 "LineItems": doc.invoice.lines.iter().map(|l| serde_json::json!({
                     "Description": if l.note.is_empty() { "Services".to_string() } else { l.note.clone() },
                     "LineAmount": l.amount_minor as f64 / 100.0,
@@ -641,7 +640,11 @@ mod tests {
         let posts = t.posts.lock().unwrap();
         let body = &posts[0].1;
         assert_eq!(body["IdDoc"]["DocNumber"], "INV-0042");
-        assert_eq!(body["IdDoc"]["TotalAmt"], 180.0);
+        // #186: invoice and payment totals use the identical exact decimal
+        // string encoding (this used to be a JSON float on one, a string on
+        // the other).
+        assert_eq!(body["IdDoc"]["TotalAmt"], "180.00");
+        assert_eq!(body["Line"][0]["Amount"], "180.00");
         assert_eq!(body["synchronized_id"], "qbo:INV-0042");
         drop(posts);
         let paid_at = Utc.timestamp_opt(1, 0).unwrap();
