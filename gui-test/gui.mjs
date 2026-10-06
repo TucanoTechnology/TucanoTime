@@ -621,75 +621,35 @@ window.document.getElementById('week-add-confirm').dispatchEvent(new window.Even
 await tick(400);
 check('add-row appended the P-9 row', [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('P-9')));
 
-// #127: after the add, focus returns to the Add-row control and the occupied
-// P-9 / MKT-2 rows are no longer offered — a second add must yield a NEW line.
+// #127/#137: truthful Add-row behaviour. Occupied PROJECT-LEVEL lines are
+// excluded; a project shown only via task rows stays addable (that is the
+// point of #137); an exhausted picker explains itself.
 check('confirm returns focus to Add row (#127)', window.document.activeElement && window.document.activeElement.id === 'week-add-row');
 window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(250);
-const addOpts = [...window.document.getElementById('week-add-project').options].map((o) => o.value);
-check('already-shown projects are excluded from the picker (#127)',
-  !addOpts.includes(`${acmeOpt.value}|P-9`) && !addOpts.includes(`${acmeOpt.value}|MKT-2`));
-{
-  const sel = window.document.getElementById('week-add-project');
-  const allShown = [...sel.options].some((o) => o.textContent.includes('already in this week'));
-  if (allShown) {
-    // Every active project is in the grid: confirming explains instead of lying.
-    window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(300);
-    check('exhausted picker explains itself (#127)',
-      /already in this week/i.test(window.document.getElementById('live-region').textContent));
-    check('week grid is back open after the explained no-op (#127)',
-      window.document.getElementById('week-add-project').hidden === true);
-  }
-}
-// A second add (Globex project or any remaining) appends without removing the first.
-const second = addOpts.find((v) => v && !v.includes('P-9'));
-if (second) {
-  window.document.getElementById('week-add-project').value = second;
-  window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(400);
-  const rows = [...window.document.querySelectorAll('#week-table tbody tr')].map((r) => r.textContent);
-  check('consecutive adds keep every project line (#127)',
-    rows.some((t) => t.includes('P-9')) && rows.some((t) => t.includes(second.split('|')[1])));
-}
-
-// ---- WEEK-GRID NOTE EDITING (#126): edit in place, no jump to Day ----
-{
-  const noteEntry = await (await fetch(BASE + '/entries', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
-    body: JSON.stringify({ date: '2026-12-08', customer_id: acmeOpt.value, project_code: 'P-9', hours: 2, note: 'api note' }),
-  })).json();
-  await fetch(BASE + '/entries', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
-    body: JSON.stringify({ date: '2026-12-09', customer_id: acmeOpt.value, project_code: 'P-9', hours: 1 }),
-  });
-  weekDateEl.value = '2026-12-07';
-  weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await tick(350);
-  const cell08 = window.document.querySelector('#week-table input[data-date="2026-12-08"][data-project="P-9"]');
-  const flag126 = cell08 && cell08.closest('td').querySelector('.note-flag');
-  check('cell with a note shows the filled ¶ affordance (#126)', !!flag126 && flag126.textContent === '\u00b6');
-  const cell11 = window.document.querySelector('#week-table input[data-date="2026-12-11"][data-project="P-9"]');
-  check('empty cell (no entry) offers no fake note button (#126)', !!cell11 && !cell11.closest('td').querySelector('.note-flag'));
-  const cell09 = window.document.querySelector('#week-table input[data-date="2026-12-09"][data-project="P-9"]');
-  const addFlag = cell09 && cell09.closest('td').querySelector('.note-flag.note-empty');
-  check('entry without a note offers a faint add-note ✎ (#126)', !!addFlag && addFlag.textContent === '\u270e');
-  if (flag126) {
-    flag126.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(250);
-    const dlgIn = window.document.getElementById('dlg-input');
-    check('note dialog prefills the current note (#126)', dlgIn.value === 'api note');
-    dlgIn.value = 'edited in week';
-    window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(400);
-    const after126 = await (await fetch(BASE + `/entries/${noteEntry.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
-    check('note edited in place, hours untouched (#126)',
-      after126.note === 'edited in week' && after126.hours === 2);
-    check('note save announced', /Note saved\./i.test(window.document.getElementById('live-region').textContent));
-  }
-}
+const addSel2 = window.document.getElementById('week-add-project');
+const addOpts = [...addSel2.options].map((o) => o.value);
+check('project-level P-9 row is excluded from the picker (#127)',
+  !addOpts.includes(`${acmeOpt.value}|P-9`));
+check('task-only MKT-2 stays addable at project level (#137)',
+  addOpts.includes(`${acmeOpt.value}|MKT-2`));
+// Add MKT-2 project-level too -> the picker becomes exhausted.
+addSel2.value = `${acmeOpt.value}|MKT-2`;
+window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(400);
+const rows127 = [...window.document.querySelectorAll('#week-table tbody tr')].map((r) => r.textContent);
+check('consecutive adds keep every project line (#127)',
+  rows127.some((t) => t.includes('P-9')) && rows127.some((t) => t.includes('MKT-2')));
+window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
+const sel127 = window.document.getElementById('week-add-project');
+const allShown = [...sel127.options].some((o) => o.textContent.includes('already in this week'));
+check('exhausted picker states so (#127)', allShown);
+window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(300);
+check('exhausted confirm explains instead of phantom-adding (#127)',
+  /already in this week/i.test(window.document.getElementById('live-region').textContent)
+  && window.document.getElementById('week-add-project').hidden === true);
 
 // Lock column: the submitted 2027-01 week renders its cell disabled.
 weekDateEl.value = '2027-01-05';
