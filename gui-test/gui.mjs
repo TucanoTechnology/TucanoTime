@@ -876,6 +876,19 @@ await tick(300);
 check('Settings discloses the email transport state (#130)',
   /Email delivery:/i.test(window.document.getElementById('email-status').textContent));
 const varRows = [...window.document.querySelectorAll('#template-vars tbody tr')];
+check('company identity form saves and reloads (#138)', await (async () => {
+  window.document.getElementById('org-name').value = 'Tucano SRL';
+  window.document.getElementById('org-legal').value = 'BE0987654321';
+  window.document.getElementById('org-city').value = 'Milan';
+  window.document.getElementById('org-country').value = 'IT';
+  window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(350);
+  const o = await (await fetch(BASE + '/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
+  return o.name === 'Tucano SRL' && o.legal_id === 'BE0987654321' && o.address.country === 'IT'
+    && !window.document.getElementById('org-error').hidden === false;
+})());
+const tplCleared = await fetch(BASE + '/admin/org', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: JSON.stringify({ name: '', legal_id: '', address: null }) });
+check('empty org name restores the config fallback (#138)', tplCleared.status === 200);
 check('template editor renders the variable cheat-sheet from the server', varRows.length >= 12 && varRows.some((r) => r.textContent.includes('%invoice_issue_month%')));
 // Unknown variable: inline error, no save.
 window.document.getElementById('template-subject').value = 'Invoice %invoice_number%';

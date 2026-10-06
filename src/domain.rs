@@ -354,6 +354,24 @@ impl PaymentTerms {
     }
 }
 
+/// Organization legal identity for invoice documents and emails (#138),
+/// stored as the singleton `org_profile.json`. `name` empty means "fall back
+/// to the boot-time `org_name` config key" — a documented resolution order
+/// (org_profile > config org_name > built-in default), never parallel truth:
+/// every reader goes through `api::invoicing::org_for`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrgProfile {
+    /// Display name on documents (falls back to config `org_name`).
+    #[serde(default)]
+    pub name: String,
+    /// VAT / tax / company registration identifier printed on documents.
+    #[serde(default)]
+    pub legal_id: String,
+    #[serde(default)]
+    pub address: Option<Address>,
+}
+
 /// The org-wide invoice document template (#116), stored as the singleton
 /// `invoice_template.json` next to `scheduler.json`. Every field is optional:
 /// an unset template keeps the hard-coded legacy behaviour byte-for-byte.

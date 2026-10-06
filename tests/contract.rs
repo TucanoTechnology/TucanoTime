@@ -4672,3 +4672,82 @@ async fn legacy_customer_keeps_working_and_new_fields_are_omitted_when_empty() {
     .await;
     assert_eq!(got["name"], "OLDSTYLE");
 }
+
+// ------------------------------------------------------------------ #138 ---
+
+#[tokio::test]
+async fn org_profile_round_trips_and_prints_on_the_document() {
+    let (app, _d) = app().await;
+    // Default read: everything empty.
+    let (_s0, empty) = json_req(&app, "GET", "/admin/org", None).await;
+    assert_eq!(empty["name"], "");
+    assert!(empty.get("address").is_none() || empty["address"].is_null());
+
+    // Validation before persistence.
+    let (sb, bb) = json_req(
+        &app,
+        "PUT",
+        "/admin/org",
+        Some(json!({"name":"X","legal_id":"","address":{"street":"a","country":""}})),
+    )
+    .await;
+    assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY, "{bb}");
+    let (_sv, before) = json_req(&app, "GET", "/admin/org", None).await;
+    assert_eq!(before["name"], "", "rejection persisted nothing");
+
+    // Valid save round-trips.
+    let (sp, saved) = json_req(
+        &app,
+        "PUT",
+        "/admin/org",
+        Some(json!({"name":"Tucano BV","legal_id":"BE0123456789",
+          "address":{"street":"Markt 1","city":"Brugge","postal_code":"8000","country":"BE"}})),
+    )
+    .await;
+    assert_eq!(sp, StatusCode::OK, "{saved}");
+    assert_eq!(saved["name"], "Tucano BV");
+
+    // The identity prints on the issued document (uncompressed streams, so
+    // the bytes are greppable — the determinism contract of #113 in use).
+    let (issued, iid) = seed_issued_invoice(&app).await;
+    let (_s2, _h2, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let text = String::from_utf8_lossy(&pdf).into_owned();
+    // The layout emits one text-showing op per WORD (positions carry the
+    // spacing), so decode the literals back into running text.
+    let joined: String = text
+        .split('(')
+        .skip(1)
+        .map(|s| s.split(')').next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(joined.contains("BE0123456789"), "legal id on the PDF");
+    assert!(
+        joined.contains("Tucano BV"),
+        "profile name replaces the config default"
+    );
+    assert!(joined.contains("Brugge"), "address on the PDF");
+    assert_eq!(issued["status"], "issued");
+
+    // Member: admin tier on both verbs.
+    json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(
+            json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
+        ),
+    )
+    .await;
+    let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
+    let (sm, _, _) = raw(&app.router, "GET", "/admin/org", None, Some(&cookie)).await;
+    assert_eq!(sm, StatusCode::FORBIDDEN);
+    let (spm, _, _) = raw(
+        &app.router,
+        "PUT",
+        "/admin/org",
+        Some(json!({"name":"Evil"})),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(spm, StatusCode::FORBIDDEN);
+}

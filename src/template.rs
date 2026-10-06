@@ -689,13 +689,7 @@ mod tests {
         };
         let template = InvoiceTemplate::default();
         let inv = sample_invoice();
-        let mut doc = crate::pdf::doc_for(
-            &inv,
-            &customer,
-            &crate::pdf::Org {
-                name: "Tucano".into(),
-            },
-        );
+        let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tucano"));
         let before = doc.clone();
         let content = doc_content(&template, &customer, &vars_for(&inv, &customer.name, None));
         apply_doc_content(&mut doc, &content);
@@ -728,13 +722,7 @@ mod tests {
             ..Default::default()
         };
         let inv = sample_invoice();
-        let mut doc = crate::pdf::doc_for(
-            &inv,
-            &customer,
-            &crate::pdf::Org {
-                name: "Tucano".into(),
-            },
-        );
+        let mut doc = crate::pdf::doc_for(&inv, &customer, &crate::pdf::Org::named("Tucano"));
         let content = doc_content(
             &template,
             &customer,

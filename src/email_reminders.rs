@@ -126,7 +126,24 @@ impl EmailReminderJob {
                     .ok()
                     .flatten()
                     .unwrap_or_default();
-                let mut doc = crate::pdf::doc_for(inv, customer, &self.org);
+                // Same identity resolution as the API (#138): org_profile
+                // wins over the boot-time config name.
+                let profile = self
+                    .store
+                    .read_json_rel::<crate::domain::OrgProfile>("org_profile.json")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let org = crate::pdf::Org {
+                    name: if profile.name.trim().is_empty() {
+                        self.org.name.clone()
+                    } else {
+                        profile.name.trim().to_string()
+                    },
+                    legal_id: profile.legal_id.clone(),
+                    address: profile.address.clone(),
+                };
+                let mut doc = crate::pdf::doc_for(inv, customer, &org);
                 let vars = crate::template::vars_for(
                     inv,
                     &customer.name,

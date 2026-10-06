@@ -33,10 +33,25 @@ use crate::domain::{Currency, Customer, Invoice, InvoiceLine, LineKind};
 // =============================================================== doc model ==
 
 /// The issuing organisation. `doc_for` is the only place that reads it, and
-/// the API layer resolves it from `config.json` (`org_name`, #94).
+/// the API layer resolves it from `org_profile.json` (#138) with the
+/// `org_name` config key (#94) as the name fallback.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Org {
     pub name: String,
+    /// VAT / company id printed under the From block (#138).
+    pub legal_id: String,
+    pub address: Option<crate::domain::Address>,
+}
+
+impl Org {
+    /// Identity-only org (tests, config fallback): no legal id or address.
+    pub fn named(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            legal_id: String::new(),
+            address: None,
+        }
+    }
 }
 
 /// Inline text with style flags. #116's markdown `**`/`*` map 1:1 onto these
@@ -159,6 +174,24 @@ pub fn doc_for(invoice: &Invoice, customer: &Customer, org: &Org) -> Doc {
     ];
     if let Some(due) = invoice.due_date {
         header.push(kv("Due date", due.to_string()));
+    }
+    // #138 company identity printed on the document header.
+    if let Some(a) = &org.address {
+        let lines: Vec<&str> = [
+            a.street.trim(),
+            a.postal_code.trim(),
+            a.city.trim(),
+            a.country.trim(),
+        ]
+        .into_iter()
+        .filter(|v| !v.is_empty())
+        .collect();
+        if !lines.is_empty() {
+            header.push(kv("From address", lines.join(", ")));
+        }
+    }
+    if !org.legal_id.trim().is_empty() {
+        header.push(kv("VAT / company id", org.legal_id.trim().to_string()));
     }
     let lines = invoice.lines.iter().map(|l| line_row(l, &money)).collect();
     let totals = vec![Block::KeyVal {
@@ -1054,9 +1087,7 @@ mod tests {
     }
 
     fn org() -> Org {
-        Org {
-            name: "Tucano".into(),
-        }
+        Org::named("Tucano")
     }
 
     #[test]

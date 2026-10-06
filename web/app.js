@@ -2425,6 +2425,7 @@ async function refreshSettings() {
     }
   }
   await refreshConfig();
+  await refreshOrgProfile();
   await refreshInvoiceTemplate();
 }
 
@@ -2513,6 +2514,42 @@ async function saveConfig(evt) {
 // ------------------------------------------------- invoice template (#116) --
 
 let templateVarsLoaded = false;
+
+// ------------------------------------------------- company identity (#138) --
+async function refreshOrgProfile() {
+  try {
+    const o = await api.get('/admin/org');
+    $('org-name').value = o.name || '';
+    $('org-legal').value = o.legal_id || '';
+    const a = o.address || {};
+    $('org-street').value = a.street || '';
+    $('org-city').value = a.city || '';
+    $('org-postal').value = a.postal_code || '';
+    $('org-country').value = a.country || '';
+  } catch { /* members cannot manage the org profile */ }
+}
+
+async function saveOrgProfile(evt) {
+  evt.preventDefault();
+  clearFormError($('org-error'));
+  const street = $('org-street').value.trim();
+  const city = $('org-city').value.trim();
+  const postal = $('org-postal').value.trim();
+  const country = $('org-country').value.trim();
+  try {
+    await api.put('/admin/org', {
+      name: $('org-name').value.trim(),
+      legal_id: $('org-legal').value.trim(),
+      address: street || city || postal || country
+        ? { street, city, postal_code: postal, country }
+        : null,
+    });
+    announce('Company information saved.');
+    await refreshOrgProfile();
+  } catch (err) {
+    showFormError($('org-error'), err);
+  }
+}
 
 async function refreshInvoiceTemplate() {
   try {
@@ -2965,6 +3002,7 @@ async function startApp() {
   $('invoice-preview').addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeInvoicePreview();
   });
+  $('org-form').addEventListener('submit', saveOrgProfile);
   $('rec-form').addEventListener('submit', addRecurring);
   $('contact-add').addEventListener('click', () => {
     if ($('contact-rows').children.length >= 10) {
