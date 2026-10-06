@@ -1102,6 +1102,8 @@ pub async fn invoice_template_put(
             payments: vec![],
             write_off_reason: String::new(),
             written_off_at: None,
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         };
         let vars = crate::template::vars_for(&sample, "Sample Customer", None);
         // interpolate/parse cannot fail by design; the call is the assertion
@@ -1150,4 +1152,228 @@ pub async fn invoice_document(State(app): State<AppState>, Path(id): Path<Uuid>)
         .unwrap_or_default();
     let html = crate::template::email_html(&content).unwrap_or_default();
     Ok(Json(serde_json::json!({ "subject": subject, "html": html })).into_response())
+}
+
+// ------------------------------------------------- manual lines & edit ----
+
+/// Body for `POST /invoices/manual` (#143).
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManualInvoiceInput {
+    pub customer_id: Uuid,
+    /// Absent = the customer's currency.
+    #[serde(default)]
+    pub currency: Option<Currency>,
+    #[serde(default)]
+    pub tax_hundredths: u16,
+    #[serde(default)]
+    pub discount_hundredths: u16,
+    pub lines: Vec<crate::domain::ManualLineInput>,
+}
+
+/// Body for `PUT /invoices/{id}` (#143): draft-only full replacement of the
+/// line set + percentages. Tracked lines must come back exactly as stored
+/// (identity and amounts are enforced server-side); manual lines are free.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvoiceEditInput {
+    pub lines: Vec<crate::domain::InvoiceLine>,
+    #[serde(default)]
+    pub tax_hundredths: u16,
+    #[serde(default)]
+    pub discount_hundredths: u16,
+}
+
+fn percent_field(value: u16, field: &str, errors: &mut Vec<FieldError>) {
+    if value > 10_000 {
+        errors.push(FieldError::new(field, "at most 100.00 percent"));
+    }
+}
+
+/// Create a draft invoice from manual Product/Service lines (#143). Money is
+/// computed server-side with integer math; the draft locks nothing (#8).
+pub async fn create_manual_invoice(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<ManualInvoiceInput>,
+) -> ApiResult {
+    let customer = get_customer(&app.store, input.customer_id)?;
+    let mut errors = Vec::new();
+    if input.lines.is_empty() {
+        errors.push(FieldError::new("lines", "at least one line is required"));
+    }
+    percent_field(input.tax_hundredths, "tax_hundredths", &mut errors);
+    percent_field(
+        input.discount_hundredths,
+        "discount_hundredths",
+        &mut errors,
+    );
+    let lines = crate::domain::validate_manual_lines(&input.lines, &mut errors);
+    validate_line_projects(&app, &customer.id, &lines, &mut errors);
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    let subtotal = lines.iter().map(|l| l.amount_minor).sum();
+    let totals =
+        crate::domain::invoice_totals(subtotal, input.tax_hundredths, input.discount_hundredths);
+    let today = app.clock.today();
+    let draft = Invoice {
+        id: Uuid::new_v4(),
+        number: String::new(),
+        customer_id: customer.id,
+        currency: input
+            .currency
+            .clone()
+            .unwrap_or_else(|| customer.currency.clone()),
+        period_from: today,
+        period_to: today,
+        lines,
+        total_minor: totals.total_minor,
+        status: crate::domain::InvoiceStatus::Draft,
+        created_at: app.clock.now(),
+        issued_at: None,
+        due_date: None,
+        paid_at: None,
+        payment_reference: String::new(),
+        pdf: None,
+        payments: vec![],
+        write_off_reason: String::new(),
+        written_off_at: None,
+        tax_hundredths: input.tax_hundredths,
+        discount_hundredths: input.discount_hundredths,
+    };
+    let created = app.store.create_invoice(draft)?;
+    Ok((StatusCode::CREATED, Json(created)).into_response())
+}
+
+fn validate_line_projects(
+    app: &AppState,
+    customer_id: &Uuid,
+    lines: &[crate::domain::InvoiceLine],
+    errors: &mut Vec<FieldError>,
+) {
+    for (i, l) in lines.iter().enumerate() {
+        if let Some(code) = &l.project_code
+            && !app
+                .store
+                .list_projects(*customer_id)
+                .map(|ps| ps.iter().any(|p| &p.code == code))
+                .unwrap_or(false)
+        {
+            errors.push(FieldError::new(
+                format!("lines[{i}].project_code"),
+                "unknown project for this customer",
+            ));
+        }
+    }
+}
+
+/// Edit a draft invoice (#143): replace the line set and percentages under a
+/// Draft-only guard. Tracked lines must be preserved verbatim; manual lines
+/// are re-priced from their integer quantity x unit price. 409 for anything
+/// that is not a draft; validation failures persist nothing.
+pub async fn update_invoice_draft(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+    ValidJson(edit): ValidJson<InvoiceEditInput>,
+) -> ApiResult {
+    let invoice = get_invoice_or_404(&app, id)?;
+    if invoice.status != crate::domain::InvoiceStatus::Draft {
+        return Err(ApiError::conflict("only a draft invoice can be edited"));
+    }
+    let mut errors = Vec::new();
+    if edit.lines.is_empty() {
+        errors.push(FieldError::new("lines", "at least one line is required"));
+    }
+    if edit.lines.len() > crate::domain::MANUAL_LINE_MAX {
+        errors.push(FieldError::new(
+            "lines",
+            format!("at most {} lines", crate::domain::MANUAL_LINE_MAX),
+        ));
+    }
+    percent_field(edit.tax_hundredths, "tax_hundredths", &mut errors);
+    percent_field(edit.discount_hundredths, "discount_hundredths", &mut errors);
+    let stored_tracked: Vec<&crate::domain::InvoiceLine> = invoice
+        .lines
+        .iter()
+        .filter(|l| l.entry_id.is_some() || l.expense_id.is_some())
+        .collect();
+    let mut out_lines: Vec<crate::domain::InvoiceLine> = Vec::new();
+    for (i, l) in edit.lines.iter().enumerate() {
+        let is_tracked = l.entry_id.is_some() || l.expense_id.is_some();
+        if is_tracked {
+            // Tracked lines survive exactly as snapshotted (the rate-snapshot
+            // guarantee of #8): identity + numbers must match the stored one.
+            let Some(orig) = stored_tracked
+                .iter()
+                .find(|o| o.entry_id == l.entry_id && o.expense_id == l.expense_id)
+            else {
+                errors.push(FieldError::new(
+                    format!("lines[{i}]"),
+                    "tracked lines must come from this draft",
+                ));
+                continue;
+            };
+            if l != *orig {
+                errors.push(FieldError::new(
+                    format!("lines[{i}]"),
+                    "tracked lines are immutable (rate snapshot #8)",
+                ));
+                continue;
+            }
+            out_lines.push((*orig).clone());
+        } else {
+            // Manual line: validated + re-priced server-side.
+            let qty = l.quantity_hundredths.unwrap_or(0);
+            let price = l.unit_price_minor.unwrap_or(0);
+            if l.kind != crate::domain::LineKind::Fixed || l.item_kind.is_none() {
+                errors.push(FieldError::new(
+                    format!("lines[{i}].kind"),
+                    "manual lines are Fixed with an item kind",
+                ));
+                continue;
+            }
+            if qty == 0 || qty > 1_000_000 {
+                errors.push(FieldError::new(
+                    format!("lines[{i}].quantity_hundredths"),
+                    "must be between 0.01 and 10000.00 units",
+                ));
+                continue;
+            }
+            if price > 100_000_000 {
+                errors.push(FieldError::new(
+                    format!("lines[{i}].unit_price_minor"),
+                    "at most 100000000",
+                ));
+                continue;
+            }
+            if l.note.trim().is_empty() || l.note.chars().count() > 500 {
+                errors.push(FieldError::new(
+                    format!("lines[{i}].note"),
+                    "required, at most 500 characters",
+                ));
+                continue;
+            }
+            out_lines.push(crate::domain::InvoiceLine {
+                amount_minor: crate::domain::manual_amount_minor(qty, price),
+                note: l.note.trim().to_string(),
+                ..l.clone()
+            });
+        }
+    }
+    validate_line_projects(&app, &invoice.customer_id, &out_lines, &mut errors);
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    let subtotal = out_lines.iter().map(|l| l.amount_minor).sum();
+    let totals =
+        crate::domain::invoice_totals(subtotal, edit.tax_hundredths, edit.discount_hundredths);
+    let candidate = Invoice {
+        lines: out_lines,
+        total_minor: totals.total_minor,
+        tax_hundredths: edit.tax_hundredths,
+        discount_hundredths: edit.discount_hundredths,
+        ..invoice.clone()
+    };
+    let updated = app.store.replace_invoice_draft(id, &candidate)?;
+    Ok(Json(updated).into_response())
 }

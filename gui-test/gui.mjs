@@ -582,6 +582,64 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 }
 
+// ---- MANUAL LINES + DRAFT EDITOR (#143) ----
+{
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  window.document.getElementById('invoice-customer').value = acmeOpt.value;
+  window.document.getElementById('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(200);
+  const edPanel = window.document.getElementById('invoice-editor');
+  check('manual editor opens with a line row (#143)', edPanel.hidden === false
+    && edPanel.querySelectorAll('tbody tr').length === 1);
+  const fill = (row, desc, kind, qty, price) => {
+    row.querySelector('input[type=text]').value = desc;
+    row.querySelectorAll('select')[0].value = kind;
+    const nums = row.querySelectorAll('input[type=number]');
+    nums[0].value = qty;
+    nums[1].value = price;
+    for (const elx of row.querySelectorAll('input, select')) elx.dispatchEvent(new window.Event('input', { bubbles: true }));
+  };
+  fill(edPanel.querySelector('tbody tr'), 'Office seat', 'product', '2.50', '40.00');
+  window.document.getElementById('ed-add').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(120);
+  fill([...edPanel.querySelectorAll('tbody tr')][1], 'Setup service', 'service', '1.00', '50.00');
+  window.document.getElementById('ed-discount').value = '10';
+  window.document.getElementById('ed-discount').dispatchEvent(new window.Event('input', { bubbles: true }));
+  window.document.getElementById('ed-tax').value = '21';
+  window.document.getElementById('ed-tax').dispatchEvent(new window.Event('input', { bubbles: true }));
+  await tick(150);
+  const totalsTxt = window.document.getElementById('ed-totals').textContent;
+  check('live totals use exact integer math (#143)',
+    totalsTxt.includes('150.00') && totalsTxt.includes('-15.00') && totalsTxt.includes('28.35') && totalsTxt.includes('163.35'),
+    totalsTxt);
+  window.document.getElementById('ed-save').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(500);
+  const mInvs = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices;
+  const manual = mInvs.find((i) => i.total_minor === 16335 && i.status === 'draft');
+  check('manual draft saved with server-computed totals (#143)', !!manual && manual.lines.length === 2
+    && manual.lines[0].amount_minor === 10000 && manual.lines[1].item_kind === 'service');
+  check('manual save announced and closed the editor (#143)',
+    edPanel.hidden === true && /Draft INV-\d+ saved \(total 163\.35 EUR\)/.test(window.document.getElementById('live-region').textContent));
+  check('manual draft locks nothing (entries untouched) (#143)',
+    !(await (await fetch(BASE + `/invoices/${manual.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } }))).ok);
+  // Re-edit the draft through the Edit action and save unchanged.
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(350);
+  const editBtn = [...window.document.querySelectorAll('#invoice-table tbody button')]
+    .find((b) => b.textContent === 'Edit' && b.closest('tr').textContent.includes(manual.number));
+  check('draft rows offer Edit (#143)', !!editBtn);
+  editBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(450);
+  check('editor reopens with stored manual lines (#143)',
+    window.document.getElementById('ed-lines').querySelectorAll('tbody tr').length === 2
+    && [...window.document.querySelectorAll('#ed-lines tbody input[type=text]')].some((x) => x.value === 'Office seat'));
+  window.document.getElementById('ed-save').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(500);
+  const after = await (await fetch(BASE + `/invoices/${manual.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
+  check('idempotent re-save keeps totals (#143)', after.total_minor === 16335 && after.lines.length === 2);
+}
+
 // ---- RECURRING SCHEDULE MANAGEMENT (#136) ----
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));

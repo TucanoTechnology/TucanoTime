@@ -51,6 +51,9 @@ impl RecurringJob {
                     rate_minor: None,
                     amount_minor: schedule.retainer_amount_minor,
                     note: format!("{} retainer", cadence_label(schedule.cadence)),
+                    quantity_hundredths: None,
+                    unit_price_minor: None,
+                    item_kind: None,
                 };
                 Ok(Some(Invoice {
                     id: uuid::Uuid::new_v4(),
@@ -71,6 +74,8 @@ impl RecurringJob {
                     payments: vec![],
                     write_off_reason: String::new(),
                     written_off_at: None,
+                    tax_hundredths: 0,
+                    discount_hundredths: 0,
                 }))
             }
             RecurMode::Time => {

@@ -578,6 +578,37 @@ impl Store {
         self.unindex_invoice_locked(&id.to_string())
     }
 
+    /// Replace a DRAFT document wholesale (#143 draft editing): identity
+    /// (`id`, `number`, `created_at`) and the Draft status are enforced by
+    /// the store, never trusted from the payload; anything else the caller
+    /// assembled lands atomically. Issued/paid/written-off documents Conflict
+    /// — the snapshot rules of #8/#113/#114 stay unbreakable.
+    pub fn replace_invoice_draft(
+        &self,
+        id: Uuid,
+        updated: &Invoice,
+    ) -> Result<Invoice, StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.doc_path::<Invoice>(&id.to_string());
+        let Some(existing) = read_json::<Invoice>(&path)? else {
+            return Err(StoreError::NotFound);
+        };
+        if existing.status != InvoiceStatus::Draft {
+            return Err(StoreError::Conflict(
+                "only a draft invoice can be edited".into(),
+            ));
+        }
+        let mut next = updated.clone();
+        next.id = existing.id;
+        next.number = existing.number;
+        next.created_at = existing.created_at;
+        next.status = InvoiceStatus::Draft;
+        next.issued_at = None;
+        write_json(&path, &next)?;
+        self.index_invoice_locked(&next)?;
+        Ok(next)
+    }
+
     /// Atomically assign the next invoice number and persist under one writer
     /// lock, so two processes never mint the same number (#62) and a deleted
     /// invoice never frees its number for reuse (review B3): the sequence is
@@ -1519,6 +1550,8 @@ mod invoice_seq_tests {
             payments: vec![],
             write_off_reason: String::new(),
             written_off_at: None,
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         }
     }
 
@@ -1566,6 +1599,9 @@ mod txn_tests {
                 rate_minor: None,
                 amount_minor: 100,
                 note: String::new(),
+                quantity_hundredths: None,
+                unit_price_minor: None,
+                item_kind: None,
             }],
             total_minor: 100,
             status: InvoiceStatus::Draft,
@@ -1578,6 +1614,8 @@ mod txn_tests {
             payments: vec![],
             write_off_reason: String::new(),
             written_off_at: None,
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         }
     }
 
@@ -1860,6 +1898,8 @@ mod index_tests {
             payments: vec![],
             write_off_reason: String::new(),
             written_off_at: None,
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         }
     }
 

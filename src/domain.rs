@@ -535,9 +535,144 @@ pub struct InvoiceLine {
     pub hours: Option<Hours>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_minor: Option<u64>,
+    /// Manual lines are re-priced by the server from quantity x unit price,
+    /// so an edit payload may omit it (#143); it is always stored.
+    #[serde(default)]
     pub amount_minor: u64,
     #[serde(default)]
     pub note: String,
+    /// Manual lines (#143): quantity in HUNDREDTHS (150 = 1.50 units) and the
+    /// snapshot unit price, so `amount_minor` is always recomputable with
+    /// integer math. Absent on tracked lines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantity_hundredths: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_price_minor: Option<u64>,
+    /// Product vs Service on manual lines (#143/#147 catalog).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_kind: Option<LineItemKind>,
+}
+
+/// What a manual line sells (#143). Tracked lines need no value (time and
+/// expenses are inherently services/costs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LineItemKind {
+    Product,
+    Service,
+}
+
+/// Integer money math for manual lines: hundredths x minor units rounded
+/// half up to a minor unit — the same discipline as `Hours::amount_minor`.
+#[must_use]
+pub fn manual_amount_minor(quantity_hundredths: u32, unit_price_minor: u64) -> u64 {
+    let numerator = u128::from(quantity_hundredths) * u128::from(unit_price_minor);
+    u64::try_from((numerator + 50) / 100).unwrap_or(u64::MAX)
+}
+
+/// Percentages in hundredths of a percent applied to the integer subtotal.
+#[must_use]
+pub fn percent_of_minor(value_minor: u64, hundredths: u16) -> u64 {
+    // hundredths-of-a-percent over 10_000, rounded half up to a minor unit.
+    let numerator = u128::from(value_minor) * u128::from(hundredths);
+    u64::try_from((numerator + 5_000) / 10_000).unwrap_or(u64::MAX)
+}
+
+/// Document money: discount off the subtotal, VAT on the net. Persisted
+/// totals are always these values — never re-derived at render time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct InvoiceTotals {
+    pub subtotal_minor: u64,
+    pub discount_minor: u64,
+    pub tax_minor: u64,
+    pub total_minor: u64,
+}
+
+#[must_use]
+pub fn invoice_totals(
+    subtotal_minor: u64,
+    tax_hundredths: u16,
+    discount_hundredths: u16,
+) -> InvoiceTotals {
+    let discount_minor = percent_of_minor(subtotal_minor, discount_hundredths);
+    let net = subtotal_minor.saturating_sub(discount_minor);
+    let tax_minor = percent_of_minor(net, tax_hundredths);
+    InvoiceTotals {
+        subtotal_minor,
+        discount_minor,
+        tax_minor,
+        total_minor: net + tax_minor,
+    }
+}
+
+/// A manual line as submitted (#143); the server computes the amount.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManualLineInput {
+    pub description: String,
+    pub item_kind: LineItemKind,
+    /// Integer API: hundredths of a unit (150 = 1.50). No floats.
+    pub quantity_hundredths: u32,
+    pub unit_price_minor: u64,
+    #[serde(default)]
+    pub project_code: Option<ProjectCode>,
+}
+
+pub const MANUAL_LINE_MAX: usize = 100;
+
+/// Validate + convert manual line input; errors carry `lines[i].field` names.
+pub fn validate_manual_lines(
+    lines: &[ManualLineInput],
+    errors: &mut Vec<FieldError>,
+) -> Vec<InvoiceLine> {
+    if lines.len() > MANUAL_LINE_MAX {
+        errors.push(FieldError::new(
+            "lines",
+            format!("at most {MANUAL_LINE_MAX} lines"),
+        ));
+        return Vec::new();
+    }
+    let today = chrono::Utc::now().date_naive();
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let desc = l.description.trim();
+            if desc.is_empty() || desc.chars().count() > 500 {
+                errors.push(FieldError::new(
+                    format!("lines[{i}].description"),
+                    "required, at most 500 characters",
+                ));
+            }
+            if l.quantity_hundredths == 0 || l.quantity_hundredths > 1_000_000 {
+                errors.push(FieldError::new(
+                    format!("lines[{i}].quantity_hundredths"),
+                    "must be between 0.01 and 10000.00 units",
+                ));
+            }
+            if l.unit_price_minor > 100_000_000 {
+                errors.push(FieldError::new(
+                    format!("lines[{i}].unit_price_minor"),
+                    "at most 100000000",
+                ));
+            }
+            InvoiceLine {
+                kind: LineKind::Fixed,
+                date: today,
+                entry_id: None,
+                expense_id: None,
+                project_code: l.project_code.clone(),
+                task_code: None,
+                hours: None,
+                rate_minor: None,
+                amount_minor: manual_amount_minor(l.quantity_hundredths, l.unit_price_minor),
+                note: desc.to_string(),
+                quantity_hundredths: Some(l.quantity_hundredths),
+                unit_price_minor: Some(l.unit_price_minor),
+                item_kind: Some(l.item_kind),
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -565,6 +700,12 @@ pub struct Invoice {
     /// `invoices/<id>.pdf` written at issue time. `None` for drafts and for
     /// legacy issued invoices whose PDF has not been resolved yet (the first
     /// download renders it from the snapshot-locked invoice).
+    /// VAT percent in hundredths (2100 = 21.00%) — manual/draft feature
+    /// (#143); tracked invoices keep 0 and their sum-of-lines total.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub tax_hundredths: u16,
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub discount_hundredths: u16,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pdf: Option<PdfHint>,
     /// Recorded payments ledger (#114). Legacy documents default to empty;
@@ -1113,6 +1254,9 @@ pub fn generate_invoice(
             rate_minor: Some(rate),
             amount_minor: e.hours.amount_minor(rate),
             note: e.note.clone(),
+            quantity_hundredths: None,
+            unit_price_minor: None,
+            item_kind: None,
         });
     }
     if *include_expenses {
@@ -1135,6 +1279,9 @@ pub fn generate_invoice(
                 rate_minor: None,
                 amount_minor: x.amount_minor,
                 note: x.note.clone(),
+                quantity_hundredths: None,
+                unit_price_minor: None,
+                item_kind: None,
             });
         }
     }
@@ -1161,6 +1308,8 @@ pub fn generate_invoice(
         payments: vec![],
         write_off_reason: String::new(),
         written_off_at: None,
+        tax_hundredths: 0,
+        discount_hundredths: 0,
     })
 }
 
@@ -1742,7 +1891,61 @@ mod tests {
             payments: vec![],
             write_off_reason: String::new(),
             written_off_at: None,
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         }
+    }
+
+    #[test]
+    fn manual_money_math_is_exact_integers() {
+        // 1.50 units x 99.00 = 148.50 -> 14850 minor.
+        assert_eq!(manual_amount_minor(150, 9900), 14850);
+        // half-up rounding on the last minor unit: 3 x 333 / 100 = 9.99 -> 999
+        assert_eq!(manual_amount_minor(300, 333), 999);
+        assert_eq!(manual_amount_minor(1, 1), 0); // 0.01 x 0.01 = 0.00005 -> 0
+        assert_eq!(percent_of_minor(10_000, 2100), 2100); // 21% VAT
+        let t = invoice_totals(15_000, 2100, 1000);
+        assert_eq!(
+            (
+                t.subtotal_minor,
+                t.discount_minor,
+                t.tax_minor,
+                t.total_minor
+            ),
+            (15_000, 1_500, 2_835, 16_335)
+        );
+        // Zero percents are exact pass-through: tracked totals stay stable.
+        let z = invoice_totals(18_000, 0, 0);
+        assert_eq!(z.total_minor, 18_000);
+        assert_eq!(z.discount_minor + z.tax_minor, 0);
+    }
+
+    #[test]
+    fn manual_line_validation_guards() {
+        let mut errs = Vec::new();
+        let ok = ManualLineInput {
+            description: "Seat".into(),
+            item_kind: LineItemKind::Product,
+            quantity_hundredths: 400,
+            unit_price_minor: 2500,
+            project_code: None,
+        };
+        let lines = validate_manual_lines(std::slice::from_ref(&ok), &mut errs);
+        assert!(errs.is_empty());
+        assert_eq!(lines[0].amount_minor, 10_000);
+        assert_eq!(lines[0].kind, LineKind::Fixed);
+        let bad = ManualLineInput {
+            quantity_hundredths: 0,
+            ..ok.clone()
+        };
+        let mut e2 = Vec::new();
+        validate_manual_lines(&[bad], &mut e2);
+        assert_eq!(e2.len(), 1);
+        // > MANUAL_LINE_MAX lines short-circuits.
+        let many = vec![ok; MANUAL_LINE_MAX + 1];
+        let mut e3 = Vec::new();
+        assert!(validate_manual_lines(&many, &mut e3).is_empty());
+        assert!(!e3.is_empty());
     }
 
     #[test]

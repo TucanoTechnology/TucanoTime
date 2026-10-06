@@ -1040,6 +1040,9 @@ mod tests {
                     rate_minor: Some(9000),
                     amount_minor: 72000,
                     note: String::new(),
+                    quantity_hundredths: None,
+                    unit_price_minor: None,
+                    item_kind: None,
                 },
                 InvoiceLine {
                     kind: LineKind::Expense,
@@ -1052,6 +1055,9 @@ mod tests {
                     rate_minor: None,
                     amount_minor: 12500,
                     note: "Flight tickets".into(),
+                    quantity_hundredths: None,
+                    unit_price_minor: None,
+                    item_kind: None,
                 },
             ],
             total_minor: 84500,
@@ -1065,6 +1071,8 @@ mod tests {
             payments: vec![],
             write_off_reason: String::new(),
             written_off_at: None,
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         }
     }
 
@@ -1167,6 +1175,9 @@ mod tests {
                 rate_minor: None,
                 amount_minor: i as u64 * 100,
                 note: format!("Recurring charge {i}"),
+                quantity_hundredths: None,
+                unit_price_minor: None,
+                item_kind: None,
             })
             .collect();
         let doc = doc_for(&inv, &customer(), &org());
