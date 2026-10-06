@@ -595,6 +595,38 @@ window.document.getElementById('week-add-confirm').dispatchEvent(new window.Even
 await tick(400);
 check('add-row appended the P-9 row', [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('P-9')));
 
+// #127: after the add, focus returns to the Add-row control and the occupied
+// P-9 / MKT-2 rows are no longer offered — a second add must yield a NEW line.
+check('confirm returns focus to Add row (#127)', window.document.activeElement && window.document.activeElement.id === 'week-add-row');
+window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
+const addOpts = [...window.document.getElementById('week-add-project').options].map((o) => o.value);
+check('already-shown projects are excluded from the picker (#127)',
+  !addOpts.includes(`${acmeOpt.value}|P-9`) && !addOpts.includes(`${acmeOpt.value}|MKT-2`));
+{
+  const sel = window.document.getElementById('week-add-project');
+  const allShown = [...sel.options].some((o) => o.textContent.includes('already in this week'));
+  if (allShown) {
+    // Every active project is in the grid: confirming explains instead of lying.
+    window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(300);
+    check('exhausted picker explains itself (#127)',
+      /already in this week/i.test(window.document.getElementById('live-region').textContent));
+    check('week grid is back open after the explained no-op (#127)',
+      window.document.getElementById('week-add-project').hidden === true);
+  }
+}
+// A second add (Globex project or any remaining) appends without removing the first.
+const second = addOpts.find((v) => v && !v.includes('P-9'));
+if (second) {
+  window.document.getElementById('week-add-project').value = second;
+  window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  const rows = [...window.document.querySelectorAll('#week-table tbody tr')].map((r) => r.textContent);
+  check('consecutive adds keep every project line (#127)',
+    rows.some((t) => t.includes('P-9')) && rows.some((t) => t.includes(second.split('|')[1])));
+}
+
 // Lock column: the submitted 2027-01 week renders its cell disabled.
 weekDateEl.value = '2027-01-05';
 weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));

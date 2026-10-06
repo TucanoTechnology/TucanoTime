@@ -700,6 +700,7 @@ async function saveEntry(evt) {
 
 const weekState = {
   extraRows: [], // [{customer_id, project_code}]
+  rowKeys: new Set(), // `${customer_id}::${project_code}` shown in this week (#127)
   days: [],
   seq: 0, // render guard: only the newest fetch may touch the DOM
 };
@@ -776,6 +777,7 @@ async function refreshWeek() {
     if (e.note) row.notes[e.date] = e.note;
   }
   for (const r of weekState.extraRows) rowFor(r.customer_id, r.project_code);
+  weekState.rowKeys = new Set(byKey.keys()); // what "Add row" must not offer again (#127)
 
   const table = $('week-table');
   table.textContent = '';
@@ -1000,16 +1002,28 @@ async function fillWeekProjectSelect() {
     const projects = await loadProjects(c.id);
     for (const p of projects) {
       if (!p.active) continue;
+      // #127: a project that already has a line in this week is not offered —
+      // confirming it before added nothing yet still claimed "Row added".
+      if (weekState.rowKeys.has(`${c.id}::${p.code}`)) continue;
       options.push({ value: `${c.id}|${p.code}`, text: `${c.name} / ${p.code} — ${p.name}` });
     }
   }
-  fillSelect($('week-add-project'), options);
+  if (options.length === 0) {
+    fillSelect($('week-add-project'), [
+      { value: '', text: 'All active projects are already in this week' },
+    ]);
+  } else {
+    fillSelect($('week-add-project'), options);
+  }
 }
 
+/// Append an extra grid row; returns false when the line already exists (#127).
 function addWeekRow(customerId, projectCode) {
-  if (!weekState.extraRows.some((r) => r.customer_id === customerId && r.project_code === projectCode)) {
-    weekState.extraRows.push({ customer_id: customerId, project_code: projectCode });
+  if (weekState.extraRows.some((r) => r.customer_id === customerId && r.project_code === projectCode)) {
+    return false;
   }
+  weekState.extraRows.push({ customer_id: customerId, project_code: projectCode });
+  return true;
 }
 
 async function copyLastWeek(weeksAgo = 1) {
@@ -2420,11 +2434,21 @@ async function startApp() {
   $('week-add-cancel').addEventListener('click', () => toggleWeekAddRow(false));
   $('week-add-confirm').addEventListener('click', async () => {
     const [cid, code] = $('week-add-project').value.split('|');
-    if (!cid || !code) return;
-    addWeekRow(cid, code);
+    if (!cid || !code) {
+      // Exhausted picker (or nothing chosen): explain, keep the grid as-is.
+      announce('All active projects are already in this week.');
+      toggleWeekAddRow(false);
+      $('week-add-row').focus();
+      return;
+    }
+    const added = addWeekRow(cid, code);
     toggleWeekAddRow(false);
     await refreshWeek();
-    announce(`Row added for ${code} — type hours to save.`);
+    // #127: the announcement tells the truth about what happened.
+    announce(added
+      ? `Row added for ${code} — type hours to save.`
+      : `${code} is already in this week — no row added.`);
+    $('week-add-row').focus();
   });
 
   $('template-form').addEventListener('submit', saveInvoiceTemplate);
