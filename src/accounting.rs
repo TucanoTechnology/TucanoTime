@@ -602,6 +602,9 @@ mod tests {
                 rate_minor: Some(6000),
                 amount_minor: 18000,
                 note: "work".into(),
+                quantity_hundredths: None,
+                unit_price_minor: None,
+                item_kind: None,
             }],
             total_minor: 18000,
             status: InvoiceStatus::Issued,
@@ -614,6 +617,8 @@ mod tests {
             payments: vec![],
             write_off_reason: String::new(),
             written_off_at: None,
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         };
         (inv, customer)
     }

@@ -172,8 +172,14 @@ pub fn build_router(state: AppState) -> Router {
             get(api::list_invoices).post(api::create_invoice),
         )
         .route(
+            "/invoices/manual",
+            axum::routing::post(api::create_manual_invoice),
+        )
+        .route(
             "/invoices/{id}",
-            get(api::get_invoice_handler).delete(api::delete_invoice),
+            get(api::get_invoice_handler)
+                .delete(api::delete_invoice)
+                .put(api::update_invoice_draft),
         )
         .route(
             "/invoices/{id}/issue",

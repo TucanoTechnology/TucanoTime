@@ -4751,3 +4751,179 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
     .await;
     assert_eq!(spm, StatusCode::FORBIDDEN);
 }
+
+// ------------------------------------------------------------------ #143 ---
+
+#[tokio::test]
+async fn manual_invoice_creation_computes_exact_totals() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "SHOP", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    let (s, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices/manual",
+        Some(json!({"customer_id":cid,"tax_hundredths":2100,"discount_hundredths":1000,
+          "lines":[{"description":"Office seat","item_kind":"product","quantity_hundredths":250,"unit_price_minor":4000,"project_code":"P1"},
+                   {"description":"Setup service","item_kind":"service","quantity_hundredths":100,"unit_price_minor":5000}]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{inv}");
+    assert_eq!(inv["status"], "draft");
+    assert!(inv["number"].as_str().unwrap().starts_with("INV-"));
+    assert_eq!(inv["currency"], "EUR");
+    let lines = inv["lines"].as_array().unwrap();
+    assert_eq!(lines[0]["amount_minor"], 10000); // 2.50 x 40.00
+    assert_eq!(lines[0]["kind"], "fixed");
+    assert_eq!(lines[0]["item_kind"], "product");
+    assert_eq!(lines[0]["project_code"], "P1");
+    assert_eq!(lines[1]["amount_minor"], 5000);
+    // subtotal 15000, discount 10% = 1500, VAT 21% of 13500 = 2835, total 16335.
+    assert_eq!(inv["total_minor"], 16335);
+    assert_eq!(inv["tax_hundredths"], 2100);
+    assert_eq!(inv["discount_hundredths"], 1000);
+    // Draft locks nothing and sends nothing.
+    let eid = json_req(&app, "GET", "/entries", None).await;
+    let _ = eid;
+    let pdf = raw_req(
+        &app,
+        "GET",
+        &format!("/invoices/{}/pdf", inv["id"].as_str().unwrap()),
+    )
+    .await;
+    assert_eq!(
+        pdf.0,
+        StatusCode::CONFLICT,
+        "draft has no archived document"
+    );
+}
+
+#[tokio::test]
+async fn manual_invoice_validation_matrix_persists_nothing() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "SHOP", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    let base = |lines: Value, extra: Value| -> Value {
+        let mut o = json!({"customer_id": cid, "lines": lines});
+        if let (Some(o1), Some(o2)) = (o.as_object_mut(), extra.as_object()) {
+            for (k, v) in o2 {
+                o1.insert(k.clone(), v.clone());
+            }
+        }
+        o
+    };
+    let good = json!([{"description":"X","item_kind":"product","quantity_hundredths":100,"unit_price_minor":100}]);
+    for (label, body) in [
+        ("empty lines", base(json!([]), json!({}))),
+        (
+            "zero qty",
+            base(
+                json!([{"description":"X","item_kind":"product","quantity_hundredths":0,"unit_price_minor":100}]),
+                json!({}),
+            ),
+        ),
+        (
+            "bad percent",
+            base(good.clone(), json!({"tax_hundredths": 10001})),
+        ),
+        (
+            "unknown project",
+            base(
+                json!([{"description":"X","item_kind":"product","quantity_hundredths":100,"unit_price_minor":100,"project_code":"NOPE"}]),
+                json!({}),
+            ),
+        ),
+        ("unknown field", base(good.clone(), json!({"evil": true}))),
+        (
+            "float quantity",
+            json!({"customer_id": cid, "lines": [{"description":"X","item_kind":"product","quantity_hundredths":1.5,"unit_price_minor":100}]}),
+        ),
+    ] {
+        let (st, body) = json_req(&app, "POST", "/invoices/manual", Some(body)).await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{label}: {body}");
+    }
+    let (_s, list) = json_req(&app, "GET", "/invoices", None).await;
+    assert!(
+        list["invoices"].as_array().unwrap().is_empty(),
+        "nothing persisted"
+    );
+}
+
+#[tokio::test]
+async fn draft_editing_replaces_lines_and_issued_stays_immutable() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "SHOP", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, gent) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = gent["id"].as_str().unwrap().to_string();
+    let tracked = &gent["lines"][0];
+    assert_eq!(tracked["amount_minor"], 18000);
+
+    // Draft edit: keep the tracked line verbatim + add a manual line, tax 10%.
+    let edit = json!({"lines": [tracked,
+        {"kind":"fixed","date":"2026-10-02","note":"Extra hosting","item_kind":"service",
+         "quantity_hundredths":100,"unit_price_minor":900}],
+        "tax_hundredths": 1000, "discount_hundredths": 0});
+    let (se, edited) = json_req(&app, "PUT", &format!("/invoices/{iid}"), Some(edit)).await;
+    assert_eq!(se, StatusCode::OK, "{edited}");
+    assert_eq!(edited["lines"].as_array().unwrap().len(), 2);
+    // 18000 + 900 = 18900 subtotal; 10% = 1890; total 20790.
+    assert_eq!(edited["total_minor"], 20790);
+    // The tracked line survived untouched (snapshot #8).
+    assert_eq!(edited["lines"][0]["amount_minor"], 18000);
+    assert_eq!(edited["lines"][0]["entry_id"], tracked["entry_id"]);
+
+    // Tampering with a tracked line's amount is refused; nothing persisted.
+    let mut tampered = tracked.clone();
+    tampered["amount_minor"] = json!(1);
+    let (st, bt) = json_req(
+        &app,
+        "PUT",
+        &format!("/invoices/{iid}"),
+        Some(json!({"lines":[tampered],"tax_hundredths":0,"discount_hundredths":0})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{bt}");
+    let (_sr, again) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    assert_eq!(again["total_minor"], 20790, "rejection persisted nothing");
+
+    // Issue: snapshot locks the document; PUT now conflicts.
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (si, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/invoices/{iid}"),
+        Some(json!({"lines":[],"tax_hundredths":0})),
+    )
+    .await;
+    assert_eq!(si, StatusCode::CONFLICT);
+    // The archived PDF shows the EDITED lines (the document follows the
+    // draft at issue time, not the earlier generation).
+    let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let joined: String = String::from_utf8_lossy(&pdf)
+        .split('(')
+        .skip(1)
+        .map(|x| x.split(')').next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        joined.contains("Extra hosting"),
+        "manual line reached the document"
+    );
+    assert!(joined.contains("207.90"), "total with VAT printed");
+}

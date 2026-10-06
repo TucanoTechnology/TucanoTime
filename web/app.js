@@ -1710,7 +1710,7 @@ async function refreshCustomerPickers() {
   // C7: every customer picker (day form, invoices, expenses, timer) refreshes
   // from one place — previously a newly added customer could not be invoiced
   // until a full page reload.
-  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer']) {
+  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer', 'ed-customer']) {
     const picker = $(id);
     if (picker) fillCustomerSelect(picker, picker.value, true);
   }
@@ -1782,6 +1782,8 @@ async function refreshInvoices() {
     const open = inv.status === 'issued' || inv.status === 'partly_paid';
     if (inv.status === 'draft') {
       actions.push(
+        action('link', 'Edit', () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
+          'Edit the draft lines and percentages (#143)'),
         action('link', 'Issue', () => issueInvoice(inv)),
         action('danger', 'Delete', () => removeInvoice(inv.id)),
       );
@@ -2115,6 +2117,198 @@ async function removeInvoice(id) {
     announce('Invoice deleted.');
   } catch (err) {
     announce(err.message);
+  }
+}
+
+// --------------------------------------------------- invoice editor (#143) --
+//
+// Manual Product/Service lines and draft editing. Money stays integer:
+// decimal inputs are parsed to hundredths/minor units WITHOUT floats (string
+// math), amounts and totals mirror the server's exact formulas. Tracked
+// lines from an existing draft show read-only and round-trip verbatim —
+// the #8 rate snapshots are untouchable, and saving a draft never issues,
+// emails, locks or syncs.
+
+const ed = { id: null, tracked: [], currency: '' };
+
+/// '12.34' -> 1234 (hundredths) without ever touching a float.
+function parseHundredths(str) {
+  const s = String(str).trim();
+  if (!s) return 0;
+  const neg = s.startsWith('-');
+  const body = neg ? s.slice(1) : s;
+  const [i, f = ''] = body.split('.');
+  const ff = (f + '00').slice(0, 2);
+  const n = Number(i || 0) * 100 + Number(ff);
+  if (!Number.isFinite(n) || n < 0) return NaN;
+  return neg ? -n : n;
+}
+
+const edAmount = (qtyH, priceMinor) => Math.floor((qtyH * priceMinor + 50) / 100);
+const edPercent = (v, hundredths) => Math.floor((v * hundredths + 5000) / 10000);
+
+function edTotals(subtotal, taxH, discH) {
+  const discount = edPercent(subtotal, discH);
+  const net = subtotal - discount;
+  const tax = edPercent(net, taxH);
+  return { subtotal, discount, tax, total: net + tax };
+}
+
+function edLineRow(line = null) {
+  const desc = el('input', { attrs: { type: 'text', maxlength: 500, placeholder: 'Description', value: line ? line.note : '' } });
+  const kind = el('select', {}, [
+    el('option', { attrs: { value: 'product', selected: !line || line.item_kind !== 'service' ? '' : null }, text: 'Product' }),
+    el('option', { attrs: { value: 'service' }, text: 'Service' }),
+  ]);
+  if (line && line.item_kind === 'service') kind.value = 'service';
+  const qty = el('input', {
+    cls: 'num',
+    attrs: { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal', style: 'width:7ch',
+      value: line && line.quantity_hundredths ? (line.quantity_hundredths / 100).toFixed(2) : '1.00' },
+  });
+  const price = el('input', {
+    cls: 'num',
+    attrs: { type: 'number', min: '0', step: '0.01', inputmode: 'decimal', style: 'width:9ch',
+      value: line && line.unit_price_minor != null ? (line.unit_price_minor / 100).toFixed(2) : '0.00' },
+  });
+  const amount = el('td', { cls: 'num' });
+  const row = el('tr', {}, [
+    el('td', {}, [desc]),
+    el('td', {}, [kind]),
+    el('td', {}, [qty]),
+    el('td', {}, [price]),
+    amount,
+    el('td', { cls: 'actions-col' }, [
+      el('button', { type: 'button', cls: 'link danger', text: 'Remove', on: { click: () => { row.remove(); edRecalc(); } } }),
+    ]),
+  ]);
+  const read = () => {
+    const q = parseHundredths(qty.value);
+    const p = parseHundredths(price.value);
+    return {
+      description: desc.value.trim(),
+      item_kind: kind.value,
+      quantity_hundredths: q,
+      unit_price_minor: p,
+      amount_minor: Number.isFinite(q) && Number.isFinite(p) ? edAmount(q, p) : NaN,
+    };
+  };
+  row.__read = read;
+  row.__render = () => {
+    const r = read();
+    amount.textContent = Number.isFinite(r.amount_minor) ? formatMoney(r.amount_minor) : '—';
+  };
+  for (const inp of [desc, kind, qty, price]) inp.addEventListener('input', edRecalc);
+  return row;
+}
+
+function edTrackedRow(line) {
+  return el('tr', {}, [
+    el('td', { text: line.note || (line.project_code || '') }),
+    el('td', { text: 'tracked' }),
+    el('td', { cls: 'num', text: line.hours ? (line.hours / 100).toFixed(2) : '1.00' }),
+    el('td', { cls: 'num', text: line.rate_minor != null ? formatMoney(line.rate_minor) : formatMoney(line.amount_minor) }),
+    el('td', { cls: 'num', text: formatMoney(line.amount_minor) }),
+    el('td', {}),
+  ]);
+}
+
+function edRecalc() {
+  const tbody = $('ed-lines').querySelector('tbody');
+  for (const row of tbody.querySelectorAll('tr')) row.__render?.();
+  const manual = [...tbody.querySelectorAll('tr')].map((r) => r.__read?.()).filter(Boolean);
+  const trackedSub = ed.tracked.reduce((a, l) => a + l.amount_minor, 0);
+  const subtotal = trackedSub + manual.reduce((a, l) => a + (Number.isFinite(l.amount_minor) ? l.amount_minor : 0), 0);
+  const t = edTotals(
+    subtotal,
+    parseHundredths($('ed-tax').value),
+    parseHundredths($('ed-discount').value),
+  );
+  const cur = ed.currency || 'EUR';
+  const dl = $('ed-totals');
+  dl.textContent = '';
+  for (const [label, v] of [['Subtotal', t.subtotal], ['Discount', -t.discount], ['VAT', t.tax], ['Total', t.total]]) {
+    dl.appendChild(el('dt', { text: label }));
+    dl.appendChild(el('dd', { cls: 'num', text: `${v < 0 ? '-' : ''}${formatMoney(Math.abs(v))} ${cur}` }));
+  }
+}
+
+function edOpen(draft) {
+  ed.id = draft ? draft.id : null;
+  ed.tracked = draft ? (draft.lines || []).filter((l) => l.entry_id || l.expense_id) : [];
+  ed.currency = draft ? draft.currency : (state.customers.find((c) => c.id === $('invoice-customer').value)?.currency || 'EUR');
+  $('ed-title').textContent = draft ? `Edit draft ${draft.number}` : 'Manual invoice';
+  $('ed-customer').disabled = Boolean(draft);
+  if (!draft) $('ed-customer').value = $('invoice-customer').value || $('ed-customer').value;
+  const tbody = $('ed-lines').querySelector('tbody');
+  tbody.textContent = '';
+  for (const l of ed.tracked) tbody.appendChild(edTrackedRow(l));
+  const manuals = draft ? (draft.lines || []).filter((l) => !l.entry_id && !l.expense_id) : [];
+  if (manuals.length === 0 && !draft) tbody.appendChild(edLineRow());
+  for (const l of manuals) tbody.appendChild(edLineRow(l));
+  $('ed-tax').value = draft ? (draft.tax_hundredths / 100).toFixed(2) : '0';
+  $('ed-discount').value = draft ? (draft.discount_hundredths / 100).toFixed(2) : '0';
+  clearFormError($('ed-error'));
+  $('invoice-editor').hidden = false;
+  edRecalc();
+  $('invoice-editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  $('ed-lines').querySelector('tbody input')?.focus();
+  announce(draft ? `Editing draft ${draft.number}.` : 'Manual invoice editor open.');
+}
+
+function edClose() {
+  ed.id = null;
+  $('invoice-editor').hidden = true;
+}
+
+async function edSave() {
+  clearFormError($('ed-error'));
+  const manual = [...$('ed-lines').querySelectorAll('tbody tr')]
+    .map((r) => r.__read?.())
+    .filter(Boolean);
+  const lines = manual.map((m) => ({
+    description: m.description, item_kind: m.item_kind,
+    quantity_hundredths: m.quantity_hundredths, unit_price_minor: m.unit_price_minor,
+  }));
+  const taxH = parseHundredths($('ed-tax').value);
+  const discH = parseHundredths($('ed-discount').value);
+  if (!Number.isFinite(taxH) || !Number.isFinite(discH) || lines.some((l) => !Number.isFinite(l.quantity_hundredths) && l.quantity_hundredths !== 0)) {
+    showFormError($('ed-error'), { message: 'Enter valid numbers in every line.' });
+    return;
+  }
+  try {
+    if (!ed.id) {
+      const created = await api.post('/invoices/manual', {
+        customer_id: $('ed-customer').value,
+        tax_hundredths: taxH,
+        discount_hundredths: discH,
+        lines,
+      });
+      announce(`Draft ${created.number} saved (total ${formatMoney(created.total_minor)} ${created.currency}).`);
+    } else {
+      const payloadLines = [
+        ...ed.tracked,
+        ...manual.map((m) => ({
+          kind: 'fixed',
+          date: new Date().toISOString().slice(0, 10),
+          note: m.description,
+          item_kind: m.item_kind,
+          quantity_hundredths: m.quantity_hundredths,
+          unit_price_minor: m.unit_price_minor,
+          amount_minor: m.amount_minor,
+          entry_id: null, expense_id: null, project_code: null, task_code: null,
+          hours: null, rate_minor: null,
+        })),
+      ];
+      const updated = await api.put(`/invoices/${ed.id}`, {
+        lines: payloadLines, tax_hundredths: taxH, discount_hundredths: discH,
+      });
+      announce(`Draft ${updated.number} updated (total ${formatMoney(updated.total_minor)} ${updated.currency}).`);
+    }
+    edClose();
+    await refreshInvoices();
+  } catch (err) {
+    showFormError($('ed-error'), err);
   }
 }
 
@@ -3003,6 +3197,17 @@ async function startApp() {
     if (e.key === 'Escape') closeInvoicePreview();
   });
   $('org-form').addEventListener('submit', saveOrgProfile);
+  $('manual-new').addEventListener('click', () => edOpen(null));
+  $('ed-close').addEventListener('click', edClose);
+  $('ed-add').addEventListener('click', () => {
+    const row = edLineRow();
+    $('ed-lines').querySelector('tbody').appendChild(row);
+    row.querySelector('input').focus();
+    edRecalc();
+  });
+  $('ed-save').addEventListener('click', edSave);
+  $('ed-tax').addEventListener('input', edRecalc);
+  $('ed-discount').addEventListener('input', edRecalc);
   $('rec-form').addEventListener('submit', addRecurring);
   $('contact-add').addEventListener('click', () => {
     if ($('contact-rows').children.length >= 10) {

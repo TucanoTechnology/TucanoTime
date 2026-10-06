@@ -349,8 +349,26 @@
         <div class="field"><label for="invoice-from">From</label><input type="date" id="invoice-from" required></div>
         <div class="field"><label for="invoice-to">To</label><input type="date" id="invoice-to" required></div>
         <p class="form-error" id="invoice-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="invoice-generate">Generate draft invoice</button></div>
+        <div class="buttons"><button type="submit" id="invoice-generate">Generate draft invoice</button>
+        <button type="button" id="manual-new" class="secondary">New manual invoice…</button></div>
       </form>
+      <!-- #143: manual lines + draft editing editor. -->
+      <div id="invoice-editor" class="card" role="region" aria-label="Invoice line editor" hidden>
+        <div class="ip-head"><h3 id="ed-title">Manual invoice</h3>
+          <button type="button" id="ed-close" class="link secondary">Close editor</button></div>
+        <div class="field"><label for="ed-customer">Customer</label><select id="ed-customer"></select></div>
+        <table id="ed-lines">
+          <caption class="sr-only">Invoice lines</caption>
+          <thead><tr><th scope="col">Description</th><th scope="col">Type</th><th scope="col">Qty</th><th scope="col">Unit price</th><th scope="col" class="num">Amount</th><th scope="col" class="actions-col"></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="buttons"><button type="button" id="ed-add" class="secondary">+ Add line</button></div>
+        <div class="field"><label for="ed-discount">Discount %</label><input id="ed-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+        <div class="field"><label for="ed-tax">VAT %</label><input id="ed-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+        <dl id="ed-totals" class="ip-facts"></dl>
+        <p class="form-error" id="ed-error" role="alert" hidden></p>
+        <div class="buttons"><button type="button" id="ed-save" class="primary">Save draft</button></div>
+      </div>
       <table id="invoice-table">
         <caption class="sr-only">Invoices</caption>
         <thead><tr><th scope="col">Number</th><th scope="col">Customer</th><th scope="col">Period</th><th scope="col">Total</th><th scope="col">Balance</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>

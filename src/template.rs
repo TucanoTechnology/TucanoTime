@@ -517,6 +517,8 @@ mod tests {
             payments: vec![],
             write_off_reason: String::new(),
             written_off_at: None,
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         }
     }
 
