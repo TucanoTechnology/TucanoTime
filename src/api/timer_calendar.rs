@@ -292,6 +292,21 @@ fn provider_env(provider: &str, suffix: &str) -> String {
 /// The caller's notifications, newest first (#22).
 pub async fn list_notifications(State(app): State<AppState>, actor: AuthUser) -> ApiResult {
     let mut list = app.store.list_notifications(actor.0.id)?;
+    if list
+        .iter()
+        .any(|notification| notification.kind == "no_time_today")
+    {
+        let today = app.clock.now().date_naive();
+        let has_time_today = app
+            .store
+            .list_range(today, today)?
+            .iter()
+            .any(|entry| entry.user_id == Some(actor.0.id));
+        list.retain(|notification| {
+            notification.kind != "no_time_today"
+                || (notification.created_at.date_naive() == today && !has_time_today)
+        });
+    }
     list.sort_by_key(|n| std::cmp::Reverse(n.created_at));
     let unread = list.iter().filter(|n| !n.read).count();
     Ok(Json(serde_json::json!({ "notifications": list, "unread": unread })).into_response())

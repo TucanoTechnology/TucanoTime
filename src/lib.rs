@@ -118,7 +118,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/categories/{id}",
-            axum::routing::delete(api::delete_category),
+            axum::routing::put(api::update_category).delete(api::delete_category),
         )
         .route(
             "/expenses",

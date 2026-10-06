@@ -468,7 +468,7 @@ pub use self::expenses::{
     ClaimDecisionInput, DecisionInput, SubmitInput, create_category, create_claim, create_expense,
     create_submission, decide_claim, decide_submission, delete_category, delete_expense,
     get_expense_handler, list_categories, list_claims, list_expenses, list_submissions,
-    submit_claim,
+    submit_claim, update_category,
 };
 pub use self::invoicing::{
     CheckoutInput, InvoiceEditInput, InvoiceInput, ManualInvoiceInput, PayInput, SyncInput,

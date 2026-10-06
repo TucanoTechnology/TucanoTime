@@ -4,6 +4,7 @@
 use super::*;
 
 pub async fn list_categories(State(app): State<AppState>) -> ApiResult {
+    app.store.ensure_default_categories()?;
     let categories = app.store.list_categories()?;
     Ok(Json(serde_json::json!({ "categories": categories })).into_response())
 }
@@ -21,6 +22,23 @@ pub async fn create_category(
     };
     app.store.put_category(&category)?;
     Ok((StatusCode::CREATED, Json(category)).into_response())
+}
+
+pub async fn update_category(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<CategoryInput>,
+) -> ApiResult {
+    let draft = validate_category_input(&input).map_err(ApiError::validation)?;
+    let mut category = app
+        .store
+        .get_category(id)?
+        .ok_or_else(|| ApiError::not_found("category"))?;
+    category.name = draft.name;
+    category.default_billable = draft.default_billable;
+    category.active = draft.active;
+    app.store.update_category(&category)?;
+    Ok(Json(category).into_response())
 }
 
 pub async fn delete_category(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {

@@ -697,12 +697,57 @@ impl Store {
         Ok(out)
     }
 
+    /// Seed common expense categories once for a fresh installation. The
+    /// marker prevents deleted defaults from reappearing on a later restart.
+    pub fn ensure_default_categories(&self) -> Result<(), StoreError> {
+        let marker = self.doc_dir::<Category>().join(".defaults-seeded");
+        if marker.exists() {
+            return Ok(());
+        }
+        let _guard = self.write_lock()?;
+        if marker.exists() {
+            return Ok(());
+        }
+
+        let existing = self.list_docs::<Category>()?;
+        let dir = self.doc_dir::<Category>();
+        std::fs::create_dir_all(&dir)?;
+        if existing.is_empty() {
+            for name in ["Food", "Travel", "Lodging", "Supplies", "Software"] {
+                let category = Category {
+                    id: Uuid::new_v4(),
+                    name: name.to_string(),
+                    default_billable: true,
+                    active: true,
+                };
+                write_json(
+                    &self.doc_path::<Category>(&category.id.to_string()),
+                    &category,
+                )?;
+            }
+        }
+
+        let marker_tmp = dir.join(".defaults-seeded.tmp");
+        std::fs::write(&marker_tmp, b"expense-category-defaults-v1\n")?;
+        std::fs::rename(marker_tmp, marker)?;
+        Ok(())
+    }
+
     pub fn get_category(&self, id: Uuid) -> Result<Option<Category>, StoreError> {
         self.get_doc::<Category>(&id.to_string())
     }
 
     pub fn put_category(&self, category: &Category) -> Result<(), StoreError> {
         self.put_doc(category)
+    }
+
+    pub fn update_category(&self, category: &Category) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.doc_path::<Category>(&category.id.to_string());
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
+        write_json(&path, category)
     }
 
     pub fn delete_category(&self, id: Uuid) -> Result<(), StoreError> {

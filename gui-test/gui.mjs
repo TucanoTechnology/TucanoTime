@@ -20,6 +20,17 @@ vc.on('error', (m) => console.error('[console.error]', m));
 const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: BASE + '/', virtualConsole: vc });
 const { window } = dom;
 
+// jsdom does not implement the native dialog open/close methods. Preserve the
+// reflected `open` state so popup flows can be asserted without changing app code.
+if (window.HTMLDialogElement && !window.HTMLDialogElement.prototype.showModal) {
+  window.HTMLDialogElement.prototype.showModal = function showModal() {
+    this.setAttribute('open', '');
+  };
+  window.HTMLDialogElement.prototype.close = function close() {
+    this.removeAttribute('open');
+  };
+}
+
 // Cookie-aware fetch for the whole harness: attaches the session once logged in.
 const _fetch = globalThis.fetch.bind(globalThis);
 let SESSION_COOKIE = '';
@@ -84,27 +95,34 @@ check('wizard auto-opens as a modal on first login with no customers', wzOpen())
 check('wizard starts on the welcome step', !window.document.getElementById('wz-step-0').hidden);
 window.document.getElementById('wz-later').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('"Set up later" dismisses the wizard cleanly', !wzOpen());
-// The sidebar icon sits directly under "Customers & projects" and reopens it.
+// The setup wizard is a utility action after core and secondary navigation.
 const wzOrder = [...window.document.querySelectorAll('#tabs button')].map((b) => b.id);
 check('wizard entry is the last item in the sidebar (#125)', wzOrder[wzOrder.length - 1] === 'wizard-open');
 
 // #142: grouped rail + shortcuts.
-check('rail has the four groups (#142)',
-  [...window.document.querySelectorAll('#tabs .nav-label')].map((n) => n.textContent).join(',') === 'Track,Organize,Bill,Review');
-check('tabs keep roving order inside the groups (#142)',
-  [...window.document.querySelectorAll('#tabs [role=\"tab\"]')].map((t) => t.id).join(',') ===
-    'tab-timesheet,tab-expenses,tab-customers,tab-invoices,tab-reports,tab-submissions,tab-settings');
-window.document.getElementById('shortcut-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
-check('Invoice shortcut selects the invoices tab (#142)',
-  window.document.getElementById('tab-invoices').getAttribute('aria-selected') === 'true');
-window.document.getElementById('shortcut-timer').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
-check('Timer shortcut focuses the timer without starting it (#142)',
-  window.document.getElementById('tab-timesheet').getAttribute('aria-selected') === 'true'
-  && window.document.activeElement.id === 'timer-customer'
-  && window.document.getElementById('timer-start').hidden === false
-  && window.document.getElementById('timer-display').hidden === true);
+check('core MVP navigation comes first: Timesheets, Customers, Invoices',
+  [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(0, 3).map((t) => t.id).join(',') ===
+    'tab-timesheet,tab-customers,tab-invoices');
+check('implemented secondary tools are grouped after the MVP destinations',
+  [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(3).map((t) => t.id).join(',') ===
+    'tab-expenses,tab-submissions,tab-reports,tab-settings'
+  && [...window.document.querySelectorAll('#tabs .nav-label')].map((n) => n.textContent).join(',') ===
+    'Track time,Setup,Billing,More tools');
+check('redundant Invoice and Timer shortcut buttons are absent',
+  !window.document.getElementById('shortcut-invoices') && !window.document.getElementById('shortcut-timer'));
+const timerOpen = window.document.getElementById('timer-open');
+const timerSetup = window.document.getElementById('timerbar');
+check('Day timer action sits alongside Track time',
+  timerOpen.previousElementSibling.id === 'day-add');
+check('timer selections are hidden until requested', timerSetup.hidden);
+timerOpen.click();
+check('Start timer reveals setup and focuses customer',
+  !timerSetup.hidden && timerOpen.getAttribute('aria-expanded') === 'true'
+  && window.document.activeElement.id === 'timer-customer');
+window.document.getElementById('timer-cancel').click();
+check('Cancel hides timer setup and returns focus to its action',
+  timerSetup.hidden && timerOpen.getAttribute('aria-expanded') === 'false'
+  && window.document.activeElement === timerOpen);
 window.document.getElementById('wizard-open').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('the icon reopens the wizard fresh', wzOpen() && !window.document.getElementById('wz-step-0').hidden);
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -211,8 +229,15 @@ check('aria-live region announced an add', /added|updated/i.test(live));
 {
   const edlg = window.document.getElementById('entry-dialog');
   const isOpen = () => edlg.open === true || edlg.hasAttribute('open');
-  check('create re-opens the dialog for the next entry (#145)', isOpen());
+  check('adding an entry closes the Day popup', !isOpen());
+  check('successful save returns focus to Track time',
+    window.document.activeElement.id === 'day-add');
   check('dialog kept the day just logged (#145)', window.document.getElementById('entry-date').value === '2026-11-11');
+  window.document.getElementById('day-add').click();
+  window.document.getElementById('entry-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(100);
+  check('invalid entry keeps the popup open with its error',
+    isOpen() && !window.document.getElementById('entry-error').hidden);
   edlg.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await tick(150);
   check('Escape cancels and closes the dialog (#145)', !isOpen());
@@ -293,12 +318,13 @@ window.document.getElementById('day-next').dispatchEvent(new window.Event('click
 await tick(200);
 check('day navigator moves forward', window.document.getElementById('day-date').value === '2026-11-12');
 
-const copySel = window.document.getElementById('copy-days');
-copySel.value = '1'; // one day back from 2026-11-12 -> the 2026-11-11 entry
-copySel.dispatchEvent(new window.Event('change', { bubbles: true }));
+const copyButton = window.document.getElementById('copy-previous');
+check('copy previous day is a button rather than a dropdown',
+  copyButton.tagName === 'BUTTON' && !window.document.getElementById('copy-days'));
+copyButton.click();
 await tick(200);
 const copyRow = window.document.querySelector('#copy-rows .copy-row');
-check('copy-from-N-days lists the P-9 row', !!copyRow && copyRow.textContent.includes('P-9'));
+check('copy previous day lists the P-9 row', !!copyRow && copyRow.textContent.includes('P-9'));
 copyRow.querySelector('input').value = '3';
 copyRow.querySelector('button').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(250);
@@ -310,6 +336,19 @@ await fetch(`${BASE}/entries/${copied.id}`, { method: 'DELETE', headers: { Cooki
 
 // ---- create a brand-new customer through the customers form ----
 const custForm = window.document.getElementById('customer-form');
+const customerDialog = window.document.getElementById('customer-dialog');
+check('customer form is in a closed popup initially',
+  custForm.closest('dialog') === customerDialog && !customerDialog.open);
+window.document.getElementById('customer-new').click();
+check('+ Customer opens a blank popup and focuses Name',
+  customerDialog.open && window.document.activeElement.id === 'customer-name'
+  && window.document.getElementById('customer-id').value === '');
+window.document.getElementById('customer-cancel').click();
+check('Cancel closes the customer popup', !customerDialog.open);
+window.document.getElementById('customer-new').click();
+customerDialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+check('Escape closes the customer popup', !customerDialog.open);
+window.document.getElementById('customer-new').click();
 window.document.getElementById('customer-name').value = 'Globex';
 window.document.getElementById('customer-currency').value = 'usd';
 window.document.getElementById('customer-rate').value = '45.50';
@@ -319,6 +358,8 @@ await tick(250);
 const customers = (await (await fetch(BASE + '/customers')).json()).customers;
 const globex = customers.find((c) => c.name === 'Globex');
 check('customer form created Globex', !!globex);
+check('customer save closes the popup and restores focus',
+  !customerDialog.open && window.document.activeElement.id === 'customer-new');
 // C7 regression: every customer picker refreshes immediately (used to need a
 // page reload, so a new customer could not be invoiced/expensed/timed).
 const optHas = (id, name) => [...window.document.getElementById(id).options].some((o) => o.textContent.includes(name));
@@ -402,19 +443,60 @@ check('cancel leaves the note unchanged (#126)',
   /Note unchanged/i.test(window.document.getElementById('live-region').textContent));
 window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 
-// Add row + copy-last-week controls exist.
-check('add-row control present', !!window.document.getElementById('week-add-row'));
-check('copy-from-week dropdown present', !!window.document.getElementById('week-copy-weeks'));
+check('Week add-row controls are removed',
+  ['week-add-row', 'week-add-project', 'week-add-task', 'week-add-confirm', 'week-add-cancel']
+    .every((id) => !window.document.getElementById(id)));
+check('copy previous week is a button rather than a dropdown',
+  window.document.getElementById('week-copy-previous').tagName === 'BUTTON'
+  && !window.document.getElementById('week-copy-weeks'));
 
 // ---- PROJECT FORM: prefill from customer + required currency/rate (#11) ----
 const tabCust = window.document.getElementById('tab-customers');
 tabCust.dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
+check('customer workspace explains how to begin project setup',
+  !window.document.getElementById('projects-empty-state').hidden
+  && !window.document.getElementById('tasks-empty-state').hidden);
+check('hierarchy creation buttons share one toolbar',
+  [...window.document.querySelectorAll('.hierarchy-actions button')].map((button) => button.id).join(',')
+  === 'customer-new,project-new,task-new');
+check('project and task creation require parent selections',
+  window.document.getElementById('project-new').disabled
+  && window.document.getElementById('task-new').disabled);
 // Click "Projects" on the ACME row to open the project form.
 const projBtn = [...window.document.querySelectorAll('#customer-table button')].find((b) => b.textContent === 'Projects');
 projBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(150);
+check('selecting a customer replaces the project empty state with its project list',
+  window.document.getElementById('projects-empty-state').hidden
+  && !window.document.getElementById('tasks-empty-state').hidden);
+check('selected customer is highlighted and enables only project creation',
+  window.document.querySelector('#customer-table .hierarchy-selected .hierarchy-select').getAttribute('aria-pressed') === 'true'
+  && !window.document.getElementById('project-new').disabled
+  && window.document.getElementById('task-new').disabled);
+const projectDialog = window.document.getElementById('project-dialog');
+window.document.getElementById('project-new').click();
+check('+ Project opens its popup with selected customer context',
+  projectDialog.open && window.document.getElementById('project-dialog-parent').textContent === 'ACME'
+  && window.document.activeElement.id === 'project-code');
+const projectParent = window.document.getElementById('project-parent-customer');
+check('project popup preselects its customer dropdown', projectParent.value === acmeOpt.value && !projectParent.disabled);
+projectParent.value = globex.id;
+projectParent.dispatchEvent(new window.Event('change', { bubbles: true }));
+check('changing project customer prefills its currency and rate',
+  window.document.getElementById('project-currency').value === 'USD'
+  && window.document.getElementById('project-rate').value === '45.50');
+projectParent.value = acmeOpt.value;
+projectParent.dispatchEvent(new window.Event('change', { bubbles: true }));
 check('project currency prefilled from customer', window.document.getElementById('project-currency').value === 'EUR');
 check('project rate prefilled from customer default', window.document.getElementById('project-rate').value === '60.00');
+window.document.getElementById('project-currency').value = '';
+window.document.getElementById('project-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+check('invalid project keeps its popup open with an error',
+  projectDialog.open && !window.document.getElementById('project-error').hidden);
+window.document.getElementById('project-cancel').click();
+check('project Cancel closes without saving', !projectDialog.open);
+window.document.getElementById('project-new').click();
 // Create a project through the form with an override rate.
 window.document.getElementById('project-code').value = 'mkt-2';
 window.document.getElementById('project-rate').value = '95.00';
@@ -423,13 +505,47 @@ await tick(250);
 const projs = (await (await fetch(BASE + `/customers/${acmeOpt.value}/projects`)).json()).projects;
 const mkt = projs.find((p) => p.code === 'MKT-2');
 check('project form created MKT-2 with prefilled EUR + override rate', mkt && mkt.currency === 'EUR' && mkt.rate_minor === 9500);
+check('project save closes popup and restores toolbar focus',
+  !projectDialog.open && window.document.activeElement.id === 'project-new');
 
 // ---- TASK MANAGER (#38): add a task to MKT-2, then log time against it ----
 const projRows = [...window.document.querySelectorAll('#project-table tbody tr')];
 const mktRow = projRows.find((r) => r.cells[0].textContent === 'MKT-2');
+const projectEdit = [...mktRow.querySelectorAll('button')].find((button) => button.textContent === 'Edit');
+projectEdit.click();
+check('project Edit opens its populated popup',
+  projectDialog.open && window.document.getElementById('project-code').value === 'MKT-2'
+  && window.document.getElementById('project-dialog-title').textContent === 'Edit project');
+check('editing a project locks its parent customer', projectParent.disabled && projectParent.value === acmeOpt.value);
+projectDialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+check('project Escape closes its popup', !projectDialog.open);
 const tasksBtn = [...mktRow.querySelectorAll('button')].find((b) => b.textContent === 'Tasks');
 tasksBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(150);
+check('selecting a project replaces the task empty state with its task list',
+  window.document.getElementById('tasks-empty-state').hidden);
+check('selected project is highlighted and enables task creation',
+  !!window.document.querySelector('#project-table .hierarchy-selected')
+  && !window.document.getElementById('task-new').disabled);
+const taskDialog = window.document.getElementById('task-dialog');
+window.document.getElementById('task-new').click();
+await tick(200);
+check('+ Task opens its popup with the customer/project path',
+  taskDialog.open && window.document.getElementById('task-dialog-parent').textContent === 'ACME / MKT-2'
+  && window.document.activeElement.id === 'task-code');
+const taskCustomer = window.document.getElementById('task-parent-customer');
+const taskProject = window.document.getElementById('task-parent-project');
+check('task popup preselects customer and project dropdowns',
+  taskCustomer.value === acmeOpt.value && taskProject.value === 'MKT-2');
+taskCustomer.value = globex.id;
+taskCustomer.dispatchEvent(new window.Event('change', { bubbles: true }));
+await tick(150);
+check('changing task customer clears unrelated project options',
+  ![...taskProject.options].some((option) => option.value === 'MKT-2'));
+taskCustomer.value = acmeOpt.value;
+taskCustomer.dispatchEvent(new window.Event('change', { bubbles: true }));
+await tick(150);
+taskProject.value = 'MKT-2';
 window.document.getElementById('task-code').value = 't1';
 window.document.getElementById('task-name').value = 'Sprint';
 window.document.getElementById('task-rate').value = '95.00';
@@ -438,6 +554,15 @@ await tick(250);
 const tasks = (await (await fetch(BASE + `/customers/${acmeOpt.value}/projects/MKT-2/tasks`)).json()).tasks;
 const t1 = tasks.find((t) => t.code === 'T1');
 check('task created via form with rate override', t1 && t1.rate_minor === 9500);
+check('task save closes its popup', !taskDialog.open);
+const taskEdit = [...window.document.querySelectorAll('#task-table tbody button')].find((button) => button.textContent === 'Edit');
+taskEdit.click();
+await tick(150);
+check('task Edit opens its populated popup',
+  taskDialog.open && window.document.getElementById('task-code').value === 'T1');
+check('editing a task locks its parent dropdowns', taskCustomer.disabled && taskProject.disabled);
+taskDialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+check('task Escape closes its popup', !taskDialog.open);
 
 // Entry form: choose MKT-2 -> task picker loads T1 -> log 1h against it.
 const custSel2 = window.document.getElementById('entry-customer');
@@ -594,6 +719,17 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 {
   window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(350);
+  check('Settings tab bar has Security, Invoice documents, Products & services',
+    [...window.document.querySelectorAll('#settings-tabs [role="tab"]')].map((tab) => tab.id).join(',') ===
+    'settings-tab-security,settings-tab-invoice,settings-tab-catalog,settings-tab-expenses');
+  check('Settings opens on Security & runtime by default',
+    window.document.getElementById('settings-tab-security').getAttribute('aria-selected') === 'true'
+    && !window.document.getElementById('settings-panel-security').hidden);
+  window.document.getElementById('settings-tab-catalog').dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('Products & services tab shows the catalog only',
+    window.document.getElementById('settings-tab-catalog').getAttribute('aria-selected') === 'true'
+    && !window.document.getElementById('settings-panel-catalog').hidden
+    && window.document.getElementById('settings-panel-invoice').hidden);
   window.document.getElementById('item-name').value = 'Site visit';
   window.document.getElementById('item-kind').value = 'service';
   window.document.getElementById('item-desc').value = 'On-site engineering visit';
@@ -602,6 +738,11 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   await tick(400);
   const cat = (await (await fetch(BASE + '/admin/item-types', { headers: { Cookie: SESSION_COOKIE } })).json()).item_types;
   check('catalog item created via the form (#147)', cat.length === 1 && cat[0].name === 'Site visit' && cat[0].default_price_minor === 12000);
+  window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('Invoice documents tab shows template and field-label settings',
+    window.document.getElementById('settings-tab-invoice').getAttribute('aria-selected') === 'true'
+    && !window.document.getElementById('settings-panel-invoice').hidden
+    && window.document.getElementById('settings-panel-catalog').hidden);
   window.document.getElementById('lb-total').value = 'Amount due';
   window.document.getElementById('lb-description').value = 'Work performed';
   window.document.getElementById('template-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
@@ -1004,20 +1145,37 @@ check('invoice rows no longer render a Sync button (#129)', !rowBtns().includes(
   check('login screen hides SSO box with none configured', window.document.getElementById('sso-box').hidden === true);
 }
 
-// ---- EXPENSES (#23): add a category + an expense via the forms ----
+// ---- EXPENSES (#23): popup entry, seeded categories, and Settings CRUD ----
 const tabExp = window.document.getElementById('tab-expenses');
 tabExp.dispatchEvent(new window.Event('click', { bubbles: true }));
-window.document.getElementById('category-name').value = 'Travel';
-window.document.getElementById('category-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-await tick(200);
-const cats = (await (await fetch(BASE + '/categories')).json()).categories;
-check('category created via form', cats.some((c) => c.name === 'Travel'));
-const travel = cats.find((c) => c.name === 'Travel');
+await tick(250);
+let cats = (await (await fetch(BASE + '/categories')).json()).categories;
+check('fresh installation seeds five common expense categories',
+  ['Food', 'Travel', 'Lodging', 'Supplies', 'Software'].every((name) => cats.some((category) => category.name === name)));
+check('expense page has no inline record/category editor',
+  !!window.document.getElementById('expense-new')
+  && window.document.getElementById('expense-dialog').open === false
+  && !window.document.getElementById('category-form').closest('#panel-expenses'));
+window.document.getElementById('expense-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+check('+ Expense opens a popup', window.document.getElementById('expense-dialog').open === true);
+const catPicker = window.document.getElementById('expense-category');
+check('category selector includes the five defaults and quick-add option',
+  ['Food', 'Travel', 'Lodging', 'Supplies', 'Software'].every((name) => [...catPicker.options].some((option) => option.textContent === name))
+  && [...catPicker.options].some((option) => option.value === '__add_expense_category__'));
+catPicker.value = '__add_expense_category__';
+catPicker.dispatchEvent(new window.Event('change', { bubbles: true }));
+check('Add new category opens the quick-add popup', window.document.getElementById('expense-category-dialog').open === true);
+window.document.getElementById('expense-category-name').value = 'Client Visit';
+window.document.getElementById('expense-category-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await tick(250);
+cats = (await (await fetch(BASE + '/categories')).json()).categories;
+const clientVisit = cats.find((category) => category.name === 'Client Visit');
+check('quick-added category is persisted and selected', !!clientVisit && catPicker.value === clientVisit.id);
 window.document.getElementById('expense-date').value = '2026-10-05';
 window.document.getElementById('expense-customer').value = acmeOpt.value;
 window.document.getElementById('expense-customer').dispatchEvent(new window.Event('change', { bubbles: true }));
 await tick(150);
-window.document.getElementById('expense-category').value = travel.id;
+window.document.getElementById('expense-category').value = clientVisit.id;
 window.document.getElementById('expense-amount').value = '125.00';
 window.document.getElementById('expense-currency').value = 'EUR';
 window.document.getElementById('expense-note').value = 'client visit flight';
@@ -1025,7 +1183,22 @@ window.document.getElementById('expense-form').dispatchEvent(new window.Event('s
 await tick(250);
 const exps = (await (await fetch(BASE + '/expenses')).json()).expenses;
 const ex = exps.find((e) => e.note === 'client visit flight');
-check('expense created via form with category + amount', ex && ex.amount_minor === 12500 && ex.category_id === travel.id);
+check('expense created via popup with category + amount', ex && ex.amount_minor === 12500 && ex.category_id === clientVisit.id);
+check('successful expense save closes popup', window.document.getElementById('expense-dialog').open === false);
+window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
+window.document.getElementById('settings-tab-expenses').dispatchEvent(new window.Event('click', { bubbles: true }));
+check('Expense categories has a dedicated Settings panel',
+  window.document.getElementById('settings-tab-expenses').getAttribute('aria-selected') === 'true'
+  && !window.document.getElementById('settings-panel-expenses').hidden);
+const editClientVisit = window.document.querySelector('#category-list button[aria-label="Edit category Client Visit"]');
+editClientVisit.dispatchEvent(new window.Event('click', { bubbles: true }));
+window.document.getElementById('category-name').value = 'Client visit costs';
+window.document.getElementById('category-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await tick(250);
+cats = (await (await fetch(BASE + '/categories')).json()).categories;
+check('Settings category form updates existing category via PUT',
+  cats.some((category) => category.id === clientVisit.id && category.name === 'Client visit costs'));
 
 // ---- SUBMISSIONS (#16): submit a fresh week via the GUI ----
 const fresh = await (await fetch(BASE + '/entries', { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ date: '2027-01-05', customer_id: acmeOpt.value, project_code: 'P-9', hours: 2 }) })).json();
@@ -1046,22 +1219,30 @@ const weekDateEl = window.document.getElementById('week-date');
 weekDateEl.value = '2026-12-07';
 weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
 await tick(300);
+const emptyWeekNotice = window.document.querySelector('#week-table tbody .week-empty-notice');
+check('empty week keeps its table and headers visible',
+  !window.document.getElementById('week-table').hidden
+  && window.document.querySelectorAll('#week-table thead th').length === 9);
+check('empty week notice spans every column inside the table',
+  emptyWeekNotice && emptyWeekNotice.colSpan === 9
+  && emptyWeekNotice.querySelector('strong').textContent === 'No time logged'
+  && emptyWeekNotice.textContent.includes("You haven't recorded any time yet this week."));
 
 // Copy last week's project rows into an empty week (MKT-2 has 2026-12-01).
-const copyWeeks = window.document.getElementById('week-copy-weeks');
-copyWeeks.value = '1';
-copyWeeks.dispatchEvent(new window.Event('change', { bubbles: true }));
+const copyWeeks = window.document.getElementById('week-copy-previous');
+copyWeeks.click();
 await tick(400);
 const wkBody = window.document.querySelector('#week-table tbody');
 const copiedRow = [...wkBody.querySelectorAll('tr')].find((r) => r.textContent.includes('MKT-2'));
 check('copy-from-last-week added the MKT-2 row', !!copiedRow);
 check('copied row starts empty', !!copiedRow && [...copiedRow.querySelectorAll('input.cell-input')].every((i) => i.value === ''));
+check('copied project rows replace the empty-week notice',
+  !window.document.querySelector('#week-table .week-empty-notice'));
 check('copied row total is 0:00', copiedRow && copiedRow.querySelector('.row-total').textContent.trim() === '0:00');
 
 // #128: re-copy is idempotent and says so; empty copied rows belong to THIS
 // week (gone when viewing another week, back when returning).
-copyWeeks.value = '1';
-copyWeeks.dispatchEvent(new window.Event('change', { bubbles: true }));
+copyWeeks.click();
 await tick(400);
 const rowsAfter2 = [...window.document.querySelectorAll('#week-table tbody tr')].filter((r) => r.textContent.includes('MKT-2')).length;
 check('re-copy adds no duplicate rows (#128)', rowsAfter2 === 1);
@@ -1078,46 +1259,6 @@ await tick(300);
 check('copied rows return when the week is redisplayed (#128)',
   [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')));
 
-// Add row control reveals the project picker and appends a new row.
-window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
-const addSel = window.document.getElementById('week-add-project');
-check('add-row picker lists active projects', !addSel.hidden && [...addSel.options].some((o) => o.textContent.includes('P-9')));
-addSel.value = `${acmeOpt.value}|P-9`;
-window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(400);
-check('add-row appended the P-9 row', [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('P-9')));
-
-// #127/#137: truthful Add-row behaviour. Occupied PROJECT-LEVEL lines are
-// excluded; a project shown only via task rows stays addable (that is the
-// point of #137); an exhausted picker explains itself.
-check('confirm returns focus to Add row (#127)', window.document.activeElement && window.document.activeElement.id === 'week-add-row');
-window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
-const addSel2 = window.document.getElementById('week-add-project');
-const addOpts = [...addSel2.options].map((o) => o.value);
-check('project-level P-9 row is excluded from the picker (#127)',
-  !addOpts.includes(`${acmeOpt.value}|P-9`));
-check('task-only MKT-2 stays addable at project level (#137)',
-  addOpts.includes(`${acmeOpt.value}|MKT-2`));
-// Add MKT-2 project-level too -> the picker becomes exhausted.
-addSel2.value = `${acmeOpt.value}|MKT-2`;
-window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(400);
-const rows127 = [...window.document.querySelectorAll('#week-table tbody tr')].map((r) => r.textContent);
-check('consecutive adds keep every project line (#127)',
-  rows127.some((t) => t.includes('P-9')) && rows127.some((t) => t.includes('MKT-2')));
-window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
-const sel127 = window.document.getElementById('week-add-project');
-const allShown = [...sel127.options].some((o) => o.textContent.includes('already in this week'));
-check('exhausted picker states so (#127)', allShown);
-window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(300);
-check('exhausted confirm explains instead of phantom-adding (#127)',
-  /already in this week/i.test(window.document.getElementById('live-region').textContent)
-  && window.document.getElementById('week-add-project').hidden === true);
-
 // Lock column: the submitted 2027-01 week renders its cell disabled.
 weekDateEl.value = '2027-01-05';
 weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
@@ -1131,6 +1272,9 @@ check('submitted-week cell renders locked (disabled input)', !!lockedCell && loc
 check('locked row marked for the lock column', !!lockedCell && lockedCell.closest('tr').classList.contains('has-lock'));
 
 // ---- CONFIG (#94): effective config renders + edit persists + source flips ----
+window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
+window.document.getElementById('settings-tab-security').dispatchEvent(new window.Event('click', { bubbles: true }));
 const cfgRows = [...window.document.querySelectorAll('#config-table tbody tr')];
 check('config table renders whitelisted rows', cfgRows.length >= 5);
 const daysRow = cfgRows.find((r) => r.cells[0].textContent === 'reminder_days');
@@ -1150,9 +1294,11 @@ check('secret-shaped config keys are refused', badCfg.status === 422);
 // ---- INVOICE TEMPLATE (#116): admin editor, cheat-sheet, rejection, preview ----
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(300);
+window.document.getElementById('settings-tab-security').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('Settings discloses the email transport state (#130)',
   /Email delivery:/i.test(window.document.getElementById('email-status').textContent));
 const varRows = [...window.document.querySelectorAll('#template-vars tbody tr')];
+window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.Event('click', { bubbles: true }));
 // ---- APPEARANCE & MESSAGES (#146) ----
 {
   const set = (id, v) => { const el = window.document.getElementById(id); el.value = v; };
@@ -1528,6 +1674,17 @@ if (recBtn) {
   check('teardown removed the draft (#141)', goneInv);
   check('teardown removed the entry (#141)', goneEnt);
 }
+
+const memberDom = new JSDOM(html, { runScripts: 'outside-only', url: BASE + '/' });
+memberDom.window.eval(`${appJs}\nshowAccount({ role: "member", name: "Member" }); initSettingsTabs();`);
+const memberDocument = memberDom.window.document;
+check('members can manage expense categories without admin Settings panels',
+  !memberDocument.getElementById('tab-settings').hidden
+  && !memberDocument.getElementById('settings-tab-expenses').hidden
+  && !memberDocument.getElementById('settings-panel-expenses').hidden
+  && memberDocument.getElementById('settings-tab-security').hidden
+  && memberDocument.getElementById('settings-panel-security').hidden);
+memberDom.window.close();
 
 console.log(`\n${failures === 0 ? 'ALL GUI CHECKS PASSED' : failures + ' GUI CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

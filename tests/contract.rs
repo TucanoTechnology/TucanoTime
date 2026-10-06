@@ -1322,6 +1322,20 @@ async fn invoice_rejects_mixed_currencies() {
 #[tokio::test]
 async fn category_and_expense_crud_with_references() {
     let (app, _d) = app().await;
+    let (s0, defaults) = json_req(&app, "GET", "/categories", None).await;
+    assert_eq!(s0, StatusCode::OK);
+    let default_names = defaults["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|category| category["name"].as_str())
+        .collect::<Vec<_>>();
+    for name in ["Food", "Travel", "Lodging", "Supplies", "Software"] {
+        assert!(
+            default_names.contains(&name),
+            "missing default category {name}"
+        );
+    }
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
@@ -1329,6 +1343,16 @@ async fn category_and_expense_crud_with_references() {
     let (sc, cat) = json_req(&app, "POST", "/categories", Some(json!({"name":"Travel"}))).await;
     assert_eq!(sc, StatusCode::CREATED);
     let cat_id = cat["id"].as_str().unwrap();
+
+    let (su, updated) = json_req(
+        &app,
+        "PUT",
+        &format!("/categories/{cat_id}"),
+        Some(json!({"name":"Work travel","default_billable":true,"active":true})),
+    )
+    .await;
+    assert_eq!(su, StatusCode::OK);
+    assert_eq!(updated["name"], "Work travel");
 
     let (se, exp) = json_req(
         &app,
@@ -2385,6 +2409,63 @@ async fn notifications_endpoint_empty_then_read() {
     assert_eq!(body["unread"], 0);
     let (s2, _) = json_req(&app, "POST", "/notifications/read", None).await;
     assert_eq!(s2, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn notifications_hide_stale_and_resolved_no_time_reminders() {
+    let (app, dir) = app().await;
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let user = store
+        .list_users()
+        .unwrap()
+        .into_iter()
+        .find(|user| user.email == ADMIN_EMAIL)
+        .unwrap();
+    let now = chrono::Utc::now();
+    for (kind, created_at) in [
+        ("no_time_today", now - chrono::Duration::days(1)),
+        ("no_time_today", now),
+        ("submit_timesheet", now),
+    ] {
+        store
+            .push_notification(
+                user.id,
+                &tucano_time::domain::Notification {
+                    id: uuid::Uuid::new_v4(),
+                    kind: kind.to_string(),
+                    title: kind.to_string(),
+                    body: String::new(),
+                    created_at,
+                    read: false,
+                },
+            )
+            .unwrap();
+    }
+    let (status, before) = json_req(&app, "GET", "/notifications", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(before["notifications"].as_array().unwrap().len(), 2);
+    assert_eq!(before["unread"], 2);
+    let customer = new_customer(&app, "Reminder test", "EUR", 6000).await;
+    let cid = customer["id"].as_str().unwrap();
+    new_project(&app, cid, "REMINDER", json!({})).await;
+    let (created, _) = json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({
+            "date": now.date_naive().to_string(),
+            "customer_id": cid,
+            "project_code": "REMINDER",
+            "hours": 1,
+        })),
+    )
+    .await;
+    assert_eq!(created, StatusCode::CREATED);
+    let (_, after) = json_req(&app, "GET", "/notifications", None).await;
+    let notifications = after["notifications"].as_array().unwrap();
+    assert_eq!(notifications.len(), 1);
+    assert_eq!(notifications[0]["kind"], "submit_timesheet");
+    assert_eq!(after["unread"], 1);
 }
 
 #[tokio::test]
