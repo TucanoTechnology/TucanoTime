@@ -915,6 +915,34 @@ const termy = termCusts.find((c) => c.name === 'Termy LLC');
 check('customer invoice fields persist via the form', !!termy && termy.payment_terms.kind === 'upon_receipt'
   && termy.invoice_subject.includes('%invoice_number%') && termy.invoice_notes.includes('quote the invoice'));
 
+  // #139: address, VAT and a billing contact through the same form.
+  window.document.getElementById('customer-name').value = 'AddrCo';
+  window.document.getElementById('customer-currency').value = 'EUR';
+  window.document.getElementById('customer-rate').value = '40';
+  window.document.getElementById('cust-street').value = 'Harbour 9';
+  window.document.getElementById('cust-city').value = 'Antwerp';
+  window.document.getElementById('cust-postal').value = '2000';
+  window.document.getElementById('cust-country').value = 'BE';
+  window.document.getElementById('cust-tax').value = '21';
+  window.document.getElementById('contact-add').dispatchEvent(new window.Event('click', { bubbles: true }));
+  {
+    const row = window.document.querySelector('#contact-rows .contact-row');
+    const inputs = row.querySelectorAll('input');
+    inputs[0].value = 'Ada Finance';
+    inputs[1].value = 'Finance';
+    inputs[2].value = 'ada@addrco.test';
+    inputs[3].checked = true; // billing contact
+  }
+  window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(400);
+  const addrCusts = (await (await fetch(BASE + '/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
+  const addrCo = addrCusts.find((x) => x.name === 'AddrCo');
+  check('customer address + VAT persist via the form (#139)',
+    !!addrCo && addrCo.address.country === 'BE' && addrCo.tax_hundredths === 2100);
+  check('billing contact persists via the form (#139)',
+    !!addrCo && addrCo.contacts.length === 1 && addrCo.contacts[0].billing === true
+    && addrCo.contacts[0].email === 'ada@addrco.test');
+
 // Document preview card uses GET /invoices/{id}/document on the newest invoice.
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(400);

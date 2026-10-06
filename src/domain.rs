@@ -172,6 +172,142 @@ pub struct Customer {
     /// (#116). Empty defers to the org template, then the legacy subject.
     #[serde(default)]
     pub invoice_subject: String,
+    /// Postal address for invoice documents and e-invoicing (#139).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<Address>,
+    /// Named contacts; the one flagged `billing` receives invoice emails
+    /// when set (#139). Legacy customers have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<Contact>,
+    /// Default VAT percent in HUNDREDTHS of a percent (2100 = 21.00%).
+    /// Integer, never a float; #143's line model will consume it.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub tax_hundredths: u16,
+    /// Default discount percent, same hundredths encoding, applied by #143.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub discount_hundredths: u16,
+}
+
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
+}
+
+/// A postal address; every part is free text with validated bounds (#139).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Address {
+    #[serde(default)]
+    pub street: String,
+    #[serde(default)]
+    pub city: String,
+    #[serde(default)]
+    pub postal_code: String,
+    #[serde(default)]
+    pub country: String,
+}
+
+/// A named person at a customer (#139). `billing` marks the invoice
+/// recipient; at most one contact may carry it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Contact {
+    pub name: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub billing: bool,
+}
+
+impl Customer {
+    /// Where invoice emails go: the flagged billing contact's address when
+    /// present, else the legacy top-level email (#139 keeps both truthful).
+    #[must_use]
+    pub fn billing_email(&self) -> &str {
+        self.contacts
+            .iter()
+            .find(|c| c.billing && !c.email.trim().is_empty())
+            .map(|c| c.email.trim())
+            .unwrap_or(self.email.trim())
+    }
+}
+
+pub const MAX_CONTACTS: usize = 10;
+
+/// Validate the #139 additions; appends FieldErrors like every other input.
+pub fn validate_customer_billing_fields(
+    address: &Option<Address>,
+    contacts: &[Contact],
+    tax_hundredths: u16,
+    discount_hundredths: u16,
+    errors: &mut Vec<FieldError>,
+) {
+    if let Some(a) = address {
+        for (field, val, max) in [
+            ("address.street", &a.street, 120usize),
+            ("address.city", &a.city, 80),
+            ("address.postal_code", &a.postal_code, 16),
+            ("address.country", &a.country, 56),
+        ] {
+            if val.chars().count() > max {
+                errors.push(FieldError::new(field, format!("too long (max {max})")));
+            }
+        }
+        let any = [
+            a.street.trim(),
+            a.city.trim(),
+            a.postal_code.trim(),
+            a.country.trim(),
+        ]
+        .iter()
+        .any(|v| !v.is_empty());
+        if any && a.country.trim().len() < 2 {
+            errors.push(FieldError::new(
+                "address.country",
+                "required when addressing an invoice",
+            ));
+        }
+    }
+    if contacts.len() > MAX_CONTACTS {
+        errors.push(FieldError::new(
+            "contacts",
+            format!("at most {MAX_CONTACTS} contacts"),
+        ));
+    }
+    for (i, c) in contacts.iter().enumerate() {
+        let name = format!("contacts[{i}].name");
+        if c.name.trim().is_empty() || c.name.chars().count() > 120 {
+            errors.push(FieldError::new(name, "required, at most 120 characters"));
+        }
+        if c.role.chars().count() > 60 {
+            errors.push(FieldError::new(
+                format!("contacts[{i}].role"),
+                "at most 60 characters",
+            ));
+        }
+        let email = c.email.trim();
+        if !email.is_empty() && !crate::email::valid_address(email) {
+            errors.push(FieldError::new(
+                format!("contacts[{i}].email"),
+                "not a valid email address",
+            ));
+        }
+    }
+    if contacts.iter().filter(|c| c.billing).count() > 1 {
+        errors.push(FieldError::new(
+            "contacts",
+            "only one contact can be the billing contact",
+        ));
+    }
+    for (field, v) in [
+        ("tax_hundredths", tax_hundredths),
+        ("discount_hundredths", discount_hundredths),
+    ] {
+        if v > 10_000 {
+            errors.push(FieldError::new(field, "at most 100.00 percent"));
+        }
+    }
 }
 
 /// Payment terms that decide an invoice's `due_date` at issue (#116).
@@ -1077,6 +1213,14 @@ pub struct CustomerInput {
     pub invoice_notes: String,
     #[serde(default)]
     pub invoice_subject: String,
+    #[serde(default)]
+    pub address: Option<Address>,
+    #[serde(default)]
+    pub contacts: Vec<Contact>,
+    #[serde(default)]
+    pub tax_hundredths: u16,
+    #[serde(default)]
+    pub discount_hundredths: u16,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1188,6 +1332,13 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
         crate::template::SUBJECT_MAX,
         &mut errors,
     );
+    validate_customer_billing_fields(
+        &input.address,
+        &input.contacts,
+        input.tax_hundredths,
+        input.discount_hundredths,
+        &mut errors,
+    );
     if errors.is_empty() {
         Ok(CustomerDraft {
             name: name.unwrap(),
@@ -1198,6 +1349,24 @@ pub fn validate_customer_input(input: &CustomerInput) -> Result<CustomerDraft, V
             payment_terms: input.payment_terms,
             invoice_notes: input.invoice_notes.trim().to_string(),
             invoice_subject: input.invoice_subject.trim().to_string(),
+            address: input.address.as_ref().map(|a| Address {
+                street: a.street.trim().to_string(),
+                city: a.city.trim().to_string(),
+                postal_code: a.postal_code.trim().to_string(),
+                country: a.country.trim().to_string(),
+            }),
+            contacts: input
+                .contacts
+                .iter()
+                .map(|c| Contact {
+                    name: c.name.trim().to_string(),
+                    role: c.role.trim().to_string(),
+                    email: c.email.trim().to_string(),
+                    billing: c.billing,
+                })
+                .collect(),
+            tax_hundredths: input.tax_hundredths,
+            discount_hundredths: input.discount_hundredths,
         })
     } else {
         Err(errors)
@@ -1291,6 +1460,10 @@ pub struct CustomerDraft {
     pub payment_terms: Option<PaymentTerms>,
     pub invoice_notes: String,
     pub invoice_subject: String,
+    pub address: Option<Address>,
+    pub contacts: Vec<Contact>,
+    pub tax_hundredths: u16,
+    pub discount_hundredths: u16,
 }
 
 #[derive(Debug)]
@@ -1418,6 +1591,10 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         }
     }
 
@@ -1481,6 +1658,10 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         };
         let project = Project {
             customer_id: customer.id,

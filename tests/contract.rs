@@ -1815,6 +1815,10 @@ fn concurrent_writer_times_out_with_lock_busy() {
         payment_terms: None,
         invoice_notes: String::new(),
         invoice_subject: String::new(),
+        address: None,
+        contacts: vec![],
+        tax_hundredths: 0,
+        discount_hundredths: 0,
     };
     let err = store.put_customer(&cust).expect_err("should time out");
     assert!(
@@ -4537,4 +4541,134 @@ async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     )
     .await;
     assert_eq!(s7, StatusCode::FORBIDDEN);
+}
+
+// ------------------------------------------------------------------ #139 ---
+
+#[tokio::test]
+async fn customer_billing_details_round_trip_and_validate() {
+    let (app, _d) = app().await;
+    let (s, c) = json_req(
+        &app,
+        "POST",
+        "/customers",
+        Some(
+            json!({"name":"GLOBAL","currency":"USD","default_rate_minor":7000,
+          "address":{"street":"Mainstross 1","city":"Berlin","postal_code":"10115","country":"DE"},
+          "contacts":[{"name":"Ada","role":"Finance","email":"ada@global.test","billing":true},
+                      {"name":"Bob","role":"Ops","email":"bob@global.test"}],
+          "tax_hundredths":1900,"discount_hundredths":250}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{c}");
+    assert_eq!(c["address"]["country"], "DE");
+    assert_eq!(c["contacts"].as_array().unwrap().len(), 2);
+    assert_eq!(c["tax_hundredths"], 1900);
+    assert_eq!(c["discount_hundredths"], 250);
+    // No top-level email at all: the billing contact receives the invoice.
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(
+        &app,
+        &cid,
+        "P1",
+        json!({"currency":"USD","rate_minor":7000}),
+    )
+    .await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":2})),
+    )
+    .await;
+    let (_s2, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["sent_to"], "ada@global.test",
+        "billing contact wins (#139)"
+    );
+    assert_eq!(app.email.messages()[0].to, "ada@global.test");
+
+    // Validation matrix: bad contact email, two billing flags, tax too big,
+    // country too short — all 422, nothing persisted by the last shape.
+    let (s3, b3) = json_req(
+        &app,
+        "POST",
+        "/customers",
+        Some(json!({"name":"BAD","currency":"EUR","default_rate_minor":1,
+          "contacts":[{"name":"N","email":"nope"}]})),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::UNPROCESSABLE_ENTITY, "{b3}");
+    let (s4, _) = json_req(
+        &app,
+        "POST",
+        "/customers",
+        Some(json!({"name":"BAD","currency":"EUR","default_rate_minor":1,
+          "contacts":[{"name":"A","billing":true},{"name":"B","billing":true}]})),
+    )
+    .await;
+    assert_eq!(s4, StatusCode::UNPROCESSABLE_ENTITY);
+    let (s5, _) = json_req(
+        &app,
+        "POST",
+        "/customers",
+        Some(json!({"name":"BAD","currency":"EUR","default_rate_minor":1,"tax_hundredths":10001})),
+    )
+    .await;
+    assert_eq!(s5, StatusCode::UNPROCESSABLE_ENTITY);
+    let (s6, b6) = json_req(
+        &app,
+        "POST",
+        "/customers",
+        Some(json!({"name":"BAD","currency":"EUR","default_rate_minor":1,
+          "address":{"street":"x","country":"D"}})),
+    )
+    .await;
+    assert_eq!(s6, StatusCode::UNPROCESSABLE_ENTITY, "{b6}");
+    let (_s7, list) = json_req(&app, "GET", "/customers", None).await;
+    assert!(
+        list["customers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["name"] != "BAD"),
+        "rejections persisted nothing"
+    );
+}
+
+#[tokio::test]
+async fn legacy_customer_keeps_working_and_new_fields_are_omitted_when_empty() {
+    let (app, d) = app().await;
+    let c = new_customer(&app, "OLDSTYLE", "EUR", 5000).await; // only the pre-#139 shape
+    assert_eq!(c["email"], "");
+    assert!(c.get("contacts").is_none(), "empty vec is skipped: {c}");
+    assert!(c.get("address").is_none());
+    assert!(c.get("tax_hundredths").is_none() || c["tax_hundredths"] == 0);
+    // The stored JSON lacks the new keys entirely; reads must work anyway.
+    let path = d
+        .path()
+        .join("data")
+        .join("customers")
+        .join(format!("{}.json", c["id"].as_str().unwrap()));
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(!raw.contains("contacts"));
+    let (_s2, got) = json_req(
+        &app,
+        "GET",
+        &format!("/customers/{}", c["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    assert_eq!(got["name"], "OLDSTYLE");
 }

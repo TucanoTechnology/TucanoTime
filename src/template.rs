@@ -643,6 +643,10 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: "%invoice_number% for %customer_name%".into(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         };
         let template = InvoiceTemplate {
             subject: "Invoice %invoice_number%".into(),
@@ -678,6 +682,10 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         };
         let template = InvoiceTemplate::default();
         let inv = sample_invoice();
@@ -709,6 +717,10 @@ mod tests {
             payment_terms: None,
             invoice_notes: "Thanks for the swift payment!".into(),
             invoice_subject: String::new(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         };
         let template = InvoiceTemplate {
             body: "## Work for %invoice_issue_month%\n- consultancy".into(),

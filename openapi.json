@@ -204,6 +204,37 @@
             "type": "string",
             "maxLength": 120,
             "description": "Per-customer subject override with %variables% (#116)."
+          },
+          "address": {
+            "description": "Postal address (#139).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contacts": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            },
+            "description": "Billing contacts (#139). When a contact is flagged billing, invoice emails go there."
+          },
+          "tax_hundredths": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Default VAT in hundredths of a percent (2100 = 21.00%). Integer, never float."
+          },
+          "discount_hundredths": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Default discount, same encoding."
           }
         },
         "additionalProperties": false
@@ -256,6 +287,37 @@
             "type": "string",
             "maxLength": 120,
             "description": "Per-customer subject override with %variables% (#116)."
+          },
+          "address": {
+            "description": "Postal address (#139).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contacts": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            },
+            "description": "Billing contacts (#139). When a contact is flagged billing, invoice emails go there."
+          },
+          "tax_hundredths": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Default VAT in hundredths of a percent (2100 = 21.00%). Integer, never float."
+          },
+          "discount_hundredths": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Default discount, same encoding."
           }
         },
         "additionalProperties": false
@@ -1676,6 +1738,56 @@
           "active": {
             "type": "boolean",
             "description": "false pauses generation; the billing cursor (last_period_end) is kept (#136)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Address": {
+        "type": "object",
+        "description": "Postal address parts (#139), free text with length bounds.",
+        "properties": {
+          "street": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "postal_code": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "country": {
+            "type": "string",
+            "maxLength": 56,
+            "description": "Required (min 2 chars) when any address part is set."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Contact": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "description": "Named person at a customer (#139); at most one may be the billing contact.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "billing": {
+            "type": "boolean",
+            "default": false
           }
         },
         "additionalProperties": false

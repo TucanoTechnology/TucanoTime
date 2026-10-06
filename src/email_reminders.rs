@@ -174,7 +174,9 @@ impl Job for EmailReminderJob {
             let Some(customer) = customers.iter().find(|c| c.id == inv.customer_id) else {
                 continue;
             };
-            if customer.email.trim().is_empty() {
+            // #139: prefer the billing contact, fall back to the top-level email.
+            let billing_email = customer.billing_email().to_string();
+            if billing_email.is_empty() {
                 continue;
             }
             // Resolve the PDF to attach (#113): the archived bytes when the
@@ -194,7 +196,7 @@ impl Job for EmailReminderJob {
                 attachment.is_some(),
             );
             let msg = EmailMessage {
-                to: customer.email.clone(),
+                to: billing_email,
                 subject: format!("Overdue invoice {}", inv.number),
                 text,
                 html: None,

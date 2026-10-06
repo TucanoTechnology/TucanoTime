@@ -242,6 +242,18 @@
         <div class="field"><label for="customer-currency">Default currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
         <div class="field"><label for="customer-email">Billing email (optional, for invoice delivery)</label><input id="customer-email" type="email" maxlength="200" autocomplete="off"></div>
+        <fieldset class="field"><legend>Billing details (#139)</legend>
+          <div class="field"><label for="cust-street">Street</label><input id="cust-street" maxlength="120" autocomplete="off"></div>
+          <div class="field"><label for="cust-city">City</label><input id="cust-city" maxlength="80" autocomplete="off"></div>
+          <div class="field"><label for="cust-postal">Postal code</label><input id="cust-postal" maxlength="16" autocomplete="off"></div>
+          <div class="field"><label for="cust-country">Country</label><input id="cust-country" maxlength="56" autocomplete="off"></div>
+          <div class="field"><label for="cust-tax">Default VAT % (e.g. 21 or 20.5)</label><input id="cust-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          <div class="field"><label for="cust-discount">Default discount %</label><input id="cust-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          <div class="field"><span id="contacts-label">Contacts (one may be the billing recipient)</span>
+            <div id="contact-rows"></div>
+            <button type="button" id="contact-add" class="secondary">+ Add contact</button>
+          </div>
+        </fieldset>
         <fieldset class="field"><legend>Invoice document (#116)</legend>
           <div class="field"><label for="customer-terms">Payment terms (due date at issue)</label>
             <select id="customer-terms">
