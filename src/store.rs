@@ -885,7 +885,16 @@ impl Store {
         if !doc.exists() {
             return Err(StoreError::NotFound);
         }
-        std::fs::remove_dir_all(self.root.join("customers").join(id.to_string()))?;
+        // The projects live in a sibling DIRECTORY (customers/<id>/projects),
+        // which only exists once a project was ever added; ENOENT here must
+        // not fail the deletion of a project-less customer (found by the
+        // #141 workflow teardown — previously a 500).
+        let dir = self.root.join("customers").join(id.to_string());
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(StoreError::Io(e.to_string())),
+        }
         std::fs::remove_file(&doc)?;
         Ok(())
     }

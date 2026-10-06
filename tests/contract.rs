@@ -5353,3 +5353,22 @@ async fn appearance_and_messages_are_honored_not_inert() {
         "cleared accent = no color"
     );
 }
+
+#[tokio::test]
+async fn customer_without_ever_having_projects_deletes_cleanly() {
+    // #141 regression: the projects directory only exists after a project was
+    // added; remove_dir_all's ENOENT used to surface as a 500.
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "BARE", "EUR", 5000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (s, _, _) = raw_req(&app, "DELETE", &format!("/customers/{cid}")).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_sg, list) = json_req(&app, "GET", "/customers", None).await;
+    assert!(
+        list["customers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|x| x["id"] != c["id"])
+    );
+}
