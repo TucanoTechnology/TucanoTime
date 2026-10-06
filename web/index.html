@@ -438,6 +438,26 @@
         <tbody></tbody>
       </table>
       <p id="rec-empty" hidden>No recurring schedules yet.</p>
+      <h2>Retainers</h2>
+      <p class="hint">Advance funds held for a customer/project (#144). The balance is always the reconciled ledger; a draw applies funds and is <strong>not</strong> an invoice payment. Closing is final.</p>
+      <form id="ret-form" class="card">
+        <div class="field"><label for="ret-customer">Customer</label><select id="ret-customer" required></select></div>
+        <div class="field"><label for="ret-project">Project</label><select id="ret-project" required></select></div>
+        <div class="field"><label for="ret-opening">Opening funds (optional)</label><input id="ret-opening" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
+        <p class="form-error" id="ret-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="ret-add">Create retainer</button></div>
+      </form>
+      <table id="ret-table">
+        <caption class="sr-only">Retainer balances</caption>
+        <thead><tr><th scope="col">Customer / project</th><th scope="col" class="num">Balance</th><th scope="col">Status</th><th scope="col">Last activity</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="ret-empty" hidden>No retainers yet.</p>
+      <div id="ret-detail" class="card" role="region" aria-label="Retainer history" hidden>
+        <div class="ip-head"><h3 id="ret-detail-title">Ledger</h3>
+        <button type="button" id="ret-detail-close" class="link secondary">Close</button></div>
+        <ul id="ret-history"></ul>
+      </div>
       <!-- #133: row selection opens the live document preview. -->
       <div id="invoice-preview" class="card" role="region" aria-label="Invoice document preview" hidden>
         <div class="ip-head">

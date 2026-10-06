@@ -121,6 +121,13 @@ impl Entity for crate::domain::ItemType {
     }
 }
 
+impl Entity for crate::retainer::Retainer {
+    const DIR: &'static str = "retainers";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
 impl Entity for Category {
     const DIR: &'static str = "categories";
     fn id(&self) -> String {
@@ -538,6 +545,43 @@ impl Store {
 
     pub fn delete_item_type(&self, id: Uuid) -> Result<(), StoreError> {
         self.remove_doc::<crate::domain::ItemType>(&id.to_string())
+    }
+
+    // ---------------------------------------------------------- retainers --
+
+    pub fn list_retainers(&self) -> Result<Vec<crate::retainer::Retainer>, StoreError> {
+        let mut out = self.list_docs::<crate::retainer::Retainer>()?;
+        out.sort_by_key(|r| r.created_at);
+        Ok(out)
+    }
+
+    pub fn get_retainer(&self, id: Uuid) -> Result<Option<crate::retainer::Retainer>, StoreError> {
+        self.get_doc::<crate::retainer::Retainer>(&id.to_string())
+    }
+
+    pub fn put_retainer(&self, r: &crate::retainer::Retainer) -> Result<(), StoreError> {
+        self.put_doc(r)
+    }
+
+    /// Read-modify-write a retainer's ledger under the store lock (#144):
+    /// two concurrent operations can never interleave a half-applied tx.
+    pub fn update_retainer<F, E>(
+        &self,
+        id: Uuid,
+        f: F,
+    ) -> Result<crate::retainer::Retainer, StoreError>
+    where
+        F: FnOnce(&mut crate::retainer::Retainer) -> Result<(), E>,
+        E: std::fmt::Display,
+    {
+        let _guard = self.write_lock()?;
+        let path = self.doc_path::<crate::retainer::Retainer>(&id.to_string());
+        let Some(mut r) = read_json::<crate::retainer::Retainer>(&path)? else {
+            return Err(StoreError::NotFound);
+        };
+        f(&mut r).map_err(|e| StoreError::Io(e.to_string()))?;
+        write_json(&path, &r)?;
+        Ok(r)
     }
 
     // ------------------------------------------------------------- invoices --

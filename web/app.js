@@ -1710,7 +1710,7 @@ async function refreshCustomerPickers() {
   // C7: every customer picker (day form, invoices, expenses, timer) refreshes
   // from one place — previously a newly added customer could not be invoiced
   // until a full page reload.
-  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer', 'ed-customer', 'iw-customer']) {
+  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer', 'ed-customer', 'iw-customer', 'ret-customer']) {
     const picker = $(id);
     if (picker) fillCustomerSelect(picker, picker.value, true);
   }
@@ -2649,6 +2649,146 @@ async function saveCatalogItem(evt) {
   }
 }
 
+// ------------------------------------------------------------ retainers ----
+//
+// #144: retainer balances over the Invoices tab. The GUI never shows a
+// stored balance — the server returns balance_minor reconciled from the
+// ledger, and the history view renders that same ledger. Add/draw/create
+// carry idempotency keys, so a double click can never double-post money.
+
+async function refreshRetainers() {
+  let rows = [];
+  try {
+    rows = (await api.get('/retainers')).retainers || [];
+  } catch {
+    return; // members: admin surface
+  }
+  const tbody = $('ret-table').querySelector('tbody');
+  tbody.textContent = '';
+  for (const r of rows) {
+    const actions = [
+      el('button', { type: 'button', cls: 'link', text: 'History',
+        on: { click: () => retShow(r.id) } }),
+    ];
+    if (r.status === 'open') {
+      actions.push(
+        el('button', { type: 'button', cls: 'link', text: 'Add funds',
+          on: { click: () => retAdd(r) } }),
+        el('button', { type: 'button', cls: 'link', text: 'Draw funds',
+          on: { click: () => retDraw(r) } }),
+        el('button', { type: 'button', cls: 'danger', text: 'Close',
+          on: { click: () => retClose(r) } }),
+      );
+    }
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: `${customerName(r.customer_id)} / ${r.project_code}` }),
+        el('td', { cls: 'num', text: `${r.currency} ${formatMoney(Math.max(r.balance_minor, 0))}` }),
+        el('td', {}, [el('span', { cls: r.status === 'open' ? 'badge on' : 'badge', text: r.status })]),
+        el('td', { text: r.last_activity ? String(r.last_activity).slice(0, 10) : '\u2014' }),
+        el('td', { cls: 'actions-col' }, actions),
+      ]),
+    );
+  }
+  $('ret-table').hidden = rows.length === 0;
+  $('ret-empty').hidden = rows.length !== 0;
+}
+
+async function retAdd(r) {
+  const amt = await askPrompt(`Add funds in ${r.currency} (e.g. 250.00):`, '');
+  if (!amt) return;
+  const minor = parseHundredths(amt);
+  if (!Number.isFinite(minor) || minor <= 0) {
+    announce('Enter a positive amount.');
+    return;
+  }
+  try {
+    const out = await api.post(`/retainers/${r.id}/credit`, {
+      amount_minor: minor, reason: '', idempotency_key: crypto.randomUUID(),
+    });
+    announce(`Retainer credited. Balance: ${r.currency} ${formatMoney(out.balance_minor)}.`);
+    await refreshRetainers();
+  } catch (err) {
+    announce(`Add funds failed: ${err.message}`);
+  }
+}
+
+async function retDraw(r) {
+  const amt = await askPrompt(`Draw funds from ${r.currency} ${formatMoney(r.balance_minor)} balance:`, '');
+  if (!amt) return;
+  const minor = parseHundredths(amt);
+  if (!Number.isFinite(minor) || minor <= 0) {
+    announce('Enter a positive amount.');
+    return;
+  }
+  const reason = ((await askPrompt('Draw reason (required):')) || '').trim();
+  if (!reason) {
+    announce('Draw cancelled — a reason is required.');
+    return;
+  }
+  try {
+    await api.post(`/retainers/${r.id}/draw`, {
+      amount_minor: minor, reason, idempotency_key: crypto.randomUUID(),
+    });
+    announce('Draw recorded against the retainer (this is not an invoice payment).');
+    await refreshRetainers();
+  } catch (err) {
+    announce(`Draw failed: ${err.message}`);
+  }
+}
+
+async function retClose(r) {
+  if (!(await askConfirm(`Close the retainer for ${customerName(r.customer_id)} / ${r.project_code}? History stays readable; funds can no longer be added or drawn.`))) return;
+  try {
+    await api.post(`/retainers/${r.id}`, {});
+    announce('Retainer closed.');
+    await refreshRetainers();
+  } catch (err) {
+    announce(`Close failed: ${err.message}`);
+  }
+}
+
+async function retShow(id) {
+  try {
+    const d = await api.get(`/retainers/${id}`);
+    const ret = d.retainer;
+    $('ret-detail').hidden = false;
+    $('ret-detail-title').textContent =
+      `Ledger \u2014 ${customerName(ret.customer_id)} / ${ret.project_code} (${ret.currency} ${formatMoney(Math.max(d.balance_minor, 0))})`;
+    const ul = $('ret-history');
+    ul.textContent = '';
+    for (const t of ret.transactions) {
+      const sign = t.kind === 'draw' ? '\u2212' : '+';
+      ul.appendChild(el('li', {
+        text: `${String(t.created_at).slice(0, 10)} \u2014 ${t.kind} ${sign}${formatMoney(t.amount_minor)}${t.reason ? ` \u00b7 ${t.reason}` : ''}`,
+      }));
+    }
+    if (!ul.children.length) ul.appendChild(el('li', { cls: 'hint', text: 'No transactions yet.' }));
+    announce('Retainer ledger shown.');
+  } catch (err) {
+    announce(`History failed: ${err.message}`);
+  }
+}
+
+async function createRetainer(evt) {
+  evt.preventDefault();
+  clearFormError($('ret-error'));
+  const opening = parseHundredths($('ret-opening').value || '0');
+  try {
+    await api.post('/retainers', {
+      customer_id: $('ret-customer').value,
+      project_code: $('ret-project').value,
+      opening_amount_minor: Number.isFinite(opening) ? opening : 0,
+      idempotency_key: crypto.randomUUID(),
+    });
+    announce('Retainer created.');
+    $('ret-opening').value = '0';
+    await refreshRetainers();
+  } catch (err) {
+    showFormError($('ret-error'), err);
+  }
+}
+
 // ------------------------------------------------- recurring schedules ----
 //
 // #136: management UI for the Phase-4 recurring engine (#26). The backend
@@ -3374,6 +3514,7 @@ function refreshPanel(tabId) {
     'tab-invoices': async () => {
       await refreshInvoices();
       await refreshSchedules();
+      await refreshRetainers();
     },
     'tab-expenses': refreshExpenses,
     'tab-submissions': refreshSubmissions,
@@ -3574,6 +3715,13 @@ async function startApp() {
     for (const k of ['lb-description', 'lb-quantity', 'lb-unit-price', 'lb-subtotal', 'lb-discount', 'lb-tax', 'lb-total']) $(k).value = '';
     announce('Built-in labels restored (save the template to apply).');
   });
+  $('ret-form').addEventListener('submit', createRetainer);
+  $('ret-detail-close').addEventListener('click', () => {
+    $('ret-detail').hidden = true;
+  });
+  $('ret-customer').addEventListener('change', async () => {
+    await fillProjectSelect($('ret-project'), $('ret-customer').value, null);
+  });
   $('rec-form').addEventListener('submit', addRecurring);
   $('contact-add').addEventListener('click', () => {
     if ($('contact-rows').children.length >= 10) {
@@ -3625,6 +3773,7 @@ async function startApp() {
   await refreshCustomerPickers(); // fills all four pickers, no fetches
   refreshSchedules().catch?.(() => {});
   refreshCatalog().catch?.(() => {});
+  refreshRetainers().catch?.(() => {});
   // First-run trigger (#111): zero customers after a successful login opens
   // the wizard as a modal. Once a customer exists it never auto-opens — the
   // sidebar entry reopens it manually.
