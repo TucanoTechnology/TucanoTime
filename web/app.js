@@ -1498,10 +1498,7 @@ async function refreshInvoices() {
       actions.push(
         action('link', 'Record payment', () => recordPayment(inv, balance),
           'Record a full or partial payment (partly paid keeps the rest open)'),
-        action('link', 'Pay link', () => createCheckoutLink(inv.id, 'stripe'),
-          'Create a hosted checkout link (Stripe) for this invoice'),
-        action('link', 'Sync', () => syncInvoice(inv.id),
-          'Copy this invoice to the accounting provider (QBO/Xero)'),
+
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF'),
         action('link', 'Email', () => emailInvoice(inv.id),
@@ -1513,8 +1510,6 @@ async function refreshInvoices() {
       );
     } else if (inv.status === 'paid') {
       actions.push(
-        action('link', 'Sync', () => syncInvoice(inv.id),
-          'Copy this invoice (and payment) to the accounting provider'),
         action('link', 'PDF', () => downloadInvoicePdf(inv.id, inv.number),
           'Download the archived invoice PDF'),
         action('link', 'Email', () => emailInvoice(inv.id),
@@ -1724,35 +1719,6 @@ async function downloadInvoicePdf(id, number) {
     announce(`Invoice PDF downloaded (${blob.size} bytes).`);
   } catch (err) {
     announce(`Download failed: ${err.message}`);
-  }
-}
-
-/// Creates a hosted checkout link (#34) and shows it for the admin to send.
-async function createCheckoutLink(id, provider) {
-  try {
-    const res = await api.post(`/invoices/${id}/checkout`, { provider });
-    announce(`Checkout link: ${res.url}`);
-    await askPrompt('Payment link (copy to send to the customer):', res.url);
-  } catch (err) {
-    announce(`Checkout failed: ${err.message}`);
-  }
-}
-
-/// Copies the invoice to the first enabled accounting provider (#33).
-async function syncInvoice(id) {
-  try {
-    const st = await api.get('/sync/accounting');
-    const providers = st.providers || [];
-    if (providers.length === 0) {
-      announce('No accounting provider configured (set qbo.token or xero.token in Settings).');
-      return;
-    }
-    const res = await api.post(`/invoices/${id}/sync`, { provider: providers[0] });
-    if (res.noop) announce('Invoice already synced.');
-    else if (res.failed) announce(`Sync failed (recorded, will retry): ${res.record.error}`);
-    else announce(`Synced to ${res.record.provider} as ${res.record.remote_id}.`);
-  } catch (err) {
-    announce(`Sync failed: ${err.message}`);
   }
 }
 

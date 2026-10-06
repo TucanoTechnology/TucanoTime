@@ -15,6 +15,7 @@ suite — file-based (no database), one container, browser GUI.
 - **Reports** — totals grouped by customer, project or ISO week; **CSV export** (formula-injection safe).
 - **Invoices** — generate a draft from a period's billable work, snapshotting each entry's rate; issuing **locks** its entries, **archives a PDF** for download, email attachment (#113) and audited PDF copies to third parties such as the accountant (#112); record **full or partial payments** (#114, a per-invoice ledger with a partly-paid state) or **write off** uncollectable balances, and an **outstanding/overdue** dashboard tracks the balance still owed.
 - **Invoice templates** — org-wide subject/body/footer with `%variable%` placeholders (markdown subset), per-customer notes, subject overrides and payment terms (Upon Receipt / NET 15–45 / custom) driving the due date at issue (#116).
+- **API-level integrations** — hosted checkout links (#34) and accounting sync (#33) remain available on the API and background retry job, but are no longer surfaced as per-row invoice buttons (#129).
 - **Expenses** — record costs per project with categories, billable flags, and optional attached receipts; billable expenses roll into invoices (#25).
 - **Timesheet submissions** — submit a week for approval; submitted/approved weeks **lock** their entries (shared lock seam); rejecting releases them.
 

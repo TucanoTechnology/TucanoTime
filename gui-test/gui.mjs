@@ -500,25 +500,14 @@ if (copyBtn) {
 }
 }
 
-// ---- PAYMENTS (#34): checkout link via the Pay link button + webhook pays it ----
-const payBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Pay link');
-check('issued invoice renders a Pay link button', !!payBtn);
-if (payBtn) {
-  payBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(300);
-  const liveTxt = window.document.getElementById('live-region').textContent;
-  check('Pay link announces a checkout URL', /checkout link: https:\/\//i.test(liveTxt));
-  // The URL is offered for copying in the prompt dialog (#102), not window.prompt.
-  const payDlgOpen = window.document.getElementById('app-dialog').open === true
-    || window.document.getElementById('app-dialog').hasAttribute('open');
-  check(
-    'Pay link offers the URL in the input dialog',
-    payDlgOpen && window.document.getElementById('dlg-input').value.startsWith('https://'),
-  );
-  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(100);
+// ---- PAYMENTS (#34) + #129: Pay link / Sync buttons removed from rows; ----
+// ---- the checkout + webhook flow is covered via the API directly.      ----
+const rowBtns = () => [...window.document.querySelectorAll('#invoice-table tbody button')].map((b) => b.textContent);
+check('invoice rows no longer render a Pay link button (#129)', !rowBtns().includes('Pay link'));
+check('invoice rows no longer render a Sync button (#129)', !rowBtns().includes('Sync'));
+{
   // A signed webhook (fake-mode Stripe, signature ignored) marks the invoice paid.
-  const chk = await (await fetch(`${BASE}/invoices/${acmeInv.id}/checkout`, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ provider: 'stripe' }) })).json();
+  const chk = await (await fetch(`${BASE}/invoices/${acmeInv.id}/checkout`, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: JSON.stringify({ provider: 'stripe' }) })).json();
   const whBody = JSON.stringify({ type: 'checkout.session.completed', payment_status: 'paid', amount_minor: 9500, currency: 'EUR', client_reference_id: chk.reference, metadata: { invoice_number: acmeInv.number } });
   const whRes = await fetch(`${BASE}/payments/webhook/stripe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: whBody });
   const whJson = await whRes.json();
@@ -526,19 +515,14 @@ if (payBtn) {
   const afterInv = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.find((i) => i.id === acmeInv.id);
   check('invoice now paid with a provider reference', afterInv.status === 'paid' && /stripe:/.test(afterInv.payment_reference));
 
-  // ---- ACCOUNTING SYNC (#33): status endpoint + Sync button on the paid row ----
+  // ---- ACCOUNTING SYNC (#33): the status endpoint stays live (API-only now) ----
   const stRes = await fetch(BASE + '/sync/accounting', { headers: { Cookie: SESSION_COOKIE } });
   const stJson = await stRes.json();
   check('accounting status endpoint responds', stRes.status === 200 && Array.isArray(stJson.records));
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(300);
-  const syncBtn = [...window.document.querySelectorAll('#invoice-table tbody button')].find((b) => b.textContent === 'Sync');
-  check('paid invoice renders a Sync button', !!syncBtn);
-  if (syncBtn) {
-    syncBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await tick(300);
-    check('Sync without a configured provider explains itself', /no accounting provider configured/i.test(window.document.getElementById('live-region').textContent));
-  }
+  check('paid row still offers PDF + Email copy after the trim (#129)',
+    rowBtns().includes('PDF') && rowBtns().includes('Email copy'));
 
   // ---- SSO (#32): provider discovery endpoint (login screen advertises them) ----
   const ssoRes = await fetch(BASE + '/auth/sso/providers');
