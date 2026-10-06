@@ -6,5 +6,5 @@
 .DS_Store
 
 # jsdom harness dependencies (gui-test/)
-gui-test/node_modules/
+gui-test/node_modules
 gui-test/package-lock.json

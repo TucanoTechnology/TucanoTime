@@ -1864,6 +1864,21 @@
                 "type": "null"
               }
             ]
+          },
+          "from_name": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Email sender display name (#146); empty = built-in."
+          },
+          "reply_to": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Reply-To address (#146); empty omits the header. Validated."
+          },
+          "accent": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "description": "Invoice document accent for the totals section (#146); empty = ink-only."
           }
         },
         "additionalProperties": false

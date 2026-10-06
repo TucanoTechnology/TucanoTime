@@ -5265,3 +5265,91 @@ async fn retainer_ledger_reconciles_and_guarded_ops_persist_nothing() {
     .await;
     assert_eq!(s404, StatusCode::NOT_FOUND);
 }
+
+// ------------------------------------------------------------------ #146 ---
+
+#[tokio::test]
+async fn appearance_and_messages_are_honored_not_inert() {
+    let (app, _d) = app().await;
+    // Invalid shapes are refused before persistence.
+    let (sb, _) = json_req(
+        &app,
+        "PUT",
+        "/admin/org",
+        Some(json!({"name":"X","reply_to":"nope"})),
+    )
+    .await;
+    assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY);
+    let (sb2, _) = json_req(
+        &app,
+        "PUT",
+        "/admin/org",
+        Some(json!({"name":"X","accent":"e95420"})),
+    )
+    .await;
+    assert_eq!(sb2, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_sv, before) = json_req(&app, "GET", "/admin/org", None).await;
+    assert_eq!(before["name"], "", "rejections persisted nothing");
+
+    // Valid save round-trips.
+    let (s, saved) = json_req(
+        &app,
+        "PUT",
+        "/admin/org",
+        Some(json!({"name":"Tucano BV","from_name":"Tucano Invoicing",
+                    "reply_to":"billing@tucano.test","accent":"#E95420"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{saved}");
+    assert_eq!(saved["from_name"], "Tucano Invoicing");
+
+    // The mail adapter honors the sender identity (#146): the recorded
+    // message carries it and build_mime would render From/Reply-To.
+    let (issued, iid) = seed_issued_invoice(&app).await;
+    let _ = issued;
+    let (se, _b) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::OK);
+    let msg = &app.email.messages()[0];
+    assert_eq!(msg.from_name.as_deref(), Some("Tucano Invoicing"));
+    assert_eq!(msg.reply_to.as_deref(), Some("billing@tucano.test"));
+
+    // The accent paints the newly issued document: color ops exist, and
+    // re-rendering is byte-identical (the #113 determinism contract).
+    let (_s2, _h2, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    assert!(pdf.windows(3).any(|w| w == b" rg"), "accent emitted");
+    let (_s3, _h3, pdf2) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    assert_eq!(pdf, pdf2, "accented bytes deterministic");
+
+    // Clearing the accent restores the ink-only document (no color ops).
+    json_req(
+        &app,
+        "PUT",
+        "/admin/org",
+        Some(json!({"name":"Tucano BV","from_name":"","reply_to":"","accent":""})),
+    )
+    .await;
+    let c = new_customer(&app, "PLAIN", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "PZ", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-11-02","customer_id":cid,"project_code":"PZ","hours":1})),
+    )
+    .await;
+    let (_s4, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-11-01","to":"2026-11-07"})),
+    )
+    .await;
+    let iid2 = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/invoices/{iid2}/issue"), None).await;
+    let (_s5, _h5, plain) = raw_req(&app, "GET", &format!("/invoices/{iid2}/pdf")).await;
+    assert!(
+        !plain.windows(3).any(|w| w == b" rg"),
+        "cleared accent = no color"
+    );
+}

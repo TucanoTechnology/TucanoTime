@@ -25,6 +25,18 @@ pub struct EmailReminderJob {
     org: crate::pdf::Org,
 }
 
+/// The configured display name + Reply-To from the org profile (#146);
+/// absent/empty means "built-in / omit" — never a credential.
+pub(crate) fn sender_opt(store: &Store) -> (Option<String>, Option<String>) {
+    let profile = store
+        .read_json_rel::<crate::domain::OrgProfile>("org_profile.json")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let field = |v: &str| (!v.trim().is_empty()).then(|| v.trim().to_string());
+    (field(&profile.from_name), field(&profile.reply_to))
+}
+
 impl EmailReminderJob {
     pub fn new(
         store: Arc<Store>,
@@ -142,6 +154,7 @@ impl EmailReminderJob {
                     },
                     legal_id: profile.legal_id.clone(),
                     address: profile.address.clone(),
+                    accent: profile.accent.clone(),
                 };
                 let mut doc = crate::pdf::doc_for_labeled(inv, customer, &org, &template.labels);
                 let vars = crate::template::vars_for(
@@ -218,6 +231,9 @@ impl Job for EmailReminderJob {
                 text,
                 html: None,
                 attachment,
+                // Same configured sender identity as the API paths (#146).
+                from_name: sender_opt(&self.store).0,
+                reply_to: sender_opt(&self.store).1,
             };
             match self.sender.send(&msg) {
                 Ok(()) => {

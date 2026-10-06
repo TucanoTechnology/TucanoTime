@@ -370,6 +370,18 @@ pub struct OrgProfile {
     pub legal_id: String,
     #[serde(default)]
     pub address: Option<Address>,
+    /// Sender display name for invoice emails (#146); empty = built-in
+    /// "TucanoTime". The SMTP password/username stay in the vault — this is
+    /// presentation only.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub from_name: String,
+    /// Reply-To address for invoice emails (#146); empty omits the header.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reply_to: String,
+    /// Invoice document accent, '#rrggbb' (#146); empty keeps the built-in
+    /// ink-only rendering. Applied to the totals rule + amount text.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub accent: String,
 }
 
 /// Display-label overrides for invoice documents (#147). Empty = built-in

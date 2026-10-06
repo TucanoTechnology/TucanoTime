@@ -3374,7 +3374,20 @@ async function refreshOrgProfile() {
     $('org-city').value = a.city || '';
     $('org-postal').value = a.postal_code || '';
     $('org-country').value = a.country || '';
+    $('org-from').value = o.from_name || '';
+    $('org-reply').value = o.reply_to || '';
+    $('org-accent').value = o.accent || '';
+    paintAccent();
   } catch { /* members cannot manage the org profile */ }
+}
+
+function paintAccent() {
+  // Safe styling only: assign a validated color to one element's background
+  // (#146). No innerHTML anywhere.
+  const hex = $('org-accent').value.trim();
+  const sw = $('accent-swatch');
+  sw.style.background = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '';
+  sw.title = sw.style.background ? `Totals on new documents: ${hex}` : 'Built-in ink';
 }
 
 async function saveOrgProfile(evt) {
@@ -3388,6 +3401,10 @@ async function saveOrgProfile(evt) {
     await api.put('/admin/org', {
       name: $('org-name').value.trim(),
       legal_id: $('org-legal').value.trim(),
+      // #146 presentation rides the same org store — no parallel truth.
+      from_name: $('org-from').value.trim(),
+      reply_to: $('org-reply').value.trim(),
+      accent: $('org-accent').value.trim(),
       address: street || city || postal || country
         ? { street, city, postal_code: postal, country }
         : null,
@@ -3921,6 +3938,7 @@ async function startApp() {
     if (e.key === 'Escape') closeInvoicePreview();
   });
   $('org-form').addEventListener('submit', saveOrgProfile);
+  $('org-accent').addEventListener('input', paintAccent);
   $('manual-new').addEventListener('click', () => edOpen(null));
   iwInit(); // #134 staged invoice wizard
   $('ed-close').addEventListener('click', edClose);

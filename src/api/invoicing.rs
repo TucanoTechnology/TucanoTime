@@ -187,6 +187,7 @@ pub(crate) fn org_for(app: &AppState) -> crate::pdf::Org {
         name,
         legal_id: profile.legal_id.clone(),
         address: profile.address.clone(),
+        accent: profile.accent.clone(),
     }
 }
 
@@ -207,6 +208,17 @@ pub async fn org_put(
     }
     if profile.legal_id.chars().count() > 60 {
         errors.push(FieldError::new("legal_id", "at most 60 characters"));
+    }
+    // #146 presentation knobs, validated here so nothing inert is stored.
+    if profile.from_name.chars().count() > 120 {
+        errors.push(FieldError::new("from_name", "at most 120 characters"));
+    }
+    if !profile.reply_to.trim().is_empty() && !crate::email::valid_address(profile.reply_to.trim())
+    {
+        errors.push(FieldError::new("reply_to", "not a valid email address"));
+    }
+    if !profile.accent.is_empty() && crate::pdf::parse_accent(&profile.accent).is_none() {
+        errors.push(FieldError::new("accent", "expected a #rrggbb hex color"));
     }
     let mut billing_errors = Vec::new();
     crate::domain::validate_customer_billing_fields(
@@ -508,12 +520,15 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
         .clone()
         .unwrap_or_else(|| crate::email::invoice_subject(&invoice.number, &org.name));
     let html = crate::template::email_html(&content);
+    let profile = load_org(&app)?;
     let msg = crate::email::EmailMessage {
         to: billing_email,
         subject,
         text,
         html,
         attachment: Some((filename, pdf)),
+        from_name: sender_field(&profile.from_name),
+        reply_to: sender_field(&profile.reply_to),
     };
     let sent_to = msg.to.clone();
     let sender = app.email.clone();
@@ -591,12 +606,16 @@ pub async fn send_invoice_email_copy(
         Some(&input.note),
         &org.name,
     );
+    let profile = load_org(&app)?;
     let msg = crate::email::EmailMessage {
         to: to.clone(),
         subject,
         text,
         html: None,
         attachment: Some((filename, pdf)),
+        // Copy email carries the same configured sender identity (#146).
+        from_name: sender_field(&profile.from_name),
+        reply_to: sender_field(&profile.reply_to),
     };
     let sender = app.email.clone();
     let result = blocking("email copy send", move || {
@@ -1516,4 +1535,10 @@ pub async fn update_item_type(
 pub async fn delete_item_type(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     app.store.delete_item_type(id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Empty string in the org profile means "omit" (#146).
+fn sender_field(value: &str) -> Option<String> {
+    let v = value.trim();
+    (!v.is_empty()).then(|| v.to_string())
 }

@@ -1153,6 +1153,34 @@ await tick(300);
 check('Settings discloses the email transport state (#130)',
   /Email delivery:/i.test(window.document.getElementById('email-status').textContent));
 const varRows = [...window.document.querySelectorAll('#template-vars tbody tr')];
+// ---- APPEARANCE & MESSAGES (#146) ----
+{
+  const set = (id, v) => { const el = window.document.getElementById(id); el.value = v; };
+  set('org-from', 'Tucano Billing Desk');
+  set('org-reply', 'invoices@acme.test');
+  set('org-accent', '#e95420');
+  window.document.getElementById('org-accent').dispatchEvent(new window.Event('input', { bubbles: true }));
+  check('accent swatch paints from validated hex (#146)',
+    window.document.getElementById('accent-swatch').style.background.includes('233') ||
+    window.document.getElementById('accent-swatch').style.background !== '');
+  window.document.getElementById('org-name').value = 'Acme Invoice Co';
+  window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(350);
+  const o = await (await fetch(BASE + '/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
+  check('sender display name + reply-to + accent persist (#146)',
+    o.from_name === 'Tucano Billing Desk' && o.reply_to === 'invoices@acme.test' && o.accent === '#e95420');
+  // Invalid reply-to refuses with an inline error and stores nothing.
+  set('org-reply', 'not-an-email');
+  window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(300);
+  const o2 = await (await fetch(BASE + '/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
+  check('invalid Reply-To shows inline error and persists nothing (#146)',
+    !window.document.getElementById('org-error').hidden
+    && /reply/i.test(window.document.getElementById('org-error').textContent)
+    && o2.reply_to === 'invoices@acme.test');
+  set('org-reply', 'invoices@acme.test');
+}
+
 check('company identity form saves and reloads (#138)', await (async () => {
   window.document.getElementById('org-name').value = 'Tucano SRL';
   window.document.getElementById('org-legal').value = 'BE0987654321';
