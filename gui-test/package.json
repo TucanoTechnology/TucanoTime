@@ -3,10 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:ubuntu": "node build-ubuntu-assets.mjs",
     "test": "node gui.mjs",
     "test:contrast": "node contrast.mjs"
   },
   "dependencies": {
     "jsdom": "^26"
+  },
+  "devDependencies": {
+    "css-tree": "3.2.1",
+    "sass": "1.105.1",
+    "vanilla-framework": "4.59.0"
   }
 }

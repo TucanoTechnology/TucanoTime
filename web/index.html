@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TucanoTime — Timesheets</title>
   <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/vendor/ubuntu/components.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -42,26 +43,26 @@
         <div id="tabs" class="tabs" role="tablist" aria-label="Application sections" aria-orientation="vertical">
             <div class="nav-group" role="presentation">
               <span class="nav-label">Track time</span>
-              <button role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true">Timesheets</button>
+              <button role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true"><i class="p-icon--history" aria-hidden="true"></i>Timesheets</button>
             </div>
             <div class="nav-group" role="presentation">
               <span class="nav-label">Setup</span>
-              <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
+              <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1"><i class="p-icon--user" aria-hidden="true"></i>Customers &amp; projects</button>
             </div>
             <div class="nav-group" role="presentation">
               <span class="nav-label">Billing</span>
-              <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
+              <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Invoices</button>
             </div>
             <div class="nav-group more-tools-group" role="presentation">
               <span class="nav-label">More tools</span>
-              <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
-              <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Approvals</button>
-              <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
-              <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button>
+              <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Expenses</button>
+              <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1"><i class="p-icon--success" aria-hidden="true"></i>Approvals</button>
+              <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1"><i class="p-icon--history" aria-hidden="true"></i>Reports</button>
+              <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1"><i class="p-icon--settings" aria-hidden="true"></i>Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button>
             </div>
           <!-- Utility action, outside both tablists. -->
           <div class="tab-sep" role="separator" aria-hidden="true"></div>
-          <button type="button" id="wizard-open" title="Setup wizard — add your first customer and project" aria-haspopup="dialog">🚀 Setup wizard</button>
+          <button type="button" id="wizard-open" title="Setup wizard — add your first customer and project" aria-haspopup="dialog"><i class="p-icon--settings" aria-hidden="true"></i>Setup wizard</button>
         </div>
         <fieldset class="theme-switch" id="theme-switch">
           <legend>Colour mode</legend>
@@ -106,9 +107,9 @@
           <button type="button" id="timer-discard" class="link" hidden>Discard</button>
         </div>
         <nav class="day-nav" aria-label="Change day">
-          <button type="button" id="day-prev" aria-label="Previous day">‹</button>
+          <button type="button" id="day-prev" aria-label="Previous day" title="Previous day"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
           <span id="day-label" class="day-label"></span>
-          <button type="button" id="day-next" aria-label="Next day">›</button>
+          <button type="button" id="day-next" aria-label="Next day" title="Next day"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
         </nav>
         <button type="button" id="day-today" class="link">Return to today</button>
       </div>
@@ -193,9 +194,9 @@
       <div class="day-bar">
         <button type="button" id="week-track" class="primary">+ Track time</button>
         <nav class="day-nav" aria-label="Change week">
-          <button type="button" id="week-prev" aria-label="Previous week">‹</button>
+          <button type="button" id="week-prev" aria-label="Previous week" title="Previous week"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
           <span id="week-label" class="day-label"></span>
-          <button type="button" id="week-next" aria-label="Next week">›</button>
+          <button type="button" id="week-next" aria-label="Next week" title="Next week"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
         </nav>
         <button type="button" id="week-today" class="link">Return to this week</button>
       </div>

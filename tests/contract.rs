@@ -2124,6 +2124,20 @@ async fn member_cannot_invoice_or_approve() {
 }
 
 #[tokio::test]
+async fn ubuntu_font_is_embedded_and_served_with_font_mime_type() {
+    let (app, _dir) = app().await;
+    let request = Request::builder()
+        .uri("/vendor/ubuntu/f1ea362b-Ubuntu-wdth-wght--latin-v0.896a.woff2")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "font/woff2");
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..4], b"wOF2");
+}
+
+#[tokio::test]
 async fn security_headers_present() {
     let (client, _d) = app().await;
     let res = client
