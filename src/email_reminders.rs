@@ -143,7 +143,7 @@ impl EmailReminderJob {
                     legal_id: profile.legal_id.clone(),
                     address: profile.address.clone(),
                 };
-                let mut doc = crate::pdf::doc_for(inv, customer, &org);
+                let mut doc = crate::pdf::doc_for_labeled(inv, customer, &org, &template.labels);
                 let vars = crate::template::vars_for(
                     inv,
                     &customer.name,

@@ -471,11 +471,12 @@ pub use self::expenses::{
 };
 pub use self::invoicing::{
     CheckoutInput, InvoiceEditInput, InvoiceInput, ManualInvoiceInput, PayInput, SyncInput,
-    create_checkout, create_invoice, create_manual_invoice, delete_invoice, get_invoice_handler,
-    invoice_document, invoice_export_csv, invoice_pdf, invoice_report_handler, invoice_summary,
-    invoice_template_get, invoice_template_put, issue_invoice, list_invoices, money_for_email,
-    org_get, org_put, pay_invoice, payment_webhook, preview_invoice, send_invoice_email,
-    send_invoice_email_copy, sync_invoice, sync_status, update_invoice_draft, write_off_invoice,
+    create_checkout, create_invoice, create_item_type, create_manual_invoice, delete_invoice,
+    delete_item_type, get_invoice_handler, invoice_document, invoice_export_csv, invoice_pdf,
+    invoice_report_handler, invoice_summary, invoice_template_get, invoice_template_put,
+    issue_invoice, list_invoices, list_item_types, money_for_email, org_get, org_put, pay_invoice,
+    payment_webhook, preview_invoice, send_invoice_email, send_invoice_email_copy, sync_invoice,
+    sync_status, update_invoice_draft, update_item_type, write_off_invoice,
 };
 pub use self::people::{
     UserInput, create_customer, create_project, create_task, create_user, delete_customer,

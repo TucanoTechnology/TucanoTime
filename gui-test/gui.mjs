@@ -582,6 +582,41 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 }
 
+// ---- FIELD LABELS + CATALOG (#147) ----
+{
+  window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(350);
+  window.document.getElementById('item-name').value = 'Site visit';
+  window.document.getElementById('item-kind').value = 'service';
+  window.document.getElementById('item-desc').value = 'On-site engineering visit';
+  window.document.getElementById('item-price').value = '120.00';
+  window.document.getElementById('item-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(400);
+  const cat = (await (await fetch(BASE + '/admin/item-types', { headers: { Cookie: SESSION_COOKIE } })).json()).item_types;
+  check('catalog item created via the form (#147)', cat.length === 1 && cat[0].name === 'Site visit' && cat[0].default_price_minor === 12000);
+  window.document.getElementById('lb-total').value = 'Amount due';
+  window.document.getElementById('lb-description').value = 'Work performed';
+  window.document.getElementById('template-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(400);
+  const tpl = (await (await fetch(BASE + '/admin/invoice-template', { headers: { Cookie: SESSION_COOKIE } })).json()).template;
+  check('field labels persist with the template (#147)',
+    tpl.labels.total === 'Amount due' && tpl.labels.description === 'Work performed');
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  window.document.getElementById('manual-new').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(200);
+  const edRow = window.document.querySelector('#ed-lines tbody tr');
+  const itemSel = edRow.querySelector('select');
+  check('editor row offers catalog items (#147)', [...itemSel.options].some((o) => o.textContent.includes('Site visit')));
+  itemSel.value = [...itemSel.options].find((o) => o.textContent.includes('Site visit')).value;
+  itemSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(150);
+  const nums = edRow.querySelectorAll('input[type=number]');
+  check('catalog selection prefills description and price (#147)',
+    edRow.querySelector('input[type=text]').value.includes('On-site') && nums[1].value === '120.00');
+  window.document.getElementById('ed-close').dispatchEvent(new window.Event('click', { bubbles: true }));
+}
+
 // ---- MANUAL LINES + DRAFT EDITOR (#143) ----
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -594,7 +629,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     && edPanel.querySelectorAll('tbody tr').length === 1);
   const fill = (row, desc, kind, qty, price) => {
     row.querySelector('input[type=text]').value = desc;
-    row.querySelectorAll('select')[0].value = kind;
+    row.querySelectorAll('select')[1].value = kind; // [0] is the #147 catalog picker
     const nums = row.querySelectorAll('input[type=number]');
     nums[0].value = qty;
     nums[1].value = price;

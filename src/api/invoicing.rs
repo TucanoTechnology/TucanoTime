@@ -243,7 +243,8 @@ pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) ->
     snapshot.status = crate::domain::InvoiceStatus::Issued;
     snapshot.issued_at = Some(app.clock.now());
     snapshot.due_date = Some(due);
-    let mut doc = crate::pdf::doc_for(&snapshot, &customer, &org_for(&app));
+    let mut doc =
+        crate::pdf::doc_for_labeled(&snapshot, &customer, &org_for(&app), &template.labels);
     let content = content_for(&snapshot, &customer, &template);
     crate::template::apply_doc_content(&mut doc, &content);
     let pdf = crate::pdf::render_invoice_pdf(&doc);
@@ -1070,7 +1071,7 @@ pub(crate) fn content_for(
 pub(crate) fn render_pdf_now(app: &AppState, invoice: &Invoice) -> Result<Vec<u8>, ApiError> {
     let customer = get_customer(&app.store, invoice.customer_id)?;
     let template = load_template(app)?;
-    let mut doc = crate::pdf::doc_for(invoice, &customer, &org_for(app));
+    let mut doc = crate::pdf::doc_for_labeled(invoice, &customer, &org_for(app), &template.labels);
     let content = content_for(invoice, &customer, &template);
     crate::template::apply_doc_content(&mut doc, &content);
     Ok(crate::pdf::render_invoice_pdf(&doc))
@@ -1143,6 +1144,7 @@ pub async fn invoice_template_put(
         &mut errors,
     );
     crate::domain::validate_payment_terms(template.payment_terms.as_ref(), &mut errors);
+    template.labels.validate(&mut errors);
     if errors.is_empty() {
         // Render against a synthetic sample: anything that fails here would
         // fail on a real invoice later. Never persists a broken template.
@@ -1439,4 +1441,79 @@ pub async fn update_invoice_draft(
     };
     let updated = app.store.replace_invoice_draft(id, &candidate)?;
     Ok(Json(updated).into_response())
+}
+
+// ------------------------------------------------- product/service catalog --
+
+fn validate_item_type(input: &crate::domain::ItemTypeInput) -> Result<(), ApiError> {
+    let mut errors = Vec::new();
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 120 {
+        errors.push(FieldError::new("name", "required, at most 120 characters"));
+    }
+    if input.description.chars().count() > 500 {
+        errors.push(FieldError::new("description", "at most 500 characters"));
+    }
+    if input.default_price_minor > 100_000_000 {
+        errors.push(FieldError::new("default_price_minor", "at most 100000000"));
+    }
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
+    Ok(())
+}
+
+/// `GET /admin/item-types` — catalog incl. archived (#147).
+pub async fn list_item_types(State(app): State<AppState>) -> ApiResult {
+    Ok(Json(serde_json::json!({ "item_types": app.store.list_item_types()? })).into_response())
+}
+
+pub async fn create_item_type(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<crate::domain::ItemTypeInput>,
+) -> ApiResult {
+    validate_item_type(&input)?;
+    let item = crate::domain::ItemType {
+        id: Uuid::new_v4(),
+        name: input.name.trim().to_string(),
+        description: input.description.trim().to_string(),
+        kind: input.kind,
+        default_price_minor: input.default_price_minor,
+        currency: input
+            .currency
+            .unwrap_or_else(|| crate::domain::Currency("EUR".into())),
+        active: input.active,
+        created_at: app.clock.now(),
+    };
+    app.store.put_item_type(&item)?;
+    Ok((StatusCode::CREATED, Json(item)).into_response())
+}
+
+pub async fn update_item_type(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+    ValidJson(input): ValidJson<crate::domain::ItemTypeInput>,
+) -> ApiResult {
+    let Some(existing) = app.store.get_item_type(id)? else {
+        return Err(ApiError::not_found("item type"));
+    };
+    validate_item_type(&input)?;
+    let updated = crate::domain::ItemType {
+        id,
+        name: input.name.trim().to_string(),
+        description: input.description.trim().to_string(),
+        kind: input.kind,
+        default_price_minor: input.default_price_minor,
+        currency: input.currency.unwrap_or(existing.currency),
+        active: input.active,
+        created_at: existing.created_at,
+    };
+    app.store.put_item_type(&updated)?;
+    Ok(Json(updated).into_response())
+}
+
+/// Delete a catalog item; invoice lines keep their snapshots (#147).
+pub async fn delete_item_type(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
+    app.store.delete_item_type(id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }

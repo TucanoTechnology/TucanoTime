@@ -1721,6 +1721,9 @@
                 "type": "null"
               }
             ]
+          },
+          "labels": {
+            "$ref": "#/components/schemas/LabelOverrides"
           }
         },
         "additionalProperties": false
@@ -1981,6 +1984,128 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 10000
+          }
+        },
+        "additionalProperties": false
+      },
+      "LabelOverrides": {
+        "type": "object",
+        "description": "Display-label overrides for invoice documents (#147). Empty = built-in label; API field names never change.",
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "quantity": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "unit_price": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "subtotal": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "discount": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "tax": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "total": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "additionalProperties": false
+      },
+      "ItemType": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "default_price_minor",
+          "currency",
+          "active",
+          "created_at"
+        ],
+        "description": "Reusable Product/Service line type (#147).",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LineItemKind"
+          },
+          "default_price_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "false = archived; hidden from new picks, history untouched."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ItemTypeInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LineItemKind"
+          },
+          "default_price_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
           }
         },
         "additionalProperties": false
@@ -6093,6 +6218,146 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/admin/item-types": {
+      "get": {
+        "operationId": "listItemTypes",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Product/Service catalog incl. archived (#147)",
+        "responses": {
+          "200": {
+            "description": "Catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "item_types"
+                  ],
+                  "properties": {
+                    "item_types": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ItemType"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          }
+        }
+      },
+      "post": {
+        "operationId": "createItemType",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Add a catalog item type (#147)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemTypeInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemType"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/admin/item-types/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "put": {
+        "operationId": "updateItemType",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Edit or archive/restore a catalog item type (#147)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemTypeInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemType"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteItemType",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Delete a catalog item type (#147)",
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }

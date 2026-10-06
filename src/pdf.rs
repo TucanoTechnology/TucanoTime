@@ -127,6 +127,9 @@ pub struct LineRow {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Doc {
     pub title: String,
+    /// Table column captions: [description, quantity, unit price] (#147);
+    /// empty strings keep the built-in captions at layout time.
+    pub column_labels: [String; 3],
     pub header: Vec<Block>,
     pub blocks: Vec<Block>,
     pub lines: Vec<LineRow>,
@@ -154,6 +157,23 @@ fn kv(key: impl Into<String>, value: impl Into<String>) -> Block {
 /// recomputed.
 #[must_use]
 pub fn doc_for(invoice: &Invoice, customer: &Customer, org: &Org) -> Doc {
+    doc_for_labeled(
+        invoice,
+        customer,
+        org,
+        &crate::domain::LabelOverrides::default(),
+    )
+}
+
+/// `doc_for` with the org's display-label overrides (#147). Default labels
+/// keep the document byte-identical to the built-in wording.
+#[must_use]
+pub fn doc_for_labeled(
+    invoice: &Invoice,
+    customer: &Customer,
+    org: &Org,
+    labels: &crate::domain::LabelOverrides,
+) -> Doc {
     let money = |minor: u64| {
         crate::api::money_for_email(minor, "")
             .trim_end()
@@ -194,15 +214,49 @@ pub fn doc_for(invoice: &Invoice, customer: &Customer, org: &Org) -> Doc {
         header.push(kv("VAT / company id", org.legal_id.trim().to_string()));
     }
     let lines = invoice.lines.iter().map(|l| line_row(l, &money)).collect();
-    let totals = vec![Block::KeyVal {
-        key: "Total".into(),
+    let subtotal = invoice.lines.iter().map(|l| l.amount_minor).sum::<u64>();
+    let mut totals = Vec::new();
+    if subtotal != invoice.total_minor {
+        totals.push(Block::KeyVal {
+            key: labels.label(&labels.subtotal, "Subtotal").to_string(),
+            spans: vec![Span::text(money_for_email_total(
+                subtotal,
+                &invoice.currency,
+            ))],
+        });
+        if invoice.discount_hundredths > 0 {
+            let disc = crate::domain::percent_of_minor(subtotal, invoice.discount_hundredths);
+            totals.push(Block::KeyVal {
+                key: labels.label(&labels.discount, "Discount").to_string(),
+                spans: vec![Span::text(money_for_email_total(disc, &invoice.currency))],
+            });
+        }
+        if invoice.tax_hundredths > 0 {
+            let net = subtotal.saturating_sub(crate::domain::percent_of_minor(
+                subtotal,
+                invoice.discount_hundredths,
+            ));
+            let tax = crate::domain::percent_of_minor(net, invoice.tax_hundredths);
+            totals.push(Block::KeyVal {
+                key: labels.label(&labels.tax, "VAT").to_string(),
+                spans: vec![Span::text(money_for_email_total(tax, &invoice.currency))],
+            });
+        }
+    }
+    totals.push(Block::KeyVal {
+        key: labels.label(&labels.total, "Total").to_string(),
         spans: vec![Span::bold(money_for_email_total(
             invoice.total_minor,
             &invoice.currency,
         ))],
-    }];
+    });
     Doc {
         title: format!("Invoice {}", invoice.number),
+        column_labels: [
+            labels.description.clone(),
+            labels.quantity.clone(),
+            labels.unit_price.clone(),
+        ],
         header,
         blocks: vec![],
         lines,
@@ -614,9 +668,9 @@ fn layout(doc: &Doc) -> Vec<Vec<Op>> {
 
     // Line table with a repeating header.
     if !doc.lines.is_empty() {
-        emit_table_head(&mut p);
+        emit_table_head(&mut p, doc);
         for row in &doc.lines {
-            emit_table_row(&mut p, row);
+            emit_table_row(&mut p, row, doc);
         }
         p.advance(6);
     }
@@ -635,15 +689,37 @@ fn layout(doc: &Doc) -> Vec<Vec<Op>> {
     p.finish()
 }
 
-fn emit_table_head(p: &mut Pager) {
+fn emit_table_head(p: &mut Pager, doc: &Doc) {
     p.need(30);
     let y = p.y + 12;
     let cols = [
         ("Date", MARGIN, COL_DATE, false),
-        ("Description", MARGIN + COL_DATE, COL_DESC, false),
-        ("Hours", MARGIN + COL_DATE + COL_DESC, COL_HOURS, true),
         (
-            "Rate",
+            if doc.column_labels[0].is_empty() {
+                "Description"
+            } else {
+                &doc.column_labels[0]
+            },
+            MARGIN + COL_DATE,
+            COL_DESC,
+            false,
+        ),
+        (
+            if doc.column_labels[1].is_empty() {
+                "Hours"
+            } else {
+                &doc.column_labels[1]
+            },
+            MARGIN + COL_DATE + COL_DESC,
+            COL_HOURS,
+            true,
+        ),
+        (
+            if doc.column_labels[2].is_empty() {
+                "Rate"
+            } else {
+                &doc.column_labels[2]
+            },
             MARGIN + COL_DATE + COL_DESC + COL_HOURS,
             COL_RATE,
             true,
@@ -686,13 +762,13 @@ fn emit_table_head(p: &mut Pager) {
     p.advance(6);
 }
 
-fn emit_table_row(p: &mut Pager, row: &LineRow) {
+fn emit_table_row(p: &mut Pager, row: &LineRow, doc: &Doc) {
     // Description wraps to at most two lines in its column.
     let desc_bytes = winansi(&row.description);
     let desc_lines = wrap_limited(Face::Regular, 9, &desc_bytes, COL_DESC - 6, 2);
     let height = 12 * desc_lines.len() as i32 + 4;
     if p.need(height) {
-        emit_table_head(p);
+        emit_table_head(p, doc);
     }
     let base = p.y + 11;
     p.cur.push(Op::Text {
@@ -1224,6 +1300,7 @@ mod tests {
     fn spans_carry_bold_and_italic_faces() {
         let doc = Doc {
             title: "T".into(),
+            column_labels: Default::default(),
             header: vec![],
             blocks: vec![Block::Paragraph(vec![
                 Span::bold("B"),

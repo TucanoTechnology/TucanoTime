@@ -114,6 +114,13 @@ impl Entity for Invoice {
     }
 }
 
+impl Entity for crate::domain::ItemType {
+    const DIR: &'static str = "items";
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+}
+
 impl Entity for Category {
     const DIR: &'static str = "categories";
     fn id(&self) -> String {
@@ -511,6 +518,26 @@ impl Store {
         let _guard = self.write_lock()?;
         self.remove_doc_locked::<User>(&id.to_string())?;
         self.unindex_user_locked(&id.to_string())
+    }
+
+    // -------------------------------------------------------- item types --
+
+    pub fn list_item_types(&self) -> Result<Vec<crate::domain::ItemType>, StoreError> {
+        let mut out = self.list_docs::<crate::domain::ItemType>()?;
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    pub fn get_item_type(&self, id: Uuid) -> Result<Option<crate::domain::ItemType>, StoreError> {
+        self.get_doc::<crate::domain::ItemType>(&id.to_string())
+    }
+
+    pub fn put_item_type(&self, item: &crate::domain::ItemType) -> Result<(), StoreError> {
+        self.put_doc(item)
+    }
+
+    pub fn delete_item_type(&self, id: Uuid) -> Result<(), StoreError> {
+        self.remove_doc::<crate::domain::ItemType>(&id.to_string())
     }
 
     // ------------------------------------------------------------- invoices --

@@ -548,6 +548,38 @@
 
       <h2>Invoice template</h2>
       <p class="hint">Subject, body and footer for invoice documents and emails (#116). <code>%variable%</code> placeholders resolve at issue/render time; unknown variables are rejected on save. Leave everything empty to keep the built-in wording.</p>
+      <h3>Field labels</h3>
+      <p class="hint">Rename what the invoice <em>document</em> shows (#147). The API and stored field names never change; blank keeps the built-in word.</p>
+      <div id="labels-form" class="card">
+        <div class="field"><label for="lb-description">Line column label</label><input id="lb-description" maxlength="40" autocomplete="off" placeholder="Description"></div>
+        <div class="field"><label for="lb-quantity">Quantity column label</label><input id="lb-quantity" maxlength="40" autocomplete="off" placeholder="Hours"></div>
+        <div class="field"><label for="lb-unit-price">Unit price column label</label><input id="lb-unit-price" maxlength="40" autocomplete="off" placeholder="Rate"></div>
+        <div class="field"><label for="lb-subtotal">Subtotal label</label><input id="lb-subtotal" maxlength="40" autocomplete="off" placeholder="Subtotal"></div>
+        <div class="field"><label for="lb-discount">Discount label</label><input id="lb-discount" maxlength="40" autocomplete="off" placeholder="Discount"></div>
+        <div class="field"><label for="lb-tax">VAT label</label><input id="lb-tax" maxlength="40" autocomplete="off" placeholder="VAT"></div>
+        <div class="field"><label for="lb-total">Total label</label><input id="lb-total" maxlength="40" autocomplete="off" placeholder="Total"></div>
+        <div class="buttons"><button type="button" id="lb-reset" class="secondary">Use built-in labels</button></div>
+      </div>
+
+      <h2>Product / Service catalog</h2>
+      <p class="hint">Reusable manual-invoice line types (#147): name, type, default unit price. Archiving hides an item from new picks without touching history.</p>
+      <form id="item-form" class="card">
+        <input type="hidden" id="item-id">
+        <div class="field"><label for="item-name">Name</label><input id="item-name" maxlength="120" required autocomplete="off"></div>
+        <div class="field"><label for="item-kind">Type</label><select id="item-kind"><option value="service">Service</option><option value="product">Product</option></select></div>
+        <div class="field"><label for="item-desc">Description</label><textarea id="item-desc" maxlength="500" rows="2"></textarea></div>
+        <div class="field"><label for="item-price">Default unit price</label><input id="item-price" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
+        <div class="field"><label for="item-currency">Currency</label><input id="item-currency" maxlength="3" value="EUR"></div>
+        <p class="form-error" id="item-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="item-save">Save item</button><button type="button" class="secondary" id="item-cancel" hidden>Cancel</button></div>
+      </form>
+      <table id="item-table">
+        <caption class="sr-only">Catalog item types</caption>
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col" class="num">Default price</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="item-empty" hidden>No catalog items yet.</p>
+
       <form id="template-form" class="card">
         <div class="field"><label for="template-subject">Subject (max 120)</label>
           <input id="template-subject" maxlength="120" autocomplete="off" placeholder="Invoice %invoice_number% for %customer_name%"></div>
