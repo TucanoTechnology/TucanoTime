@@ -699,7 +699,7 @@ async function saveEntry(evt) {
 // live client-side until their cells get hours.
 
 const weekState = {
-  extraRows: [], // [{customer_id, project_code}]
+  extraRows: [], // [{customer_id, project_code, week}] — week-scoped (#128)
   rowKeys: new Set(), // `${customer_id}::${project_code}` shown in this week (#127)
   days: [],
   seq: 0, // render guard: only the newest fetch may touch the DOM
@@ -776,7 +776,8 @@ async function refreshWeek() {
     (row.ids[e.date] = row.ids[e.date] || []).push(e.id);
     if (e.note) row.notes[e.date] = e.note;
   }
-  for (const r of weekState.extraRows) rowFor(r.customer_id, r.project_code);
+  for (const r of weekState.extraRows)
+    if (r.week === start) rowFor(r.customer_id, r.project_code);
   weekState.rowKeys = new Set(byKey.keys()); // what "Add row" must not offer again (#127)
 
   const table = $('week-table');
@@ -1017,17 +1018,26 @@ async function fillWeekProjectSelect() {
   }
 }
 
-/// Append an extra grid row; returns false when the line already exists (#127).
-function addWeekRow(customerId, projectCode) {
-  if (weekState.extraRows.some((r) => r.customer_id === customerId && r.project_code === projectCode)) {
+/// Append an extra grid row for the displayed week; returns false when the
+/// line already exists (#127/#128 — the row set belongs to one week).
+function addWeekRow(customerId, projectCode, week) {
+  if (
+    weekState.extraRows.some(
+      (r) => r.week === week && r.customer_id === customerId && r.project_code === projectCode,
+    )
+  ) {
     return false;
   }
-  weekState.extraRows.push({ customer_id: customerId, project_code: projectCode });
+  weekState.extraRows.push({ customer_id: customerId, project_code: projectCode, week });
   return true;
 }
 
+/// Copy the source week's PROJECT LINES into the displayed week — never the
+/// time entries (#128). Rows are week-scoped, re-copying is idempotent, and
+/// the announcement reports what actually happened.
 async function copyLastWeek(weeksAgo = 1) {
-  const start = addDays($('week-date').value, -7 * weeksAgo);
+  const targetWeek = $('week-date').value; // Monday of the displayed week
+  const start = addDays(targetWeek, -7 * weeksAgo);
   const end = addDays(start, 6);
   try {
     const data = await api.get(`/entries?from=${start}&to=${end}`);
@@ -1037,12 +1047,16 @@ async function copyLastWeek(weeksAgo = 1) {
       const k = `${e.customer_id}|${e.project_code}`;
       if (seen.has(k)) continue;
       seen.add(k);
-      const before = weekState.extraRows.length;
-      addWeekRow(e.customer_id, e.project_code);
-      added += weekState.extraRows.length - before;
+      if (addWeekRow(e.customer_id, e.project_code, targetWeek)) added += 1;
     }
     await refreshWeek();
-    announce(`Copied ${seen.size} project row(s) from ${start} — enter hours to save.`);
+    if (seen.size === 0) {
+      announce(`Nothing to copy: no project lines in the week of ${start}.`);
+    } else if (added === 0) {
+      announce(`Already copied: all ${seen.size} project row(s) from ${start} are in this week. No hours copied.`);
+    } else {
+      announce(`Copied ${added} project row(s) from ${start} — hours left blank, nothing saved yet.`);
+    }
   } catch (err) {
     announce(`Copy failed: ${err.message}`);
   }
@@ -2441,7 +2455,7 @@ async function startApp() {
       $('week-add-row').focus();
       return;
     }
-    const added = addWeekRow(cid, code);
+    const added = addWeekRow(cid, code, $('week-date').value);
     toggleWeekAddRow(false);
     await refreshWeek();
     // #127: the announcement tells the truth about what happened.

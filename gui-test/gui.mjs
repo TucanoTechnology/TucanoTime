@@ -585,6 +585,26 @@ check('copy-from-last-week added the MKT-2 row', !!copiedRow);
 check('copied row starts empty', !!copiedRow && [...copiedRow.querySelectorAll('input.cell-input')].every((i) => i.value === ''));
 check('copied row total is 0:00', copiedRow && copiedRow.querySelector('.row-total').textContent.trim() === '0:00');
 
+// #128: re-copy is idempotent and says so; empty copied rows belong to THIS
+// week (gone when viewing another week, back when returning).
+copyWeeks.value = '1';
+copyWeeks.dispatchEvent(new window.Event('change', { bubbles: true }));
+await tick(400);
+const rowsAfter2 = [...window.document.querySelectorAll('#week-table tbody tr')].filter((r) => r.textContent.includes('MKT-2')).length;
+check('re-copy adds no duplicate rows (#128)', rowsAfter2 === 1);
+check('re-copy announces idempotency (#128)',
+  /Already copied|already in this week/i.test(window.document.getElementById('live-region').textContent));
+weekDateEl.value = '2026-12-14';
+weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+await tick(300);
+check('copied empty rows do not leak into other weeks (#128)',
+  ![...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')));
+weekDateEl.value = '2026-12-07';
+weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+await tick(300);
+check('copied rows return when the week is redisplayed (#128)',
+  [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')));
+
 // Add row control reveals the project picker and appends a new row.
 window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(250);
