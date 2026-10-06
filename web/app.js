@@ -1710,7 +1710,7 @@ async function refreshCustomerPickers() {
   // C7: every customer picker (day form, invoices, expenses, timer) refreshes
   // from one place — previously a newly added customer could not be invoiced
   // until a full page reload.
-  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer', 'ed-customer']) {
+  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer', 'ed-customer', 'iw-customer']) {
     const picker = $(id);
     if (picker) fillCustomerSelect(picker, picker.value, true);
   }
@@ -2310,6 +2310,212 @@ async function edSave() {
   } catch (err) {
     showFormError($('ed-error'), err);
   }
+}
+
+// --------------------------------------------------- invoice wizard (#134) --
+//
+// Harvest-shaped staged flow over the SAME server pipeline: preview via
+// POST /invoices/preview (nothing persisted), save via the existing
+// POST /invoices with project selection. Draft-only: issue/email/sync stay
+// separate explicit actions on the table.
+
+const iw = { step: 1, from: '', to: '', preview: null };
+
+function iwPresetRange(preset) {
+  const today = isoDate(new Date());
+  const d = new Date(`${today}T00:00:00Z`);
+  const first = (y, m) => `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  const lastDay = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  if (preset === 'this-month') {
+    iw.from = first(d.getUTCFullYear(), d.getUTCMonth());
+    iw.to = `${iw.from.slice(0, 7)}-${String(lastDay(d.getUTCFullYear(), d.getUTCMonth())).padStart(2, '0')}`;
+  } else if (preset === 'last-month') {
+    const m = d.getUTCMonth() === 0 ? 11 : d.getUTCMonth() - 1;
+    const y = d.getUTCMonth() === 0 ? d.getUTCFullYear() - 1 : d.getUTCFullYear();
+    iw.from = first(y, m);
+    iw.to = `${iw.from.slice(0, 7)}-${String(lastDay(y, m)).padStart(2, '0')}`;
+  } else if (preset === 'this-week') {
+    iw.from = mondayOf(today);
+    iw.to = addDays(iw.from, 6);
+  } else {
+    return; // custom: inputs keep whatever the user typed
+  }
+  $('iw-from').value = iw.from;
+  $('iw-to').value = iw.to;
+}
+
+async function iwLoadProjects() {
+  iw.from = $('iw-from').value;
+  iw.to = $('iw-to').value;
+  const box = $('iw-projects');
+  box.textContent = '';
+  const cid = $('iw-customer').value;
+  if (!cid || !iw.from || !iw.to || iw.from > iw.to) {
+    box.appendChild(el('span', { cls: 'hint', text: 'Pick a valid period first.' }));
+    return;
+  }
+  const [cust, entries, invoices] = await Promise.all([
+    api.get(`/customers/${cid}`),
+    api.get(`/entries?from=${iw.from}&to=${iw.to}`),
+    api.get('/invoices'),
+  ]);
+  const billed = new Set();
+  for (const inv of invoices.invoices || []) {
+    if (inv.status !== 'draft') for (const l of inv.lines || []) if (l.entry_id) billed.add(l.entry_id);
+  }
+  const unbilledBy = new Map(); // project -> hundredths
+  for (const e of entries.entries || []) {
+    if (e.customer_id !== cid || !e.billable || billed.has(e.id) || !e.project_code) continue;
+    const k = e.project_code;
+    unbilledBy.set(k, (unbilledBy.get(k) || 0) + Math.round(Number(e.hours) * 100));
+  }
+  const projects = (await api.get(`/customers/${cid}/projects`)).projects || [];
+  let shown = 0;
+  for (const p of projects) {
+    if (!p.active) continue;
+    const hours = unbilledBy.get(p.code);
+    if (!hours) continue;
+    shown += 1;
+    const cb = el('input', { attrs: { type: 'checkbox', id: `iw-p-${p.code}`, value: p.code } });
+    box.appendChild(
+      el('div', { cls: 'field checkbox' }, [
+        el('label', { attrs: { for: cb.id } }, [
+          cb,
+          el('span', { text: `${p.code} — ${p.name} · ${(hours / 100).toFixed(2)} h unbilled` }),
+        ]),
+      ]),
+    );
+  }
+  if (!shown) box.appendChild(el('span', { cls: 'hint', text: 'No uninvoiced billable work in this period.' }));
+  const rate = customerName(cid) ? ` (customer rate ${formatMoney((cust.default_rate_minor ?? 0) / 100 * 100)} default)` : '';
+  void rate;
+}
+
+function iwShow() {
+  for (const n of [1, 2, 3]) $(`iw-step${n}`).hidden = n !== iw.step;
+  const titles = ['customer and source', 'period and projects', 'review and save'];
+  $('iw-title').textContent = `Create from tracked work — ${iw.step} of 3: ${titles[iw.step - 1]}`;
+  $('iw-back').hidden = iw.step === 1;
+  $('iw-next').hidden = iw.step === 3;
+  $('iw-save').hidden = iw.step !== 3;
+  clearFormError($('iw-error'));
+}
+
+function iwSelectedProjects() {
+  return [...$('iw-projects').querySelectorAll('input:checked')].map((c) => c.value);
+}
+
+async function iwNext() {
+  if (iw.step === 1) {
+    if (!$('iw-customer').value) {
+      showFormError($('iw-error'), { message: 'Pick a customer.' });
+      return;
+    }
+    iw.step = 2;
+    iwShow();
+    await iwLoadProjects();
+    return;
+  }
+  if (iw.step === 2) {
+    const picks = iwSelectedProjects();
+    if (!$('iw-from').value || !$('iw-to').value) {
+      showFormError($('iw-error'), { message: 'Enter the period.' });
+      return;
+    }
+    iw.from = $('iw-from').value;
+    iw.to = $('iw-to').value;
+    try {
+      iw.preview = await api.post('/invoices/preview', {
+        customer_id: $('iw-customer').value,
+        from: iw.from,
+        to: iw.to,
+        include_expenses: $('iw-expenses').checked,
+        project_codes: picks,
+      });
+      iwRenderReview();
+      iw.step = 3;
+      iwShow();
+    } catch (err) {
+      showFormError($('iw-error'), err);
+    }
+  }
+}
+
+function iwRenderReview() {
+  const d = iw.preview;
+  if (!d) return;
+  const grouping = $('iw-grouping').value;
+  const dl = $('iw-summary');
+  dl.textContent = '';
+  const sum = (label, v) => {
+    dl.appendChild(el('dt', { text: label }));
+    dl.appendChild(el('dd', { text: v }));
+  };
+  sum('Customer', customerName(d.customer_id));
+  sum('Period', `${d.period_from} → ${d.period_to}`);
+  sum('Currency', d.currency);
+  sum('Lines', String((d.lines || []).length));
+  sum('Total', `${formatMoney(d.total_minor)} ${d.currency}`);
+  const ul = $('iw-lines');
+  ul.textContent = '';
+  const groups = new Map();
+  for (const l of d.lines || []) {
+    const key = grouping === 'project'
+      ? (l.project_code || 'general')
+      : grouping === 'task'
+        ? `${l.project_code || 'general'}${l.task_code ? ` / ${l.task_code}` : ''}`
+        : `${l.date} ${l.project_code || ''} ${l.note || l.kind}`;
+    if (!groups.has(key)) groups.set(key, { h: 0, amount: 0, n: 0 });
+    const g = groups.get(key);
+    g.h += l.hours || 0;
+    g.amount += l.amount_minor;
+    g.n += 1;
+  }
+  for (const [key, g] of groups) {
+    const detail = grouping === 'detailed'
+      ? `${g.n} line(s)`
+      : `${(g.h / 100).toFixed(2)} h · ${g.n} line(s)`;
+    ul.appendChild(el('li', { text: `${key}: ${detail} — ${formatMoney(g.amount)} ${d.currency}` }));
+  }
+}
+
+async function iwSave() {
+  const picks = iwSelectedProjects();
+  try {
+    const created = await api.post('/invoices', {
+      customer_id: $('iw-customer').value,
+      from: iw.from,
+      to: iw.to,
+      include_expenses: $('iw-expenses').checked,
+      project_codes: picks,
+    });
+    announce(`Draft ${created.number} created from ${created.lines.length} line(s) — review, then Issue to lock and document it.`);
+    iw.step = 1;
+    iw.preview = null;
+    iwShow();
+    await refreshInvoices();
+  } catch (err) {
+    showFormError($('iw-error'), err);
+  }
+}
+
+function iwInit() {
+  $('iw-back').addEventListener('click', () => {
+    iw.step = Math.max(1, iw.step - 1);
+    iwShow();
+    if (iw.step === 2) iwLoadProjects().catch?.(() => {});
+  });
+  $('iw-next').addEventListener('click', () => iwNext().catch?.(() => {}));
+  $('iw-save').addEventListener('click', iwSave);
+  $('iw-preset').addEventListener('change', () => {
+    iwPresetRange($('iw-preset').value);
+    iwLoadProjects().catch?.(() => {});
+  });
+  $('iw-from').addEventListener('change', () => iwLoadProjects().catch?.(() => {}));
+  $('iw-to').addEventListener('change', () => iwLoadProjects().catch?.(() => {}));
+  $('iw-grouping').addEventListener('change', iwRenderReview);
+  iwPresetRange('this-month');
+  iwShow();
 }
 
 // ------------------------------------------------- recurring schedules ----
@@ -3198,6 +3404,7 @@ async function startApp() {
   });
   $('org-form').addEventListener('submit', saveOrgProfile);
   $('manual-new').addEventListener('click', () => edOpen(null));
+  iwInit(); // #134 staged invoice wizard
   $('ed-close').addEventListener('click', edClose);
   $('ed-add').addEventListener('click', () => {
     const row = edLineRow();

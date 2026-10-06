@@ -640,6 +640,57 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('idempotent re-save keeps totals (#143)', after.total_minor === 16335 && after.lines.length === 2);
 }
 
+// ---- TRACKED-WORK INVOICE WIZARD (#134) ----
+{
+  for (const [date, hours] of [['2027-03-03', 2], ['2027-03-04', 1]]) {
+    await fetch(BASE + '/entries', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
+      body: JSON.stringify({ date, customer_id: acmeOpt.value, project_code: 'MKT-2', hours }),
+    });
+  }
+  const invsBefore = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
+  window.document.getElementById('iw-customer').value = acmeOpt.value;
+  window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  check('wizard advances to step 2 with period controls (#134)',
+    window.document.getElementById('iw-step2').hidden === false
+    && !!window.document.getElementById('iw-preset')
+    && !!window.document.getElementById('iw-from'));
+  window.document.getElementById('iw-preset').value = 'custom';
+  window.document.getElementById('iw-preset').dispatchEvent(new window.Event('change', { bubbles: true }));
+  window.document.getElementById('iw-from').value = '2027-03-01';
+  window.document.getElementById('iw-from').dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(200);
+  window.document.getElementById('iw-to').value = '2027-03-31';
+  window.document.getElementById('iw-to').dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(250);
+  const cb = window.document.getElementById('iw-p-MKT-2');
+  check('wizard finds the March work for MKT-2 (#134)', !!cb && /3\.00/.test(cb.closest('label').textContent));
+  cb.checked = true;
+  window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(700);
+  const review = window.document.getElementById('iw-summary').textContent + ' | ' + window.document.getElementById('iw-lines').textContent;
+  check('review shows grouped lines and the 285.00 total (#134)',
+    review.includes('285.00') && /MKT-2/.test(review));
+  check('review is step 3 of the wizard (#134)',
+    window.document.getElementById('iw-step3').hidden === false
+    && window.document.getElementById('iw-save').hidden === false);
+  const invsMid = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
+  check('preview persisted nothing before Save (#134)', invsMid === invsBefore);
+  window.document.getElementById('iw-save').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(500);
+  const invsAfter = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices;
+  const wizardDraft = invsAfter.find((i) => i.total_minor === 28500 && i.status === 'draft');
+  check('Save creates exactly one draft from the selection (#134)',
+    invsAfter.length === invsBefore + 1 && !!wizardDraft && wizardDraft.lines.length === 2);
+  check('draft save announced without issuing (#134)',
+    /Draft INV-\d+ created.*Issue/.test(window.document.getElementById('live-region').textContent));
+  // the wizard reset back to step 1
+  check('wizard returns to step 1 after save (#134)',
+    window.document.getElementById('iw-step1').hidden === false && window.document.getElementById('iw-title').textContent.includes('1 of 3'));
+}
+
 // ---- RECURRING SCHEDULE MANAGEMENT (#136) ----
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));

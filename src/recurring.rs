@@ -116,6 +116,8 @@ impl RecurringJob {
                     excluded_entries: &excluded_entries,
                     excluded_expenses: &excluded_expenses,
                     include_expenses: true,
+
+                    restrict_projects: false,
                 };
                 match generate_invoice(String::new(), &customer, &sources, from, to, now) {
                     Ok(inv) => Ok(Some(inv)),

@@ -344,14 +344,54 @@
     <section id="panel-invoices" role="tabpanel" aria-labelledby="tab-invoices" tabindex="0" hidden>
       <h2>Invoices</h2>
       <p id="invoice-summary" class="hint" role="status" aria-live="polite"></p>
+      <!-- #134: staged tracked-work wizard: source -> period & projects ->
+           review (POST /invoices/preview, nothing saved) -> save draft. -->
+      <div id="invoice-wizard" class="card" role="group" aria-label="Invoice wizard">
+        <h3 id="iw-title">Create from tracked work — 1 of 3: customer and source</h3>
+        <div id="iw-step1">
+          <div class="field"><label for="iw-customer">Customer</label><select id="iw-customer"></select></div>
+          <div class="field checkbox"><label for="iw-expenses"><input type="checkbox" id="iw-expenses" checked>
+            Include billable expenses (#25)</label></div>
+        </div>
+        <div id="iw-step2" hidden>
+          <div class="field"><label for="iw-preset">Period</label><select id="iw-preset">
+            <option value="this-month" selected>This month</option>
+            <option value="last-month">Last month</option>
+            <option value="this-week">This week</option>
+            <option value="custom">Custom dates</option>
+          </select></div>
+          <div class="field"><label for="iw-from">From</label><input type="date" id="iw-from"></div>
+          <div class="field"><label for="iw-to">To</label><input type="date" id="iw-to"></div>
+          <fieldset class="field"><legend>Projects with uninvoiced work</legend>
+            <div id="iw-projects"><span class="hint">Loading…</span></div>
+          </fieldset>
+        </div>
+        <div id="iw-step3" hidden>
+          <div class="field"><label for="iw-grouping">Group lines by</label><select id="iw-grouping">
+            <option value="project" selected>Project</option>
+            <option value="task">Task</option>
+            <option value="detailed">Every line</option>
+          </select></div>
+          <dl id="iw-summary" class="ip-facts"></dl>
+          <ul id="iw-lines"></ul>
+        </div>
+        <p class="form-error" id="iw-error" role="alert" hidden></p>
+        <div class="buttons">
+          <button type="button" id="iw-back" class="secondary" hidden>Back</button>
+          <button type="button" id="iw-next" class="primary">Next</button>
+          <button type="button" id="iw-save" class="primary" hidden>Save draft</button>
+        </div>
+      </div>
+      <div class="buttons"><button type="button" id="manual-new" class="secondary">New manual invoice…</button></div>
+      <details class="card"><summary>Advanced: direct period generate</summary>
       <form id="invoice-form" class="card">
         <div class="field"><label for="invoice-customer">Customer</label><select id="invoice-customer" required></select></div>
         <div class="field"><label for="invoice-from">From</label><input type="date" id="invoice-from" required></div>
         <div class="field"><label for="invoice-to">To</label><input type="date" id="invoice-to" required></div>
         <p class="form-error" id="invoice-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="invoice-generate">Generate draft invoice</button>
-        <button type="button" id="manual-new" class="secondary">New manual invoice…</button></div>
+        <div class="buttons"><button type="submit" id="invoice-generate">Generate draft invoice</button></div>
       </form>
+      </details>
       <!-- #143: manual lines + draft editing editor. -->
       <div id="invoice-editor" class="card" role="region" aria-label="Invoice line editor" hidden>
         <div class="ip-head"><h3 id="ed-title">Manual invoice</h3>

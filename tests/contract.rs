@@ -4927,3 +4927,96 @@ async fn draft_editing_replaces_lines_and_issued_stays_immutable() {
     );
     assert!(joined.contains("207.90"), "total with VAT printed");
 }
+
+// ------------------------------------------------------------------ #134 ---
+
+#[tokio::test]
+async fn invoice_preview_projects_and_paid_exclusion() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "PA", json!({"rate_minor": 5000})).await;
+    new_project(&app, &cid, "PB", json!({"rate_minor": 7000})).await;
+    for (proj, day) in [("PA", "2026-10-02"), ("PB", "2026-10-03")] {
+        json_req(
+            &app,
+            "POST",
+            "/entries",
+            Some(json!({"date":day,"customer_id":cid.clone(),"project_code":proj,"hours":2})),
+        )
+        .await;
+    }
+    // Preview only PA: exactly its 2h x 50 = 10000, nothing persisted.
+    let (sp, preview) = json_req(
+        &app,
+        "POST",
+        "/invoices/preview",
+        Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-31","project_codes":["PA"]})),
+    )
+    .await;
+    assert_eq!(sp, StatusCode::OK, "{preview}");
+    assert_eq!(preview["number"], "", "preview is unsaved");
+    let lines = preview["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["project_code"], "PA");
+    assert_eq!(preview["total_minor"], 10000);
+    let (_s0, list) = json_req(&app, "GET", "/invoices", None).await;
+    assert!(
+        list["invoices"].as_array().unwrap().is_empty(),
+        "preview persists nothing"
+    );
+
+    // Unknown project for the customer: 422.
+    let (su, _) = json_req(
+        &app,
+        "POST",
+        "/invoices/preview",
+        Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-31","project_codes":["NOPE"]})),
+    )
+    .await;
+    assert_eq!(su, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Save PA for real, pay it fully, then generate again: PA must be
+    // excluded now (any non-draft invoice's lines are billed work).
+    let (_s1, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-31","project_codes":["PA"]})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{iid}/pay"),
+        Some(json!({"reference":"x"})),
+    )
+    .await;
+    let (s2, again) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-31"})),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::CREATED, "{again}");
+    let l2 = again["lines"].as_array().unwrap();
+    assert_eq!(l2.len(), 1, "only PB remains billable");
+    assert_eq!(l2[0]["project_code"], "PB");
+    assert_eq!(again["total_minor"], 14000);
+    // Issue that one too; with every line on a non-draft invoice the period
+    // is exhausted -> NothingToInvoice 409.
+    let iid2 = again["id"].as_str().unwrap();
+    json_req(&app, "POST", &format!("/invoices/{iid2}/issue"), None).await;
+    // And the fully-invoiced period repeats -> NothingToInvoice 409.
+    let (s3, _b3) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-31"})),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::CONFLICT);
+}

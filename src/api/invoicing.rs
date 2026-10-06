@@ -12,25 +12,44 @@ pub struct InvoiceInput {
     /// Include billable expenses in the period (default true, #25).
     #[serde(default = "default_active_true")]
     pub include_expenses: bool,
+    /// Restrict billing to these projects of the customer (#134); absent or
+    /// empty = every project with eligible work in the period.
+    #[serde(default)]
+    pub project_codes: Vec<crate::domain::ProjectCode>,
 }
 
-pub async fn list_invoices(State(app): State<AppState>) -> ApiResult {
-    let invoices = app.store.list_invoices()?;
-    Ok(Json(serde_json::json!({ "invoices": invoices })).into_response())
-}
-
-/// Generate a draft invoice from the billable, not-yet-invoiced work in a period.
-pub async fn create_invoice(
-    State(app): State<AppState>,
-    ValidJson(input): ValidJson<InvoiceInput>,
-) -> ApiResult {
-    let customer = get_customer(&app.store, input.customer_id)?;
-    let from = parse_date(&input.from)?;
-    let to = parse_date(&input.to)?;
-    if from > to {
-        return Err(ApiError::bad_request("'from' must not be after 'to'"));
+/// Shared selection pipeline for POST /invoices and /invoices/preview:
+/// gather sources, honour project filtering (#134), build the draft.
+#[allow(clippy::too_many_arguments)]
+fn build_draft(
+    app: &AppState,
+    customer: &crate::domain::Customer,
+    from: chrono::NaiveDate,
+    to: chrono::NaiveDate,
+    include_expenses: bool,
+    project_codes: &[crate::domain::ProjectCode],
+) -> Result<Invoice, ApiError> {
+    if !project_codes.is_empty() {
+        let owned = app.store.list_projects(customer.id)?;
+        for code in project_codes {
+            if !owned.iter().any(|p| &p.code == code) {
+                return Err(ApiError::validation(vec![FieldError::new(
+                    "project_codes",
+                    format!("unknown project {} for this customer", code.0),
+                )]));
+            }
+        }
     }
-    let projects = app.store.list_projects(customer.id)?;
+    let projects: Vec<_> = {
+        let all = app.store.list_projects(customer.id)?;
+        if project_codes.is_empty() {
+            all
+        } else {
+            all.into_iter()
+                .filter(|p| project_codes.contains(&p.code))
+                .collect()
+        }
+    };
     let mut tasks = Vec::new();
     for p in &projects {
         tasks.extend(app.store.list_tasks(customer.id, &p.code.0)?);
@@ -38,11 +57,10 @@ pub async fn create_invoice(
     let users = app.store.list_users()?;
     let entries = app.store.list_range(from, to)?;
     let expenses = app.store.list_expenses()?;
-    // Items already on an issued invoice are excluded from a new one.
     let invoices = app.store.list_invoices()?;
     let issued: Vec<&Invoice> = invoices
         .iter()
-        .filter(|i| i.status == InvoiceStatus::Issued)
+        .filter(|i| i.status != InvoiceStatus::Draft)
         .collect();
     let excluded_entries: Vec<Uuid> = issued
         .iter()
@@ -62,18 +80,63 @@ pub async fn create_invoice(
         expenses: &expenses,
         excluded_entries: &excluded_entries,
         excluded_expenses: &excluded_expenses,
-        include_expenses: input.include_expenses,
+        include_expenses,
+        restrict_projects: !project_codes.is_empty(),
     };
-    let invoice = generate_invoice(
-        String::new(),
+    generate_invoice(String::new(), customer, &sources, from, to, app.clock.now())
+        .map_err(invoice_error)
+}
+
+/// `POST /invoices/preview` (#134): run the SAME generation as
+/// `POST /invoices` but without persisting — the staged wizard reviews exact
+/// lines, then saves the reviewed selection. A draft is created only by the
+/// real POST; nothing here locks, numbers or stores.
+pub async fn preview_invoice(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<InvoiceInput>,
+) -> ApiResult {
+    let customer = get_customer(&app.store, input.customer_id)?;
+    let from = parse_date(&input.from)?;
+    let to = parse_date(&input.to)?;
+    if from > to {
+        return Err(ApiError::bad_request("'from' must not be after 'to'"));
+    }
+    let draft = build_draft(
+        &app,
         &customer,
-        &sources,
         from,
         to,
-        app.clock.now(),
-    )
-    .map_err(invoice_error)?;
-    let invoice = app.store.create_invoice(invoice)?;
+        input.include_expenses,
+        &input.project_codes,
+    )?;
+    Ok(Json(draft).into_response())
+}
+
+pub async fn list_invoices(State(app): State<AppState>) -> ApiResult {
+    let invoices = app.store.list_invoices()?;
+    Ok(Json(serde_json::json!({ "invoices": invoices })).into_response())
+}
+
+/// Generate a draft invoice from the billable, not-yet-invoiced work in a period.
+pub async fn create_invoice(
+    State(app): State<AppState>,
+    ValidJson(input): ValidJson<InvoiceInput>,
+) -> ApiResult {
+    let customer = get_customer(&app.store, input.customer_id)?;
+    let from = parse_date(&input.from)?;
+    let to = parse_date(&input.to)?;
+    if from > to {
+        return Err(ApiError::bad_request("'from' must not be after 'to'"));
+    }
+    let draft = build_draft(
+        &app,
+        &customer,
+        from,
+        to,
+        input.include_expenses,
+        &input.project_codes,
+    )?;
+    let invoice = app.store.create_invoice(draft)?;
     Ok((StatusCode::CREATED, Json(invoice)).into_response())
 }
 

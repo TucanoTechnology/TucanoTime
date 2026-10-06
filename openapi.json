@@ -1110,9 +1110,18 @@
             "type": "boolean",
             "default": true,
             "description": "Roll billable expenses in (#25)."
+          },
+          "project_codes": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/ProjectCode"
+            },
+            "description": "Restrict billing to these projects of the customer (#134); empty = all eligible projects."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "description": "Generate a draft from a period's billable work (#8/#134)."
       },
       "Category": {
         "type": "object",
@@ -6040,6 +6049,47 @@
           },
           "403": {
             "description": "Admin role required."
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/invoices/preview": {
+      "post": {
+        "operationId": "previewInvoice",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Stateless generation preview for the staged wizard (#134)",
+        "description": "Runs the exact POST /invoices pipeline but does NOT persist: the wizard reviews the resulting lines, then saves via POST /invoices. Errors (mixed currency, nothing to invoice) are identical to the real call.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Unsaved draft preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
