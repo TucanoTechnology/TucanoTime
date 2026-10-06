@@ -38,34 +38,27 @@
     <aside class="sidebar">
       <div class="brand">TucanoTime</div>
       <nav aria-label="Sections">
-        <!-- #142: quick actions above the grouped rail. Neither starts nor
-             invoices anything on its own — they only navigate/focus. -->
-        <div class="rail-shortcuts">
-          <button type="button" id="shortcut-invoices" title="Go to invoices">🧾 Invoice</button>
-          <button type="button" id="shortcut-timer" title="Focus the timer (does not start it)">⏱ Timer</button>
-        </div>
-        <div class="tabs" role="tablist" id="tabs" aria-orientation="vertical">
-          <div class="nav-group" role="presentation">
-            <span class="nav-label">Track</span>
-            <button role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true">Timesheets</button>
-            <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
-          </div>
-          <div class="nav-group" role="presentation">
-            <span class="nav-label">Organize</span>
-            <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
-          </div>
-          <div class="nav-group" role="presentation">
-            <span class="nav-label">Bill</span>
-            <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
-          </div>
-          <div class="nav-group" role="presentation">
-            <span class="nav-label">Review</span>
-            <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
-            <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Approvals</button>
-          </div>
-          <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button>
-          <!-- #111/#125: utility action (not a tab), pinned to the bottom of
-               the rail, visually separated from the section tabs. -->
+        <div id="tabs" class="tabs" role="tablist" aria-label="Application sections" aria-orientation="vertical">
+            <div class="nav-group" role="presentation">
+              <span class="nav-label">Track time</span>
+              <button role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true">Timesheets</button>
+            </div>
+            <div class="nav-group" role="presentation">
+              <span class="nav-label">Setup</span>
+              <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
+            </div>
+            <div class="nav-group" role="presentation">
+              <span class="nav-label">Billing</span>
+              <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
+            </div>
+            <div class="nav-group more-tools-group" role="presentation">
+              <span class="nav-label">More tools</span>
+              <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
+              <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Approvals</button>
+              <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
+              <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button>
+            </div>
+          <!-- Utility action, outside both tablists. -->
           <div class="tab-sep" role="separator" aria-hidden="true"></div>
           <button type="button" id="wizard-open" title="Setup wizard — add your first customer and project" aria-haspopup="dialog">🚀 Setup wizard</button>
         </div>
@@ -97,25 +90,29 @@
 
     <!-- DAY -->
     <section id="panel-day" role="tabpanel" aria-labelledby="ts-day" tabindex="0">
-      <div class="timerbar" id="timerbar">
-        <label for="timer-customer" class="sr-only">Customer</label>
-        <select id="timer-customer"></select>
-        <label for="timer-project" class="sr-only">Project</label>
-        <select id="timer-project"></select>
-        <button type="button" id="timer-start">Start timer</button>
-        <span id="timer-display" class="timer-display" role="timer" hidden>00:00:00</span>
-        <button type="button" id="timer-stop" class="secondary" hidden>Stop</button>
-        <button type="button" id="timer-discard" class="link" hidden>Discard</button>
-      </div>
       <input type="date" id="day-date" hidden>
       <div class="day-bar">
-        <button type="button" id="day-add" class="primary">+ Track time</button>
+        <div class="day-actions">
+          <button type="button" id="day-add" class="primary">+ Track time</button>
+          <button type="button" id="timer-open" aria-controls="timerbar" aria-expanded="false">Start timer</button>
+          <span id="timer-display" class="timer-display" role="timer" hidden>00:00:00</span>
+          <button type="button" id="timer-stop" class="secondary" hidden>Stop</button>
+          <button type="button" id="timer-discard" class="link" hidden>Discard</button>
+        </div>
         <nav class="day-nav" aria-label="Change day">
           <button type="button" id="day-prev" aria-label="Previous day">‹</button>
           <span id="day-label" class="day-label"></span>
           <button type="button" id="day-next" aria-label="Next day">›</button>
         </nav>
         <button type="button" id="day-today" class="link">Return to today</button>
+      </div>
+      <div class="timerbar" id="timerbar" hidden>
+        <label for="timer-customer">Customer</label>
+        <select id="timer-customer"></select>
+        <label for="timer-project">Project</label>
+        <select id="timer-project"></select>
+        <button type="button" id="timer-start">Start timer</button>
+        <button type="button" id="timer-cancel" class="link">Cancel</button>
       </div>
       <nav id="week-strip" class="week-strip" aria-label="Days of this week"></nav>
       <div id="notif-section" hidden>
@@ -135,8 +132,7 @@
       </table>
       <p id="day-empty" hidden>Nothing logged on this day yet. Use <strong>+ Track time</strong> to add an entry, or copy projects from an earlier day below.</p>
       <div class="copy-bar">
-        <label for="copy-days" class="sr-only">Copy projects from an earlier day</label>
-        <select id="copy-days" aria-label="Copy projects from an earlier day"></select>
+        <button type="button" id="copy-previous" class="secondary">Copy from previous day</button>
         <ul id="copy-rows" class="copy-rows" aria-label="Projects copied from an earlier day"></ul>
       </div>
 
@@ -201,15 +197,8 @@
       <div class="table-scroll">
         <table id="week-table" class="grid"></table>
       </div>
-      <p id="week-empty" hidden>No entries this week. Use “+ Add row” to start a project row, or copy projects from an earlier week.</p>
       <div class="week-controls">
-        <button type="button" id="week-add-row" class="secondary">+ Add row</button>
-        <label for="week-copy-weeks" class="sr-only">Copy project rows from an earlier week</label>
-        <select id="week-copy-weeks" aria-label="Copy project rows from an earlier week"></select>
-        <select id="week-add-project" hidden aria-label="Project to add"></select>
-        <select id="week-add-task" hidden aria-label="Task for the new row (optional)"></select>
-        <button type="button" id="week-add-confirm" hidden>Add</button>
-        <button type="button" id="week-add-cancel" class="link" hidden>Cancel</button>
+        <button type="button" id="week-copy-previous" class="secondary">Copy from previous week</button>
       </div>
     </section>
 
@@ -235,13 +224,27 @@
 
     <!-- CUSTOMERS -->
     <section id="panel-customers" role="tabpanel" aria-labelledby="tab-customers" tabindex="0" hidden>
-      <h2>Customers</h2>
-      <form id="customer-form" class="card">
+      <div class="customer-heading">
+        <h2 id="customer-section-title">Customers &amp; projects</h2>
+        <div class="hierarchy-actions" role="group" aria-label="Create reference data">
+          <button type="button" id="customer-new">+ Customer</button>
+          <button type="button" id="project-new" disabled title="Select a customer first">+ Project</button>
+          <button type="button" id="task-new" disabled title="Select a project first">+ Task</button>
+        </div>
+      </div>
+      <div class="customer-workspace">
+      <section class="customer-list-column" aria-labelledby="customer-list-title">
+      <h3 id="customer-list-title">Customers</h3>
+      <dialog id="customer-dialog" aria-labelledby="customer-dialog-title">
+      <h2 id="customer-dialog-title">Add customer</h2>
+      <form id="customer-form">
         <input type="hidden" id="customer-id">
         <div class="field"><label for="customer-name">Name</label><input id="customer-name" maxlength="120" required></div>
         <div class="field"><label for="customer-currency">Default currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
         <div class="field"><label for="customer-email">Billing email (optional, for invoice delivery)</label><input id="customer-email" type="email" maxlength="200" autocomplete="off"></div>
+        <details class="customer-extra-details">
+          <summary>Billing and invoice defaults</summary>
         <fieldset class="field"><legend>Billing details (#139)</legend>
           <div class="field"><label for="cust-street">Street</label><input id="cust-street" maxlength="120" autocomplete="off"></div>
           <div class="field"><label for="cust-city">City</label><input id="cust-city" maxlength="80" autocomplete="off"></div>
@@ -274,49 +277,68 @@
           <div class="field"><label for="customer-notes">Invoice notes (markdown subset, appended after the footer)</label>
             <textarea id="customer-notes" maxlength="4000" rows="3"></textarea></div>
         </fieldset>
+        </details>
         <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
         <p class="form-error" id="customer-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="customer-save">Add customer</button><button type="button" class="secondary" id="customer-cancel" hidden>Cancel</button></div>
+        <div class="buttons"><button type="submit" id="customer-save">Add customer</button><button type="button" class="secondary" id="customer-cancel">Cancel</button></div>
       </form>
-      <table id="customer-table">
+      </dialog>
+      <div class="table-scroll"><table id="customer-table">
         <caption class="sr-only">All customers</caption>
-        <thead><tr><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Default rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <thead><tr><th scope="col">Name</th><th scope="col">Default rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
 
+      </section>
+      <section class="customer-detail-column" aria-label="Selected customer details">
       <h2>Projects for <span id="project-customer-label">— select a customer —</span></h2>
-      <form id="project-form" class="card" hidden>
+      <p id="projects-empty-state" class="workspace-empty">Select a customer to create and manage projects.</p>
+      <dialog id="project-dialog" aria-labelledby="project-dialog-title" aria-describedby="project-dialog-parent">
+      <h2 id="project-dialog-title">Add project</h2>
+      <p id="project-dialog-parent" class="hint"></p>
+      <form id="project-form">
         <input type="hidden" id="project-original-code">
+        <div class="field"><label for="project-parent-customer">Customer</label><select id="project-parent-customer" required></select></div>
         <div class="field"><label for="project-code">Project code</label><input id="project-code" maxlength="24" required></div>
         <div class="field"><label for="project-name">Name</label><input id="project-name" maxlength="120"></div>
         <div class="field"><label for="project-currency">Currency (ISO-4217)</label><input id="project-currency" maxlength="3" placeholder="EUR" required></div>
         <div class="field"><label for="project-rate">Hourly rate (e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
         <div class="field checkbox"><label for="project-active"><input type="checkbox" id="project-active" checked> Active</label></div>
         <p class="form-error" id="project-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="project-save">Add project</button><button type="button" class="secondary" id="project-cancel" hidden>Cancel</button></div>
+        <div class="buttons"><button type="submit" id="project-save">Add project</button><button type="button" class="secondary" id="project-cancel">Cancel</button></div>
       </form>
-      <table id="project-table" hidden>
+      </dialog>
+      <div class="table-scroll"><table id="project-table" hidden>
         <caption class="sr-only">Projects for the selected customer</caption>
         <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
 
       <h2>Tasks for <span id="task-project-label">— select a project —</span></h2>
-      <form id="task-form" class="card" hidden>
+      <p id="tasks-empty-state" class="workspace-empty">Select a project to manage its task codes and rates.</p>
+      <dialog id="task-dialog" aria-labelledby="task-dialog-title" aria-describedby="task-dialog-parent">
+      <h2 id="task-dialog-title">Add task</h2>
+      <p id="task-dialog-parent" class="hint"></p>
+      <form id="task-form">
         <input type="hidden" id="task-original-code">
+        <div class="field"><label for="task-parent-customer">Customer</label><select id="task-parent-customer" required></select></div>
+        <div class="field"><label for="task-parent-project">Project</label><select id="task-parent-project" required></select></div>
         <div class="field"><label for="task-code">Task code</label><input id="task-code" maxlength="24" required></div>
         <div class="field"><label for="task-name">Name</label><input id="task-name" maxlength="120"></div>
         <div class="field"><label for="task-currency">Currency override (optional)</label><input id="task-currency" maxlength="3" placeholder="(project)"></div>
         <div class="field"><label for="task-rate">Rate override (optional, minor/h)</label><input id="task-rate" type="number" min="0" step="0.01" placeholder="(project default)" inputmode="decimal"></div>
         <div class="field checkbox"><label for="task-active"><input type="checkbox" id="task-active" checked> Active</label></div>
         <p class="form-error" id="task-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="task-save">Add task</button><button type="button" class="secondary" id="task-cancel" hidden>Cancel</button></div>
+        <div class="buttons"><button type="submit" id="task-save">Add task</button><button type="button" class="secondary" id="task-cancel">Cancel</button></div>
       </form>
-      <table id="task-table" hidden>
+      </dialog>
+      <div class="table-scroll"><table id="task-table" hidden>
         <caption class="sr-only">Tasks for the selected project</caption>
         <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
+      </section>
+      </div>
     </section>
 
     <!-- REPORTS -->
@@ -342,50 +364,28 @@
 
     <!-- INVOICES -->
     <section id="panel-invoices" role="tabpanel" aria-labelledby="tab-invoices" tabindex="0" hidden>
-      <h2>Invoices</h2>
+      <h2>Create or review an invoice</h2>
       <div id="inv-overview" class="inv-overview">
         <div id="inv-tiles">
           <div class="inv-tile"><span class="inv-tile-label">Total open</span><span id="inv-tile-open" class="inv-tile-value">—</span></div>
           <div class="inv-tile"><span class="inv-tile-label">Paid in <span id="inv-year-label"></span></span><span id="inv-tile-paid" class="inv-tile-value">—</span></div>
         </div>
-        <div id="inv-chart-wrap">
+          <details id="invoice-trends" class="invoice-trends">
+            <summary>Invoice trends by year</summary>
+          <div id="inv-chart-wrap">
           <div class="chart-nav">
             <button type="button" id="inv-year-prev" aria-label="Previous year">&larr;</button>
             <span id="inv-chart-title">Open vs paid by month</span>
             <button type="button" id="inv-year-next" aria-label="Next year">&rarr;</button>
           </div>
-          <div id="inv-chart" role="img" aria-label="Monthly open versus paid amounts"></div>
-        </div>
+            <div id="inv-chart" role="img" aria-label="Monthly open versus paid amounts"></div>
+          </div>
+        </details>
       </div>
-      <div id="inv-list-head">
-        <div class="seg" role="group" aria-label="Invoice list filter">
-          <button type="button" id="inv-tab-open" class="seg-btn" aria-pressed="true">Open</button>
-          <button type="button" id="inv-tab-all" class="seg-btn" aria-pressed="false">All</button>
-        </div>
-        <div class="inv-filters">
-          <label class="sr-only" for="invoice-search">Search invoices</label>
-          <input id="invoice-search" type="search" placeholder="Number, customer, note…" autocomplete="off">
-          <label class="sr-only" for="inv-f-customer">Customer filter</label>
-          <select id="inv-f-customer"><option value="">All customers</option></select>
-          <label class="sr-only" for="inv-f-project">Project filter</label>
-          <select id="inv-f-project"><option value="">All projects</option></select>
-          <label class="sr-only" for="inv-f-from">Period from</label>
-          <input id="inv-f-from" type="date" title="Period from">
-          <label class="sr-only" for="inv-f-to">Period to</label>
-          <input id="inv-f-to" type="date" title="Period to">
-          <details class="cols-pop">
-            <summary>Columns</summary>
-            <label><input type="checkbox" class="inv-col" value="customer" checked> Customer</label>
-            <label><input type="checkbox" class="inv-col" value="period" checked> Period</label>
-            <label><input type="checkbox" class="inv-col" value="total" checked> Total</label>
-            <label><input type="checkbox" class="inv-col" value="balance" checked> Balance</label>
-            <label><input type="checkbox" class="inv-col" value="status" checked> Status</label>
-          </details>
-        </div>
-      </div>
+      <div class="invoice-workspace">
+      <section class="invoice-create-column" aria-label="Create invoice">
       <p id="invoice-summary" class="hint" role="status" aria-live="polite"></p>
-      <!-- #134: staged tracked-work wizard: source -> period & projects ->
-           review (POST /invoices/preview, nothing saved) -> save draft. -->
+      <!-- #134: tracked-work path only; manual lines are a separate path below. -->
       <div id="invoice-wizard" class="card" role="group" aria-label="Invoice wizard">
         <h3 id="iw-title">Create from tracked work — 1 of 3: customer and source</h3>
         <div id="iw-step1">
@@ -422,39 +422,90 @@
           <button type="button" id="iw-save" class="primary" hidden>Save draft</button>
         </div>
       </div>
-      <div class="buttons"><button type="button" id="manual-new" class="secondary">New manual invoice…</button></div>
-      <details class="card"><summary>Advanced: direct period generate</summary>
-      <form id="invoice-form" class="card">
-        <div class="field"><label for="invoice-customer">Customer</label><select id="invoice-customer" required></select></div>
-        <div class="field"><label for="invoice-from">From</label><input type="date" id="invoice-from" required></div>
-        <div class="field"><label for="invoice-to">To</label><input type="date" id="invoice-to" required></div>
-        <p class="form-error" id="invoice-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="invoice-generate">Generate draft invoice</button></div>
-      </form>
-      </details>
+      <div class="invoice-secondary-actions">
+        <button type="button" id="manual-new" class="secondary">New manual invoice</button>
+      </div>
       <!-- #143: manual lines + draft editing editor. -->
       <div id="invoice-editor" class="card" role="region" aria-label="Invoice line editor" hidden>
         <div class="ip-head"><h3 id="ed-title">Manual invoice</h3>
           <button type="button" id="ed-close" class="link secondary">Close editor</button></div>
         <div class="field"><label for="ed-customer">Customer</label><select id="ed-customer"></select></div>
-        <table id="ed-lines">
+        <div class="table-scroll"><table id="ed-lines">
           <caption class="sr-only">Invoice lines</caption>
           <thead><tr><th scope="col">Description</th><th scope="col">Type</th><th scope="col">Qty</th><th scope="col">Unit price</th><th scope="col" class="num">Amount</th><th scope="col" class="actions-col"></th></tr></thead>
           <tbody></tbody>
-        </table>
+        </table></div>
         <div class="buttons"><button type="button" id="ed-add" class="secondary">+ Add line</button></div>
-        <div class="field"><label for="ed-discount">Discount %</label><input id="ed-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
-        <div class="field"><label for="ed-tax">VAT %</label><input id="ed-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+        <div class="invoice-editor-adjustments">
+          <div class="field"><label for="ed-discount">Discount %</label><input id="ed-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          <div class="field"><label for="ed-tax">VAT %</label><input id="ed-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+        </div>
         <dl id="ed-totals" class="ip-facts"></dl>
         <p class="form-error" id="ed-error" role="alert" hidden></p>
         <div class="buttons"><button type="button" id="ed-save" class="primary">Save draft</button></div>
       </div>
-      <table id="invoice-table">
+      </section>
+      <section class="invoice-register-column" aria-label="Invoice register">
+      <div id="inv-list-head">
+        <div class="seg" role="group" aria-label="Invoice list filter">
+          <button type="button" id="inv-tab-open" class="seg-btn" aria-pressed="true">Open</button>
+          <button type="button" id="inv-tab-all" class="seg-btn" aria-pressed="false">All</button>
+        </div>
+        <div class="inv-filters">
+          <label class="sr-only" for="invoice-search">Search invoices</label>
+          <input id="invoice-search" type="search" placeholder="Number, customer, note…" autocomplete="off">
+          <label class="sr-only" for="inv-f-customer">Customer filter</label>
+          <select id="inv-f-customer"><option value="">All customers</option></select>
+          <label class="sr-only" for="inv-f-project">Project filter</label>
+          <select id="inv-f-project"><option value="">All projects</option></select>
+          <label class="sr-only" for="inv-f-from">Period from</label>
+          <input id="inv-f-from" type="date" title="Period from">
+          <label class="sr-only" for="inv-f-to">Period to</label>
+          <input id="inv-f-to" type="date" title="Period to">
+          <details class="cols-pop">
+            <summary>Columns</summary>
+            <label><input type="checkbox" class="inv-col" value="customer" checked> Customer</label>
+            <label><input type="checkbox" class="inv-col" value="period" checked> Period</label>
+            <label><input type="checkbox" class="inv-col" value="total" checked> Total</label>
+            <label><input type="checkbox" class="inv-col" value="balance" checked> Balance</label>
+            <label><input type="checkbox" class="inv-col" value="status" checked> Status</label>
+          </details>
+        </div>
+      </div>
+      <div class="invoice-table-scroll"><table id="invoice-table">
         <caption class="sr-only">Invoices</caption>
         <thead><tr><th scope="col"><button type="button" class="sort-th" data-col="number">Number</button></th><th scope="col"><button type="button" class="sort-th" data-col="customer">Customer</button></th><th scope="col"><button type="button" class="sort-th" data-col="period">Period</button></th><th scope="col" class="num"><button type="button" class="sort-th" data-col="total">Total</button></th><th scope="col" class="num"><button type="button" class="sort-th" data-col="balance">Balance</button></th><th scope="col"><button type="button" class="sort-th" data-col="status">Status</button></th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
-      </table>
+      </table></div>
       <p id="invoice-empty" hidden>No invoices yet.</p>
+      <!-- #133: row selection opens the live document preview. -->
+      <div id="invoice-preview" class="card" role="region" aria-label="Invoice document preview" hidden>
+        <div class="ip-head">
+          <h2 class="ip-title">Invoice document</h2>
+          <button type="button" id="ip-close" class="link secondary">Close preview</button>
+        </div>
+        <dl id="ip-facts" class="ip-facts"></dl>
+        <p id="ip-subject" class="ip-subject"></p>
+        <div id="ip-letter" class="ip-letter"></div>
+        <p id="ip-pdf-state" class="hint" hidden></p>
+        <div class="buttons"><button type="button" id="ip-download" class="primary">Download PDF</button></div>
+      </div>
+      </section>
+      </div>
+      <details id="advanced-billing" class="advanced-billing">
+      <summary>Advanced billing tools: recurring schedules and retainers</summary>
+      <details class="invoice-legacy">
+        <summary>Legacy direct draft generator</summary>
+        <form id="invoice-form" class="card">
+          <div class="field"><label for="invoice-customer">Customer</label><select id="invoice-customer" required></select></div>
+          <div class="field"><label for="invoice-from">From</label><input type="date" id="invoice-from" required></div>
+          <div class="field"><label for="invoice-to">To</label><input type="date" id="invoice-to" required></div>
+          <p class="form-error" id="invoice-error" role="alert" hidden></p>
+          <div class="buttons"><button type="submit" id="invoice-generate" class="secondary">Generate draft</button></div>
+        </form>
+      </details>
+      <div class="advanced-billing-grid">
+      <section class="advanced-billing-section" aria-labelledby="recurring-title">
       <h2>Recurring schedules</h2>
       <p class="hint">The daily scheduler (#61/#26) generates a draft invoice when a period closes for each <strong>active</strong> schedule. Paused schedules wait where they left off. Generated drafts still need an explicit Issue.</p>
       <form id="rec-form" class="card">
@@ -478,7 +529,9 @@
         <tbody></tbody>
       </table>
       <p id="rec-empty" hidden>No recurring schedules yet.</p>
-      <h2>Retainers</h2>
+      </section>
+      <section class="advanced-billing-section" aria-labelledby="retainer-title">
+      <h2 id="retainer-title">Retainers</h2>
       <p class="hint">Advance funds held for a customer/project (#144). The balance is always the reconciled ledger; a draw applies funds and is <strong>not</strong> an invoice payment. Closing is final.</p>
       <form id="ret-form" class="card">
         <div class="field"><label for="ret-customer">Customer</label><select id="ret-customer" required></select></div>
@@ -498,49 +551,47 @@
         <button type="button" id="ret-detail-close" class="link secondary">Close</button></div>
         <ul id="ret-history"></ul>
       </div>
-      <!-- #133: row selection opens the live document preview. -->
-      <div id="invoice-preview" class="card" role="region" aria-label="Invoice document preview" hidden>
-        <div class="ip-head">
-          <h2 class="ip-title">Invoice document</h2>
-          <button type="button" id="ip-close" class="link secondary">Close preview</button>
-        </div>
-        <dl id="ip-facts" class="ip-facts"></dl>
-        <p id="ip-subject" class="ip-subject"></p>
-        <div id="ip-letter" class="ip-letter"></div>
-        <p id="ip-pdf-state" class="hint" hidden></p>
-        <div class="buttons"><button type="button" id="ip-download" class="primary">Download PDF</button></div>
+      </section>
       </div>
+      </details>
     </section>
 
     <!-- EXPENSES -->
     <section id="panel-expenses" role="tabpanel" aria-labelledby="tab-expenses" tabindex="0" hidden>
-      <h2>Expense categories</h2>
-      <form id="category-form" class="bar">
-        <label for="category-name">New category</label>
-        <input id="category-name" maxlength="120" required>
-        <button type="submit" class="secondary">Add</button>
-      </form>
-      <ul id="category-list" class="chips"></ul>
-
-      <h2>Record an expense</h2>
-      <form id="expense-form" class="card">
-        <div class="field"><label for="expense-date">Date</label><input type="date" id="expense-date" required></div>
-        <div class="field"><label for="expense-customer">Customer</label><select id="expense-customer" required></select></div>
-        <div class="field"><label for="expense-project">Project (optional)</label><select id="expense-project"></select></div>
-        <div class="field"><label for="expense-category">Category (optional)</label><select id="expense-category"></select></div>
-        <div class="field"><label for="expense-amount">Amount (e.g. 125.00)</label><input id="expense-amount" type="number" min="0" step="0.01" required inputmode="decimal"></div>
-        <div class="field"><label for="expense-currency">Currency</label><input id="expense-currency" maxlength="3" placeholder="EUR" required></div>
-        <div class="field checkbox"><label for="expense-billable"><input type="checkbox" id="expense-billable" checked> Billable</label></div>
-        <div class="field"><label for="expense-note">Note</label><input id="expense-note" maxlength="500"></div>
-        <p class="form-error" id="expense-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit">Add expense</button></div>
-      </form>
+      <div class="panel-heading-row">
+        <h2>Expenses</h2>
+        <button type="button" id="expense-new" class="primary">+ Expense</button>
+      </div>
       <table id="expense-table">
         <caption class="sr-only">Expenses</caption>
         <thead><tr><th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Project</th><th scope="col">Category</th><th scope="col">Amount</th><th scope="col">Billable</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table>
-      <p id="expense-empty" hidden>No expenses recorded yet.</p>
+      <p id="expense-empty" hidden>No expenses recorded yet. Use “+ Expense” to add one.</p>
+      <dialog id="expense-dialog" aria-labelledby="expense-dialog-title">
+      <h2 id="expense-dialog-title">Record an expense</h2>
+      <form id="expense-form">
+        <div class="field"><label for="expense-date">Date</label><input type="date" id="expense-date" required></div>
+        <div class="field"><label for="expense-customer">Customer</label><select id="expense-customer" required></select></div>
+        <div class="field"><label for="expense-project">Project (optional)</label><select id="expense-project"></select></div>
+        <div class="field"><label for="expense-category">Category</label><select id="expense-category"></select></div>
+        <div class="field"><label for="expense-amount">Amount (e.g. 125.00)</label><input id="expense-amount" type="number" min="0" step="0.01" required inputmode="decimal"></div>
+        <div class="field"><label for="expense-currency">Currency</label><input id="expense-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="field checkbox"><label for="expense-billable"><input type="checkbox" id="expense-billable" checked> Billable</label></div>
+        <div class="field"><label for="expense-note">Note</label><input id="expense-note" maxlength="500"></div>
+        <p class="form-error" id="expense-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit">Save expense</button><button type="button" id="expense-cancel" class="secondary">Cancel</button></div>
+      </form>
+      </dialog>
+      <dialog id="expense-category-dialog" aria-labelledby="expense-category-title">
+        <h2 id="expense-category-title">Add expense category</h2>
+        <form id="expense-category-form">
+          <div class="field"><label for="expense-category-name">Category name</label><input id="expense-category-name" maxlength="120" required autocomplete="off"></div>
+          <p class="hint">Categories can be managed later in Settings → Expense categories.</p>
+          <p class="form-error" id="expense-category-error" role="alert" hidden></p>
+          <div class="buttons"><button type="submit" class="primary">Add category</button><button type="button" id="expense-category-cancel" class="secondary">Cancel</button></div>
+        </form>
+      </dialog>
     </section>
 
     <!-- SUBMISSIONS -->
@@ -562,6 +613,16 @@
 
     <!-- SETTINGS (admin) -->
     <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
+      <div class="settings-head">
+        <h2>Settings</h2>
+        <div id="settings-tabs" class="seg settings-tabs" role="tablist" aria-label="Settings categories">
+          <button type="button" role="tab" id="settings-tab-security" aria-controls="settings-panel-security" aria-selected="true">Security &amp; runtime</button>
+          <button type="button" role="tab" id="settings-tab-invoice" aria-controls="settings-panel-invoice" aria-selected="false" tabindex="-1">Invoice documents</button>
+          <button type="button" role="tab" id="settings-tab-catalog" aria-controls="settings-panel-catalog" aria-selected="false" tabindex="-1">Products &amp; services</button>
+          <button type="button" role="tab" id="settings-tab-expenses" aria-controls="settings-panel-expenses" aria-selected="false" tabindex="-1">Expense categories</button>
+        </div>
+      </div>
+      <section id="settings-panel-security" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0">
       <h2>Integration credentials <span class="beta">Beta</span></h2>
       <p class="hint">Store provider secrets (Stripe, OAuth, SMTP, calendar feeds) encrypted at rest. The integrations that consume these are <strong>Beta</strong> — not yet wired to live providers.</p>
       <p id="vault-status" class="hint"></p>
@@ -592,7 +653,23 @@
         <p class="form-error" id="config-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="config-save">Apply to config.json</button></div>
       </form>
+      </section>
 
+      <section id="settings-panel-expenses" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-expenses" tabindex="0" hidden>
+        <h2>Expense categories</h2>
+        <p class="hint">Choose the categories available when recording expenses. Removing a category is blocked while an expense still uses it.</p>
+        <form id="category-form" class="bar">
+          <input type="hidden" id="category-id">
+          <label for="category-name">Category name</label>
+          <input id="category-name" maxlength="120" required autocomplete="off">
+          <button type="submit" id="category-save" class="primary">Add category</button>
+          <button type="button" id="category-cancel" class="secondary" hidden>Cancel edit</button>
+        </form>
+        <p class="form-error" id="category-error" role="alert" hidden></p>
+        <ul id="category-list" class="chips"></ul>
+      </section>
+
+      <section id="settings-panel-invoice" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-invoice" tabindex="0" hidden>
       <h2>Invoice settings: company, appearance, messages</h2>
       <p class="hint">Printed on invoice documents and emails (#138). Leave the name empty to keep the boot-time <code>org_name</code> setting; due terms and message wording live in the invoice template below (one store, no parallel defaults).</p>
       <form id="org-form" class="card">
@@ -624,25 +701,6 @@
         <div class="field"><label for="lb-total">Total label</label><input id="lb-total" maxlength="40" autocomplete="off" placeholder="Total"></div>
         <div class="buttons"><button type="button" id="lb-reset" class="secondary">Use built-in labels</button></div>
       </div>
-
-      <h2>Product / Service catalog</h2>
-      <p class="hint">Reusable manual-invoice line types (#147): name, type, default unit price. Archiving hides an item from new picks without touching history.</p>
-      <form id="item-form" class="card">
-        <input type="hidden" id="item-id">
-        <div class="field"><label for="item-name">Name</label><input id="item-name" maxlength="120" required autocomplete="off"></div>
-        <div class="field"><label for="item-kind">Type</label><select id="item-kind"><option value="service">Service</option><option value="product">Product</option></select></div>
-        <div class="field"><label for="item-desc">Description</label><textarea id="item-desc" maxlength="500" rows="2"></textarea></div>
-        <div class="field"><label for="item-price">Default unit price</label><input id="item-price" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
-        <div class="field"><label for="item-currency">Currency</label><input id="item-currency" maxlength="3" value="EUR"></div>
-        <p class="form-error" id="item-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="item-save">Save item</button><button type="button" class="secondary" id="item-cancel" hidden>Cancel</button></div>
-      </form>
-      <table id="item-table">
-        <caption class="sr-only">Catalog item types</caption>
-        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col" class="num">Default price</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p id="item-empty" hidden>No catalog items yet.</p>
 
       <form id="template-form" class="card">
         <div class="field"><label for="template-subject">Subject (max 120)</label>
@@ -678,6 +736,28 @@
         <p id="template-preview-subject"></p>
         <div id="template-preview-body"></div>
       </div>
+      </section>
+
+      <section id="settings-panel-catalog" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-catalog" tabindex="0" hidden>
+      <h2>Product / Service catalog</h2>
+      <p class="hint">Reusable manual-invoice line types (#147): name, type, default unit price. Archiving hides an item from new picks without touching history.</p>
+      <form id="item-form" class="card">
+        <input type="hidden" id="item-id">
+        <div class="field"><label for="item-name">Name</label><input id="item-name" maxlength="120" required autocomplete="off"></div>
+        <div class="field"><label for="item-kind">Type</label><select id="item-kind"><option value="service">Service</option><option value="product">Product</option></select></div>
+        <div class="field"><label for="item-desc">Description</label><textarea id="item-desc" maxlength="500" rows="2"></textarea></div>
+        <div class="field"><label for="item-price">Default unit price</label><input id="item-price" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
+        <div class="field"><label for="item-currency">Currency</label><input id="item-currency" maxlength="3" value="EUR"></div>
+        <p class="form-error" id="item-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="item-save">Save item</button><button type="button" class="secondary" id="item-cancel" hidden>Cancel</button></div>
+      </form>
+      <div class="table-scroll"><table id="item-table">
+        <caption class="sr-only">Catalog item types</caption>
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col" class="num">Default price</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p id="item-empty" hidden>No catalog items yet.</p>
+      </section>
     </section>
       </main>
 

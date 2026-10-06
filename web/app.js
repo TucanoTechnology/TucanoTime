@@ -251,11 +251,15 @@ function fillCustomerSelect(select, selectedId, includePlaceholder) {
 }
 
 async function fillProjectSelect(select, customerId, selectedCode) {
+  const sequence = (select.__projectSequence || 0) + 1;
+  select.__projectSequence = sequence;
+  select.textContent = '';
   if (!customerId) {
     fillSelect(select, [{ value: '', text: 'Choose a customer first…' }]);
     return;
   }
   const projects = await loadProjects(customerId);
+  if (select.__projectSequence !== sequence) return;
   fillSelect(select, [
     { value: '', text: 'Choose a project…' },
     ...projects.map((p) => ({
@@ -328,6 +332,38 @@ function initSegTabs() {
       }
     });
   });
+}
+
+function initSettingsTabs() {
+  const tabs = Array.from(document.querySelectorAll('#settings-tabs [role="tab"]'));
+  function activate(tab, moveFocus = true) {
+    tabs.forEach((candidate) => {
+      const active = candidate === tab;
+      candidate.setAttribute('aria-selected', String(active));
+      candidate.tabIndex = active ? 0 : -1;
+      const panel = $(candidate.getAttribute('aria-controls'));
+      if (panel) panel.hidden = !active;
+    });
+    if (moveFocus) tab.focus();
+  }
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => activate(tab, false));
+    tab.addEventListener('keydown', (event) => {
+      const visibleTabs = tabs.filter((candidate) => !candidate.hidden);
+      const index = visibleTabs.indexOf(tab);
+      let next = null;
+      if (event.key === 'ArrowRight') next = (index + 1) % visibleTabs.length;
+      if (event.key === 'ArrowLeft') next = (index - 1 + visibleTabs.length) % visibleTabs.length;
+      if (event.key === 'Home') next = 0;
+      if (event.key === 'End') next = visibleTabs.length - 1;
+      if (next !== null) {
+        event.preventDefault();
+        activate(visibleTabs[next]);
+      }
+    });
+  });
+  const firstVisibleTab = tabs.find((tab) => !tab.hidden);
+  if (firstVisibleTab) activate(firstVisibleTab, false);
 }
 
 /// Opens the Timesheets section with a given segment (used by jump-to-entry
@@ -441,11 +477,16 @@ async function refreshTimeCal() {
 function initTabs() {
   const tabs = Array.from(document.querySelectorAll('#tabs [role="tab"]'));
   function activate(tab) {
-    tabs.forEach((t) => {
+    const tablist = tab.closest('[role="tablist"]');
+    const siblings = Array.from(tablist.querySelectorAll('[role="tab"]'));
+    siblings.forEach((t) => {
       const on = t === tab;
       t.setAttribute('aria-selected', String(on));
       t.tabIndex = on ? 0 : -1;
-      $(t.getAttribute('aria-controls')).hidden = !on;
+    });
+    tabs.forEach((t) => {
+      const panel = $(t.getAttribute('aria-controls'));
+      if (panel) panel.hidden = t !== tab;
     });
     const title = $('page-title');
     if (title) title.textContent = tab.textContent.trim();
@@ -454,15 +495,17 @@ function initTabs() {
     // (e.g. an invoice issued via the API) without a full reload.
     refreshPanel(tab.id);
   }
-  tabs.forEach((t, i) => {
+  tabs.forEach((t) => {
     t.addEventListener('click', () => activate(t));
     t.addEventListener('keydown', (e) => {
+      const siblings = Array.from(t.closest('[role="tablist"]').querySelectorAll('[role="tab"]'));
+      const i = siblings.indexOf(t);
       let j = null;
-      if (e.key === 'ArrowRight') j = (i + 1) % tabs.length;
-      if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length;
+      if (e.key === 'ArrowRight') j = (i + 1) % siblings.length;
+      if (e.key === 'ArrowLeft') j = (i - 1 + siblings.length) % siblings.length;
       if (e.key === 'Home') j = 0;
-      if (e.key === 'End') j = tabs.length - 1;
-      if (j !== null) { e.preventDefault(); activate(tabs[j]); }
+      if (e.key === 'End') j = siblings.length - 1;
+      if (j !== null) { e.preventDefault(); activate(siblings[j]); }
     });
   });
 }
@@ -624,7 +667,7 @@ async function refreshDay() {
   $('entry-date').value = date;
   $('entry-form-date').textContent = date ? `For ${date}` : '';
   // D2: the strip and calendar pulls are independent — fetch them at once.
-  await Promise.all([refreshWeekStrip(), refreshCalendar(date)]);
+  await Promise.all([refreshWeekStrip(), refreshCalendar(date), refreshNotifications()]);
 }
 
 /// Copy-forward (#12, restyled #108): pending rows for the projects worked
@@ -803,21 +846,13 @@ async function saveEntry(evt) {
     }
     // #145: saving returns to the timesheet — the dialog closes for creates
     // too; Track time re-opens it with the day kept for the next entry.
-    const wasEdit = Boolean(id);
     const savedDate = body.date;
     // Keep the table aligned with whatever day was just written, even if it
     // differs from the one being viewed.
     $('day-date').value = savedDate;
     resetEntryForm();
     showEntryForm(false);
-    if (!wasEdit) {
-      // Fast re-track: reopen primed for the same day (Harvest behaviour).
-      $('entry-date').value = savedDate;
-      showEntryForm(true);
-      $('entry-hours').focus();
-    } else {
-      $('day-add').focus();
-    }
+    $('day-add').focus();
     await refreshDay();
   } catch (err) {
     showFormError($('entry-error'), err);
@@ -1039,6 +1074,14 @@ async function refreshWeek() {
     );
     tbody.appendChild(tr);
   }
+  if (sorted.length === 0) {
+    tbody.appendChild(el('tr', {}, [
+      el('td', { cls: 'week-empty-notice', attrs: { colspan: String(days.length + 2) } }, [
+        el('strong', { text: 'No time logged' }),
+        el('p', { text: "You haven't recorded any time yet this week." }),
+      ]),
+    ]));
+  }
   table.appendChild(tbody);
 
   const grandRow = el('tr', {}, [
@@ -1048,8 +1091,6 @@ async function refreshWeek() {
   ]);
   table.appendChild(el('tfoot', {}, [grandRow]));
 
-  $('week-table').hidden = sorted.length === 0;
-  $('week-empty').hidden = sorted.length !== 0;
 }
 
 /// Inline cell save (#13): blur or Enter commits the typed hours.
@@ -1138,50 +1179,6 @@ async function commitCell(input) {
 function navigateWeek(delta) {
   $('week-date').value = addDays($('week-date').value, delta * 7);
   refreshWeek();
-}
-
-function toggleWeekAddRow(show) {
-  $('week-add-project').hidden = !show;
-  $('week-add-task').hidden = !show;
-  $('week-add-confirm').hidden = !show;
-  $('week-add-cancel').hidden = !show;
-  if (show) $('week-add-project').focus();
-}
-
-/// Task options for the project chosen in the Add-row picker (#137). The
-/// first entry keeps project-level rows possible.
-async function fillWeekTaskSelect() {
-  const sel = $('week-add-task');
-  const [cid, code] = ($('week-add-project').value || '|').split('|');
-  if (!cid || !code) {
-    sel.textContent = '';
-    return;
-  }
-  await fillTaskSelect(sel, cid, code, null);
-  // relabel the generic "None" so project-level rows read clearly
-  if (sel.options.length) sel.options[0].text = '— project-level (no task) —';
-}
-
-async function fillWeekProjectSelect() {
-  const options = [];
-  for (const c of state.customers) {
-    if (!c.active) continue;
-    const projects = await loadProjects(c.id);
-    for (const p of projects) {
-      if (!p.active) continue;
-      // #127: a project that already has a line in this week is not offered —
-      // confirming it before added nothing yet still claimed "Row added".
-      if (weekState.rowKeys.has(`${c.id}::${p.code}::`)) continue; // project-level row shown
-      options.push({ value: `${c.id}|${p.code}`, text: `${c.name} / ${p.code} — ${p.name}` });
-    }
-  }
-  if (options.length === 0) {
-    fillSelect($('week-add-project'), [
-      { value: '', text: 'All active projects are already in this week' },
-    ]);
-  } else {
-    fillSelect($('week-add-project'), options);
-  }
 }
 
 /// Append an extra grid row for the displayed week; returns false when the
@@ -1285,9 +1282,12 @@ async function refreshCustomerTable() {
   tbody.textContent = '';
   for (const c of state.customers) {
     tbody.appendChild(
-      el('tr', {}, [
-        el('th', { attrs: { scope: 'row' }, text: c.name }),
-        el('td', { text: c.currency }),
+      el('tr', { cls: state.selectedCustomerId === c.id ? 'hierarchy-selected' : '' }, [
+        el('th', { attrs: { scope: 'row' } }, [
+          el('button', { type: 'button', cls: 'link hierarchy-select', text: c.name,
+            attrs: { 'aria-pressed': String(state.selectedCustomerId === c.id) },
+            on: { click: () => selectCustomerForProjects(c.id) } }),
+        ]),
         el('td', { cls: 'num', text: `${c.currency} ${formatMoney(c.default_rate_minor)}` }),
         el('td', {}, [
           el('span', {
@@ -1343,8 +1343,9 @@ function startCustomerEdit(c) {
   $('cust-discount').value = c.discount_hundredths ? (c.discount_hundredths / 100).toFixed(2) : '0';
   setContacts(c.contacts || []);
   $('customer-save').textContent = 'Update customer';
-  $('customer-cancel').hidden = false;
+  $('customer-dialog-title').textContent = 'Edit customer';
   clearFormError($('customer-error'));
+  if (!$('customer-dialog').open) $('customer-dialog').showModal();
   $('customer-name').focus();
 }
 
@@ -1432,7 +1433,9 @@ function cancelCustomerEdit() {
   $('customer-terms-days-field').hidden = true;
   setContacts([]);
   $('customer-save').textContent = 'Add customer';
-  $('customer-cancel').hidden = true;
+  $('customer-dialog-title').textContent = 'Add customer';
+  $('customer-dialog').close();
+  $('customer-new').focus();
   clearFormError($('customer-error'));
 }
 
@@ -1447,11 +1450,14 @@ async function removeCustomer(c) {
     // customer, so the next project save 404'd, and leak its cache entry.
     if (state.selectedCustomerId === c.id) {
       state.selectedCustomerId = null;
-      $('project-form').hidden = true;
       $('project-table').hidden = true;
-      $('task-form').hidden = true;
+      $('projects-empty-state').hidden = false;
       $('task-table').hidden = true;
+      $('tasks-empty-state').hidden = false;
       $('project-customer-label').textContent = '— select a customer —';
+      $('task-project-label').textContent = '— select a project —';
+      state.selectedProjectCode = null;
+      updateHierarchyActions();
     }
     delete state.projectsByCustomer[c.id];
     announce('Customer deleted.');
@@ -1460,22 +1466,36 @@ async function removeCustomer(c) {
   }
 }
 
+function updateHierarchyActions() {
+  $('project-new').disabled = !state.selectedCustomerId;
+  $('task-new').disabled = !state.selectedCustomerId || !state.selectedProjectCode;
+  $('project-new').title = state.selectedCustomerId ? `Add project for ${customerName(state.selectedCustomerId)}` : 'Select a customer first';
+  $('task-new').title = state.selectedProjectCode ? `Add task for ${state.selectedProjectCode}` : 'Select a project first';
+  $('project-dialog-parent').textContent = state.selectedCustomerId ? customerName(state.selectedCustomerId) : '';
+  $('task-dialog-parent').textContent = state.selectedProjectCode ? `${customerName(state.selectedCustomerId)} / ${state.selectedProjectCode}` : '';
+}
+
 async function selectCustomerForProjects(cid) {
   state.selectedCustomerId = cid;
+  state.selectedProjectCode = null;
   $('project-customer-label').textContent = customerName(cid);
-  $('project-form').hidden = false;
+  $('projects-empty-state').hidden = true;
   $('project-table').hidden = false;
+  $('task-project-label').textContent = '— select a project —';
+  $('tasks-empty-state').hidden = false;
+  $('task-table').hidden = true;
   $('project-form').reset();
   $('project-active').checked = true;
   $('project-original-code').value = '';
   $('project-save').textContent = 'Add project';
-  $('project-cancel').hidden = true;
   // Prefill the required currency + rate from the customer default (#11).
   const cust = state.customers.find((c) => c.id === cid);
   if (cust) {
     $('project-currency').value = cust.currency;
     $('project-rate').value = (cust.default_rate_minor / 100).toFixed(2);
   }
+  updateHierarchyActions();
+  await refreshCustomerTable();
   await refreshProjectTable();
 }
 
@@ -1487,8 +1507,12 @@ async function refreshProjectTable() {
   tbody.textContent = '';
   for (const p of projects) {
     tbody.appendChild(
-      el('tr', {}, [
-        el('th', { attrs: { scope: 'row' }, text: p.code }),
+      el('tr', { cls: state.selectedProjectCode === p.code ? 'hierarchy-selected' : '' }, [
+        el('th', { attrs: { scope: 'row' } }, [
+          el('button', { type: 'button', cls: 'link hierarchy-select', text: p.code,
+            attrs: { 'aria-pressed': String(state.selectedProjectCode === p.code) },
+            on: { click: () => selectProjectForTasks(p.code) } }),
+        ]),
         el('td', { text: p.name }),
         el('td', { text: p.currency || 'customer' }),
         el('td', { cls: 'num', text: p.rate_minor != null ? formatMoney(p.rate_minor) : 'customer' }),
@@ -1523,7 +1547,33 @@ async function refreshProjectTable() {
   }
 }
 
+function fillParentCustomers(select, selectedId) {
+  fillSelect(select, [
+    { value: '', text: 'Choose a customer...' },
+    ...state.customers.map((customer) => ({ value: customer.id, text: customer.name })),
+  ]);
+  select.value = selectedId || '';
+}
+
+function prefillProjectParent() {
+  const cid = $('project-parent-customer').value;
+  const customer = state.customers.find((customer) => customer.id === cid);
+  $('project-currency').value = customer ? customer.currency : '';
+  $('project-rate').value = customer ? formatMoney(customer.default_rate_minor) : '';
+  $('project-dialog-parent').textContent = customer ? customer.name : '';
+}
+
+async function fillTaskParents(customerId, projectCode, editing = false) {
+  fillParentCustomers($('task-parent-customer'), customerId);
+  $('task-parent-customer').disabled = editing;
+  await fillProjectSelect($('task-parent-project'), customerId, projectCode);
+  $('task-parent-project').disabled = editing;
+  $('task-dialog-parent').textContent = customerId && projectCode ? `${customerName(customerId)} / ${projectCode}` : '';
+}
+
 function startProjectEdit(p) {
+  fillParentCustomers($('project-parent-customer'), state.selectedCustomerId);
+  $('project-parent-customer').disabled = true;
   $('project-original-code').value = p.code;
   $('project-code').value = p.code;
   $('project-name').value = p.name;
@@ -1531,16 +1581,21 @@ function startProjectEdit(p) {
   $('project-rate').value = p.rate_minor != null ? formatMoney(p.rate_minor) : '';
   $('project-active').checked = p.active;
   $('project-save').textContent = 'Update project';
-  $('project-cancel').hidden = false;
+  $('project-dialog-title').textContent = 'Edit project';
   clearFormError($('project-error'));
+  if (!$('project-dialog').open) $('project-dialog').showModal();
   $('project-code').focus();
 }
 
 async function saveProject(evt) {
   evt.preventDefault();
   clearFormError($('project-error'));
-  const cid = state.selectedCustomerId;
+  const cid = $('project-parent-customer').value;
   const original = $('project-original-code').value;
+  if (!cid) {
+    showFormError($('project-error'), { message: 'Select a customer.' });
+    return;
+  }
   const code = $('project-code').value.trim().toUpperCase();
   const currency = $('project-currency').value.trim().toUpperCase();
   const rate = $('project-rate').value.trim();
@@ -1560,6 +1615,12 @@ async function saveProject(evt) {
   try {
     if (original) await api.put(`/customers/${cid}/projects/${encodeURIComponent(original)}`, body);
     else await api.post(`/customers/${cid}/projects`, body);
+    if (state.selectedCustomerId !== cid) await selectCustomerForProjects(cid);
+    if (original && state.selectedProjectCode === original) {
+      state.selectedProjectCode = code;
+      $('task-project-label').textContent = `${customerName(cid)} / ${code}`;
+      updateHierarchyActions();
+    }
     await refreshProjectTable();
     announce(original ? 'Project updated.' : 'Project added.');
     cancelProjectEdit();
@@ -1573,7 +1634,14 @@ function cancelProjectEdit() {
   $('project-form').reset();
   $('project-active').checked = true;
   $('project-save').textContent = 'Add project';
-  $('project-cancel').hidden = true;
+  $('project-dialog-title').textContent = 'Add project';
+  const customer = state.customers.find((customer) => customer.id === state.selectedCustomerId);
+  if (customer) {
+    $('project-currency').value = customer.currency;
+    $('project-rate').value = formatMoney(customer.default_rate_minor);
+  }
+  $('project-dialog').close();
+  $('project-new').focus();
   clearFormError($('project-error'));
 }
 
@@ -1582,6 +1650,13 @@ async function removeProject(p) {
   const cid = state.selectedCustomerId;
   try {
     await api.del(`/customers/${cid}/projects/${encodeURIComponent(p.code)}`);
+    if (state.selectedProjectCode === p.code) {
+      state.selectedProjectCode = null;
+      $('task-table').hidden = true;
+      $('tasks-empty-state').hidden = false;
+      $('task-project-label').textContent = '— select a project —';
+      updateHierarchyActions();
+    }
     await refreshProjectTable();
     announce('Project deleted.');
   } catch (err) {
@@ -1597,9 +1672,11 @@ async function selectProjectForTasks(pcode) {
   const cid = state.selectedCustomerId;
   const cust = state.customers.find((c) => c.id === cid);
   $('task-project-label').textContent = `${cust ? cust.name : ''} / ${pcode}`;
-  $('task-form').hidden = false;
+  $('tasks-empty-state').hidden = true;
   $('task-table').hidden = false;
   cancelTaskEdit();
+  updateHierarchyActions();
+  await refreshProjectTable();
   await refreshTaskTable();
 }
 
@@ -1644,7 +1721,8 @@ async function refreshTaskTable() {
   }
 }
 
-function startTaskEdit(t) {
+async function startTaskEdit(t) {
+  await fillTaskParents(state.selectedCustomerId, state.selectedProjectCode, true);
   $('task-original-code').value = t.code;
   $('task-code').value = t.code;
   $('task-name').value = t.name;
@@ -1652,8 +1730,9 @@ function startTaskEdit(t) {
   $('task-rate').value = t.rate_minor != null ? formatMoney(t.rate_minor) : '';
   $('task-active').checked = t.active;
   $('task-save').textContent = 'Update task';
-  $('task-cancel').hidden = false;
+  $('task-dialog-title').textContent = 'Edit task';
   clearFormError($('task-error'));
+  if (!$('task-dialog').open) $('task-dialog').showModal();
   $('task-code').focus();
 }
 
@@ -1662,16 +1741,22 @@ function cancelTaskEdit() {
   $('task-form').reset();
   $('task-active').checked = true;
   $('task-save').textContent = 'Add task';
-  $('task-cancel').hidden = true;
+  $('task-dialog-title').textContent = 'Add task';
+  $('task-dialog').close();
+  $('task-new').focus();
   clearFormError($('task-error'));
 }
 
 async function saveTask(evt) {
   evt.preventDefault();
   clearFormError($('task-error'));
-  const cid = state.selectedCustomerId;
-  const pcode = state.selectedProjectCode;
+  const cid = $('task-parent-customer').value;
+  const pcode = $('task-parent-project').value;
   const original = $('task-original-code').value;
+  if (!cid || !pcode) {
+    showFormError($('task-error'), { message: 'Select a customer and project.' });
+    return;
+  }
   const code = $('task-code').value.trim().toUpperCase();
   const body = { code, name: $('task-name').value.trim(), active: $('task-active').checked };
   const currency = $('task-currency').value.trim().toUpperCase();
@@ -1682,6 +1767,8 @@ async function saveTask(evt) {
   try {
     if (original) await api.put(`${base}/${encodeURIComponent(original)}`, body);
     else await api.post(base, body);
+    if (state.selectedCustomerId !== cid) await selectCustomerForProjects(cid);
+    if (state.selectedProjectCode !== pcode) await selectProjectForTasks(pcode);
     await refreshTaskTable();
     announce(original ? 'Task updated.' : 'Task added.');
     cancelTaskEdit();
@@ -3056,8 +3143,12 @@ async function removeSchedule(scd) {
 
 // ---------------------------------------------------------------- expenses --
 
+let categoryRefreshSequence = 0;
+
 async function refreshCategories() {
+  const sequence = ++categoryRefreshSequence;
   const data = await api.get('/categories');
+  if (sequence !== categoryRefreshSequence) return;
   state.categories = data.categories || [];
   const ul = $('category-list');
   ul.textContent = '';
@@ -3065,49 +3156,110 @@ async function refreshCategories() {
     ul.appendChild(
       el(
         'li',
-        { cls: 'chip', text: cat.name },
+        { cls: `chip${cat.active ? '' : ' inactive'}` },
         [
+          el('span', { text: cat.name }),
+          el('button', {
+            type: 'button',
+            cls: 'chip-edit',
+            text: 'Edit',
+            attrs: { 'aria-label': `Edit category ${cat.name}` },
+            on: { click: () => startCategoryEdit(cat) },
+          }),
           el('button', {
             type: 'button',
             cls: 'chip-x',
             text: '×',
             attrs: { 'aria-label': `Delete category ${cat.name}` },
-            on: {
-              click: async () => {
-                try {
-                  await api.del(`/categories/${cat.id}`);
-                  await refreshCategories();
-                  await fillCategorySelect();
-                } catch (err) {
-                  announce(err.message);
-                }
-              },
-            },
+            on: { click: () => removeCategory(cat) },
           }),
         ],
       ),
     );
   }
+  const select = $('expense-category');
+  if (select) await fillCategorySelect(select.value);
 }
 
-async function addCategory(evt) {
-  evt.preventDefault();
+function startCategoryEdit(category) {
+  $('category-id').value = category.id;
+  $('category-name').value = category.name;
+  $('category-save').textContent = 'Save category';
+  $('category-cancel').hidden = false;
+  $('category-name').focus();
+}
+
+function resetCategoryForm() {
+  $('category-id').value = '';
+  $('category-form').reset();
+  $('category-save').textContent = 'Add category';
+  $('category-cancel').hidden = true;
+  clearFormError($('category-error'));
+}
+
+async function removeCategory(category) {
   try {
-    await api.post('/categories', { name: $('category-name').value.trim() });
-    $('category-name').value = '';
+    await api.del(`/categories/${category.id}`);
     await refreshCategories();
-    await fillCategorySelect();
-    announce('Category added.');
+    announce(`Category ${category.name} deleted.`);
   } catch (err) {
     announce(err.message);
   }
 }
 
-async function fillCategorySelect() {
-  fillSelect($('expense-category'), [
+async function addCategory(evt) {
+  evt.preventDefault();
+  clearFormError($('category-error'));
+  const id = $('category-id').value;
+  try {
+    const existing = id ? (state.categories || []).find((category) => category.id === id) : null;
+    const body = {
+      name: $('category-name').value.trim(),
+      default_billable: existing ? existing.default_billable : true,
+      active: existing ? existing.active : true,
+    };
+    if (id) await api.put(`/categories/${id}`, body);
+    else await api.post('/categories', body);
+    resetCategoryForm();
+    await refreshCategories();
+    announce(id ? 'Category updated.' : 'Category added.');
+  } catch (err) {
+    showFormError($('category-error'), err);
+  }
+}
+
+const ADD_CATEGORY_VALUE = '__add_expense_category__';
+
+async function fillCategorySelect(preferred = '') {
+  const select = $('expense-category');
+  if (!select) return;
+  const current = preferred || select.value;
+  fillSelect(select, [
     { value: '', text: 'None' },
-    ...(state.categories || []).map((cat) => ({ value: cat.id, text: cat.name })),
+    ...(state.categories || []).filter((cat) => cat.active).map((cat) => ({ value: cat.id, text: cat.name })),
+    { value: ADD_CATEGORY_VALUE, text: '+ Add new category…' },
   ]);
+  select.value = (state.categories || []).some((cat) => cat.id === current && cat.active) ? current : '';
+}
+
+async function addExpenseCategory(evt) {
+  evt.preventDefault();
+  clearFormError($('expense-category-error'));
+  try {
+    const created = await api.post('/categories', {
+      name: $('expense-category-name').value.trim(),
+      default_billable: true,
+      active: true,
+    });
+    $('expense-category-form').reset();
+    $('expense-category-dialog').close();
+    await refreshCategories();
+    await fillCategorySelect(created.id);
+    announce(`Category ${created.name} added and selected.`);
+    $('expense-category').focus();
+  } catch (err) {
+    showFormError($('expense-category-error'), err);
+  }
 }
 
 async function refreshExpenses() {
@@ -3163,6 +3315,7 @@ async function addExpense(evt) {
     await api.post('/expenses', body);
     $('expense-amount').value = '';
     $('expense-note').value = '';
+    $('expense-dialog').close();
     announce('Expense added.');
     await refreshExpenses();
   } catch (err) {
@@ -3563,9 +3716,11 @@ function startTimerTick(elapsedSeconds) {
 async function refreshTimer() {
   const data = await api.get('/timer');
   const running = !!data;
-  ['timer-customer', 'timer-project', 'timer-start'].forEach((id) => {
-    $(id).hidden = running;
-  });
+  $('timer-open').hidden = running;
+  if (running) {
+    $('timerbar').hidden = true;
+    $('timer-open').setAttribute('aria-expanded', 'false');
+  }
   ['timer-display', 'timer-stop', 'timer-discard'].forEach((id) => {
     $(id).hidden = !running;
   });
@@ -3732,15 +3887,8 @@ async function startApp() {
 
   initTabs();
   initSegTabs(); // Day | Week inside the Timesheets section (#107)
+  initSettingsTabs();
   initWizard(); // first-run setup wizard (#111)
-  // #142: rail shortcuts. Invoice selects the existing tab; Timer navigates
-  // to the timesheet and focuses the timer — it NEVER presses Start.
-  $('shortcut-invoices').addEventListener('click', () => $('tab-invoices').click());
-  $('shortcut-timer').addEventListener('click', () => {
-    $('tab-timesheet').click();
-    $('timer-customer').focus();
-    announce('Timer ready — choose customer and project, then press Start.');
-  });
 
   $('day-add').addEventListener('click', () => {
     resetEntryForm();
@@ -3751,18 +3899,7 @@ async function startApp() {
   $('day-next').addEventListener('click', () => navigateDay(1));
   $('day-today').addEventListener('click', () => selectDay(isoDate(new Date())));
   $('day-add-bottom').addEventListener('click', () => $('day-add').click());
-  // Copy-from-N-days dropdown (#108): choosing an offset runs the copy.
-  fillSelect(
-    $('copy-days'),
-    [1, 2, 3, 4, 5, 6, 7].map((n) => ({
-      value: String(n),
-      text: `Copy from ${n === 1 ? '1 day' : `${n} days`} ago (projects only)`,
-      selected: n === 3,
-    })),
-  );
-  $('copy-days').addEventListener('change', () =>
-    copyPreviousDay(Number($('copy-days').value) || 1),
-  );
+  $('copy-previous').addEventListener('click', () => copyPreviousDay());
   // #140: calendar navigation.
   $('cal-prev').addEventListener('click', () => {
     calState.month = shiftMonth(calState.month || $('day-date').value.slice(0, 7), -1);
@@ -3882,18 +4019,7 @@ async function startApp() {
     $('week-date').value = isoDate(new Date());
     refreshWeek();
   });
-  // Copy-from-N-weeks dropdown (#109): choosing an offset runs the copy.
-  fillSelect(
-    $('week-copy-weeks'),
-    [1, 2, 3, 4].map((n) => ({
-      value: String(n),
-      text: n === 1 ? 'Copy from last week (projects only)' : `Copy from ${n} weeks ago (projects only)`,
-      selected: n === 1,
-    })),
-  );
-  $('week-copy-weeks').addEventListener('change', () =>
-    copyLastWeek(Number($('week-copy-weeks').value) || 1),
-  );
+  $('week-copy-previous').addEventListener('click', () => copyLastWeek());
   $('week-track').addEventListener('click', async () => {
     const today = isoDate(new Date());
     const days = weekState.days.length === 7 ? weekState.days : [today];
@@ -3902,34 +4028,6 @@ async function startApp() {
     await refreshDay();
     $('day-add').click();
   });
-  $('week-add-row').addEventListener('click', async () => {
-    await fillWeekProjectSelect();
-    $('week-add-task').textContent = '';
-    toggleWeekAddRow(true);
-  });
-  $('week-add-cancel').addEventListener('click', () => toggleWeekAddRow(false));
-  $('week-add-project').addEventListener('change', fillWeekTaskSelect);
-  $('week-add-confirm').addEventListener('click', async () => {
-    const [cid, code] = $('week-add-project').value.split('|');
-    const task = $('week-add-task').value || '';
-    if (!cid || !code) {
-      // Exhausted picker (or nothing chosen): explain, keep the grid as-is.
-      announce('All active projects are already in this week.');
-      toggleWeekAddRow(false);
-      $('week-add-row').focus();
-      return;
-    }
-    const added = addWeekRow(cid, code, task, $('week-date').value);
-    toggleWeekAddRow(false);
-    await refreshWeek();
-    // #127: the announcement tells the truth about what happened.
-    const label = code + (task ? ` / ${task}` : '');
-    announce(added
-      ? `Row added for ${label} — type hours to save.`
-      : `${label} is already in this week — no row added.`);
-    $('week-add-row').focus();
-  });
-
   $('ip-close').addEventListener('click', closeInvoicePreview);
   $('ip-download').addEventListener('click', () => {
     if (invoicePreview) downloadInvoicePdf(invoicePreview.inv.id, invoicePreview.inv.number);
@@ -3985,25 +4083,116 @@ async function startApp() {
     $('template-terms-days-field').hidden = $('template-terms').value !== 'custom';
   });
   $('customer-form').addEventListener('submit', saveCustomer);
+  $('customer-new').addEventListener('click', () => {
+    cancelCustomerEdit();
+    $('customer-form').querySelectorAll('details').forEach((details) => { details.open = false; });
+    $('customer-dialog').showModal();
+    $('customer-name').focus();
+  });
+  $('customer-dialog').addEventListener('cancel', (event) => {
+    event.preventDefault();
+    cancelCustomerEdit();
+  });
+  $('customer-dialog').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelCustomerEdit();
+    }
+  });
   $('customer-cancel').addEventListener('click', cancelCustomerEdit);
   // #116: the day input only makes sense for `custom` terms.
   $('customer-terms').addEventListener('change', () => {
     $('customer-terms-days-field').hidden = $('customer-terms').value !== 'custom';
   });
   $('project-form').addEventListener('submit', saveProject);
+  $('project-new').addEventListener('click', () => {
+    if (!state.selectedCustomerId) return;
+    cancelProjectEdit();
+    fillParentCustomers($('project-parent-customer'), state.selectedCustomerId);
+    $('project-parent-customer').disabled = false;
+    prefillProjectParent();
+    $('project-dialog').showModal();
+    $('project-code').focus();
+  });
   $('project-cancel').addEventListener('click', cancelProjectEdit);
+  $('project-parent-customer').addEventListener('change', prefillProjectParent);
   $('task-form').addEventListener('submit', saveTask);
+  $('task-new').addEventListener('click', async () => {
+    if (!state.selectedCustomerId || !state.selectedProjectCode) return;
+    cancelTaskEdit();
+    await fillTaskParents(state.selectedCustomerId, state.selectedProjectCode);
+    $('task-dialog').showModal();
+    $('task-code').focus();
+  });
   $('task-cancel').addEventListener('click', cancelTaskEdit);
+  $('task-parent-customer').addEventListener('change', async () => {
+    const cid = $('task-parent-customer').value;
+    $('task-parent-project').textContent = '';
+    await fillProjectSelect($('task-parent-project'), cid, null);
+    $('task-dialog-parent').textContent = cid ? customerName(cid) : '';
+  });
+  $('task-parent-project').addEventListener('change', () => {
+    const cid = $('task-parent-customer').value;
+    const projectCode = $('task-parent-project').value;
+    $('task-dialog-parent').textContent = cid && projectCode ? `${customerName(cid)} / ${projectCode}` : '';
+  });
+  for (const [dialogId, cancel] of [['project-dialog', cancelProjectEdit], ['task-dialog', cancelTaskEdit]]) {
+    $(dialogId).addEventListener('cancel', (event) => {
+      event.preventDefault();
+      cancel();
+    });
+    $(dialogId).addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cancel();
+      }
+    });
+  }
 
   $('report-form').addEventListener('submit', runReport);
 
   $('invoice-form').addEventListener('submit', generateInvoice);
 
   $('category-form').addEventListener('submit', addCategory);
+  $('category-cancel').addEventListener('click', resetCategoryForm);
+  $('expense-new').addEventListener('click', () => {
+    $('expense-form').reset();
+    $('expense-date').value = isoDate(new Date());
+    $('expense-billable').checked = true;
+    fillCategorySelect();
+    $('expense-dialog').showModal();
+    $('expense-customer').focus();
+  });
+  $('expense-cancel').addEventListener('click', () => $('expense-dialog').close());
+  let expenseCategoryBeforeQuickAdd = '';
+  $('expense-category').addEventListener('change', () => {
+    if ($('expense-category').value === ADD_CATEGORY_VALUE) {
+      $('expense-category').value = expenseCategoryBeforeQuickAdd;
+      $('expense-category-name').value = '';
+      clearFormError($('expense-category-error'));
+      $('expense-category-dialog').showModal();
+      $('expense-category-name').focus();
+      return;
+    }
+    expenseCategoryBeforeQuickAdd = $('expense-category').value;
+  });
+  $('expense-category-form').addEventListener('submit', addExpenseCategory);
+  $('expense-category-cancel').addEventListener('click', () => $('expense-category-dialog').close());
   $('expense-form').addEventListener('submit', addExpense);
   $('submission-form').addEventListener('submit', submitWeek);
   $('secret-form').addEventListener('submit', addSecret);
   $('config-form').addEventListener('submit', saveConfig);
+  $('timer-open').addEventListener('click', () => {
+    const expanded = $('timerbar').hidden;
+    $('timerbar').hidden = !expanded;
+    $('timer-open').setAttribute('aria-expanded', String(expanded));
+    if (expanded) $('timer-customer').focus();
+  });
+  $('timer-cancel').addEventListener('click', () => {
+    $('timerbar').hidden = true;
+    $('timer-open').setAttribute('aria-expanded', 'false');
+    $('timer-open').focus();
+  });
   $('timer-start').addEventListener('click', startTimer);
   $('notif-read').addEventListener('click', markNotificationsRead);
   $('timer-stop').addEventListener('click', stopTimer);
@@ -4248,9 +4437,18 @@ function showAccount(me) {
   $('auth-overlay').hidden = true;
   $('account').hidden = false;
   $('who').textContent = me.name || me.email;
-  // Settings (credential vault) is admin-only; hide the tab for members.
-  const settingsTab = $('tab-settings');
-  if (settingsTab) settingsTab.hidden = me.role !== 'admin';
+  const admin = me.role === 'admin';
+  document.querySelectorAll('#settings-tabs [role="tab"]').forEach((tab) => {
+    tab.hidden = !admin && tab.id !== 'settings-tab-expenses';
+  });
+  if (!admin) {
+    document.querySelectorAll('#settings-tabs [role="tab"]').forEach((tab) => {
+      const active = tab.id === 'settings-tab-expenses';
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+      $(tab.getAttribute('aria-controls')).hidden = !active;
+    });
+  }
 }
 
 async function initAuth() {

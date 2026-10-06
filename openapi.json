@@ -5365,6 +5365,41 @@
           }
         }
       ],
+      "put": {
+        "operationId": "updateCategory",
+        "tags": [
+          "expenses"
+        ],
+        "summary": "Update a category",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
       "delete": {
         "operationId": "deleteCategory",
         "tags": [
