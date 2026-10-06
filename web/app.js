@@ -1334,10 +1334,52 @@ function startCustomerEdit(c) {
   $('customer-terms-days-field').hidden = !terms || terms.kind !== 'custom';
   $('customer-subject').value = c.invoice_subject || '';
   $('customer-notes').value = c.invoice_notes || '';
+  const a = c.address || {};
+  $('cust-street').value = a.street || '';
+  $('cust-city').value = a.city || '';
+  $('cust-postal').value = a.postal_code || '';
+  $('cust-country').value = a.country || '';
+  $('cust-tax').value = c.tax_hundredths ? (c.tax_hundredths / 100).toFixed(2) : '0';
+  $('cust-discount').value = c.discount_hundredths ? (c.discount_hundredths / 100).toFixed(2) : '0';
+  setContacts(c.contacts || []);
   $('customer-save').textContent = 'Update customer';
   $('customer-cancel').hidden = false;
   clearFormError($('customer-error'));
   $('customer-name').focus();
+}
+
+// ---- customer contacts editor (#139) — rows are plain inputs read on save.
+function contactRow(c = { name: '', role: '', email: '', billing: false }) {
+  const mk = (ph, val, type = 'text') =>
+    el('input', { attrs: { placeholder: ph, value: val, type, maxlength: ph === 'Email' ? 200 : 120 } });
+  const name = mk('Name', c.name);
+  const role = mk('Role', c.role);
+  const email = mk('Email', c.email, 'email');
+  const box = el('input', { attrs: { type: 'checkbox' } });
+  box.checked = !!c.billing;
+  const row = el('div', { cls: 'contact-row' }, [
+    name,
+    role,
+    email,
+    el('label', { cls: 'contact-billing' }, [box, el('span', { text: ' billing' })]),
+    el('button', {
+      type: 'button', cls: 'link danger', text: 'Remove',
+      on: { click: () => row.remove() },
+    }),
+  ]);
+  row.__read = () => ({
+    name: name.value.trim(), role: role.value.trim(), email: email.value.trim(), billing: box.checked,
+  });
+  return row;
+}
+
+function readContacts() {
+  return [...$('contact-rows').children].map((r) => r.__read()).filter((c) => c.name || c.email);
+}
+
+function setContacts(list) {
+  $('contact-rows').textContent = '';
+  for (const c of list) $('contact-rows').appendChild(contactRow(c));
 }
 
 async function saveCustomer(evt) {
@@ -1351,6 +1393,10 @@ async function saveCustomer(evt) {
     payment_terms = { kind };
     if (kind === 'custom') payment_terms.days = Number($('customer-terms-days').value);
   }
+  const street = $('cust-street').value.trim();
+  const city = $('cust-city').value.trim();
+  const postal = $('cust-postal').value.trim();
+  const country = $('cust-country').value.trim();
   const body = {
     name: $('customer-name').value.trim(),
     currency: $('customer-currency').value.trim().toUpperCase(),
@@ -1360,6 +1406,11 @@ async function saveCustomer(evt) {
     payment_terms,
     invoice_subject: $('customer-subject').value.trim(),
     invoice_notes: $('customer-notes').value.trim(),
+    // #139: percent inputs are decimal but persist as integer hundredths.
+    address: street || city || postal || country ? { street, city, postal_code: postal, country } : null,
+    contacts: readContacts(),
+    tax_hundredths: Math.round(Number($('cust-tax').value || 0) * 100),
+    discount_hundredths: Math.round(Number($('cust-discount').value || 0) * 100),
   };
   try {
     if (id) await api.put(`/customers/${id}`, body);
@@ -1379,6 +1430,7 @@ function cancelCustomerEdit() {
   $('customer-form').reset();
   $('customer-active').checked = true;
   $('customer-terms-days-field').hidden = true;
+  setContacts([]);
   $('customer-save').textContent = 'Add customer';
   $('customer-cancel').hidden = true;
   clearFormError($('customer-error'));
@@ -2914,6 +2966,14 @@ async function startApp() {
     if (e.key === 'Escape') closeInvoicePreview();
   });
   $('rec-form').addEventListener('submit', addRecurring);
+  $('contact-add').addEventListener('click', () => {
+    if ($('contact-rows').children.length >= 10) {
+      announce('At most 10 contacts per customer.');
+      return;
+    }
+    $('contact-rows').appendChild(contactRow()).focus?.();
+    $('contact-rows').lastChild.querySelector('input')?.focus();
+  });
   $('template-form').addEventListener('submit', saveInvoiceTemplate);
   $('template-terms').addEventListener('change', () => {
     $('template-terms-days-field').hidden = $('template-terms').value !== 'custom';

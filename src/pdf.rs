@@ -1046,6 +1046,10 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         }
     }
 

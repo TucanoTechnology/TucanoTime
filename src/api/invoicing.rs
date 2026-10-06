@@ -362,7 +362,10 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
         return Err(ApiError::conflict("issue the invoice before emailing it"));
     }
     let customer = get_customer(&app.store, invoice.customer_id)?;
-    if customer.email.trim().is_empty() {
+    // #139: the flagged billing contact receives it; the legacy top-level
+    // email still works for customers without contacts.
+    let billing_email = customer.billing_email().to_string();
+    if billing_email.is_empty() {
         return Err(ApiError::validation(vec![FieldError::new(
             "email",
             "customer has no billing email on file",
@@ -391,7 +394,7 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
         .unwrap_or_else(|| crate::email::invoice_subject(&invoice.number, &org.name));
     let html = crate::template::email_html(&content);
     let msg = crate::email::EmailMessage {
-        to: customer.email.clone(),
+        to: billing_email,
         subject,
         text,
         html,
@@ -1073,6 +1076,10 @@ fn synthetic_customer() -> crate::domain::Customer {
         payment_terms: None,
         invoice_notes: String::new(),
         invoice_subject: String::new(),
+        address: None,
+        contacts: vec![],
+        tax_hundredths: 0,
+        discount_hundredths: 0,
     }
 }
 

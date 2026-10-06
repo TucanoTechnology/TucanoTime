@@ -225,6 +225,10 @@ mod tests {
                 payment_terms: None,
                 invoice_notes: String::new(),
                 invoice_subject: String::new(),
+                address: None,
+                contacts: vec![],
+                tax_hundredths: 0,
+                discount_hundredths: 0,
             })
             .unwrap();
         store.put_project(&project).unwrap();
@@ -268,6 +272,10 @@ mod tests {
             payment_terms: None,
             invoice_notes: String::new(),
             invoice_subject: String::new(),
+            address: None,
+            contacts: vec![],
+            tax_hundredths: 0,
+            discount_hundredths: 0,
         };
         let entries = vec![Entry {
             id: uuid::Uuid::new_v4(),

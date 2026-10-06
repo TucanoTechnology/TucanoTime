@@ -94,6 +94,10 @@ pub async fn create_customer(
         payment_terms: draft.payment_terms,
         invoice_notes: draft.invoice_notes,
         invoice_subject: draft.invoice_subject,
+        address: draft.address,
+        contacts: draft.contacts,
+        tax_hundredths: draft.tax_hundredths,
+        discount_hundredths: draft.discount_hundredths,
     };
     app.store.put_customer(&customer)?;
     Ok((StatusCode::CREATED, Json(&customer)).into_response())
@@ -120,6 +124,10 @@ pub async fn update_customer(
         payment_terms: draft.payment_terms,
         invoice_notes: draft.invoice_notes,
         invoice_subject: draft.invoice_subject,
+        address: draft.address,
+        contacts: draft.contacts,
+        tax_hundredths: draft.tax_hundredths,
+        discount_hundredths: draft.discount_hundredths,
     };
     app.store.put_customer(&updated)?;
     Ok(Json(&updated).into_response())
