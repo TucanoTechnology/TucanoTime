@@ -1323,6 +1323,212 @@ if (recBtn) {
   }
 }
 
+// ---- E2E WORKFLOW (#141): Day -> Week -> tracked review -> DRAFT ----
+//
+// Deterministic timesheet-to-invoice journey on isolated fixtures. Stops at
+// Draft: never calls Issue/Email/Copy/Checkout/Sync, asserts the draft locks
+// nothing, and tears every fixture down again.
+{
+  const tag = 'WF' + String(Date.now()).slice(-6);
+  const ev = (elx, type) => elx.dispatchEvent(new window.Event(type, { bubbles: true }));
+  const getJson = async (path) => (await fetch(BASE + path, { headers: { Cookie: SESSION_COOKIE } })).json();
+  const postJson = async (path, body) => {
+    const r = await fetch(BASE + path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
+      body: JSON.stringify(body),
+    });
+    return { status: r.status, json: await r.json().catch(() => ({})) };
+  };
+  // Fixtures: customers through the GUI (keeps the shared pickers fresh),
+  // project + task over the API on the unique customer.
+  window.document.getElementById('tab-customers').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(250);
+  const mkCustomer = async (name) => {
+    window.document.getElementById('customer-name').value = name;
+    window.document.getElementById('customer-currency').value = 'EUR';
+    window.document.getElementById('customer-rate').value = '90';
+    window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    await tick(350);
+    return (await getJson('/customers')).customers.find((c) => c.name === name);
+  };
+  const wfCust = await mkCustomer(`WF-${tag}`);
+  const weCust = await mkCustomer(`WE-${tag}`);
+  await postJson(`/customers/${wfCust.id}/projects`, { code: 'W1', currency: 'EUR', rate_minor: 7000 });
+  await postJson(`/customers/${wfCust.id}/projects/W1/tasks`, { code: 'T1', name: 'Focus work' });
+
+  // ---- DAY: one billable entry with a note through the dialog (#145) ----
+  window.document.getElementById('tab-timesheet').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(250);
+  window.document.getElementById('ts-day').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(200);
+  const wfDay = window.document.getElementById('day-date');
+  wfDay.value = '2031-04-11';
+  ev(wfDay, 'change');
+  await tick(250);
+  window.document.getElementById('day-add').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(150);
+  const wfDlg = window.document.getElementById('entry-dialog');
+  check('Track time opens the entry dialog (#141/#145)', wfDlg.open === true || wfDlg.hasAttribute('open'));
+  const wfCustSel = window.document.getElementById('entry-customer');
+  wfCustSel.value = wfCust.id;
+  ev(wfCustSel, 'change');
+  await tick(250);
+  const wfProjSel = window.document.getElementById('entry-project');
+  wfProjSel.value = 'W1';
+  ev(wfProjSel, 'change');
+  await tick(250);
+  window.document.getElementById('entry-task').value = 'T1';
+  window.document.getElementById('entry-hours').value = '3.25';
+  window.document.getElementById('entry-note').value = 'wf: legal research';
+  window.document.getElementById('entry-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(450);
+  wfDlg.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await tick(150);
+  const wfEntry = (await getJson('/entries?date=2031-04-11')).entries
+    .find((e) => e.customer_id === wfCust.id && e.project_code === 'W1');
+  check('day entry created on the task, billable, with note (#141)',
+    !!wfEntry && wfEntry.hours === 3.25 && wfEntry.task_code === 'T1'
+    && /legal research/.test(wfEntry.note) && wfEntry.billable === true);
+  check('Day view reconciles the entry into its total (#141)',
+    window.document.getElementById('day-total').textContent.trim() === '3:15'
+    && [...window.document.querySelectorAll('#day-table tbody tr')].some((r) => r.textContent.includes('W1'))
+    && wfDlg.open !== true && !wfDlg.hasAttribute('open'));
+
+  // ---- WEEK: the same entry as a task-level cell, totals reconciled ----
+  const wfWeek = window.document.getElementById('week-date');
+  wfWeek.value = '2031-04-07';
+  ev(wfWeek, 'change');
+  await tick(400);
+  const wfRow = [...window.document.querySelectorAll('#week-table tbody tr')].find((r) => r.textContent.includes('W1 \u00b7 T1'));
+  const wfCell = window.document.querySelector('#week-table input[data-date="2031-04-11"][data-task="T1"]');
+  check('week renders the task-level row with the entry cell (#141/#137)',
+    !!wfRow && !!wfCell && wfCell.value === '3.25');
+  check('cell accessible name carries project, task and date (#141)',
+    /W1 \/ T1/.test((wfCell && wfCell.getAttribute('aria-label')) || '')
+    && /2031-04-11/.test((wfCell && wfCell.getAttribute('aria-label')) || ''));
+  check('week row total matches the day total (#141)',
+    !!wfRow && wfRow.querySelector('.row-total').textContent.trim() === '3:15');
+
+  // ---- TRACKED INVOICE WIZARD (#134): review, then save DRAFT ----
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  const invsBefore = (await getJson('/invoices')).invoices.length;
+  window.document.getElementById('iw-customer').value = wfCust.id;
+  window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  window.document.getElementById('iw-preset').value = 'custom';
+  ev(window.document.getElementById('iw-preset'), 'change');
+  const wfFrom = window.document.getElementById('iw-from');
+  wfFrom.value = '2031-04-01';
+  ev(wfFrom, 'change');
+  await tick(200);
+  const wfTo = window.document.getElementById('iw-to');
+  wfTo.value = '2031-04-30';
+  ev(wfTo, 'change');
+  await tick(300);
+  const wfBox = window.document.getElementById('iw-projects');
+  check('wizard lists exactly the fixture project with unbilled hours (#141)',
+    /W1.*3\.25 h unbilled/.test(wfBox.textContent)
+    && wfBox.querySelectorAll('input[type=checkbox]').length === 1);
+  wfBox.querySelector('input[type=checkbox]').checked = true;
+  window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(600);
+  const wfReview = window.document.getElementById('iw-summary').textContent + ' | ' + window.document.getElementById('iw-lines').textContent;
+  check('review shows the exact line, currency and 227.50 EUR (#141)',
+    /227\.50/.test(wfReview) && /EUR/.test(wfReview) && /W1/.test(wfReview));
+  check('review is persisted nothing before Save (#141)',
+    (await getJson('/invoices')).invoices.length === invsBefore);
+  window.document.getElementById('iw-save').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(550);
+  check('save announced a draft with Issue still ahead (#141)',
+    /Draft INV-\d+ created from 1 line/.test(window.document.getElementById('live-region').textContent));
+  const wfInv = (await getJson('/invoices')).invoices.find((i) => i.customer_id === wfCust.id);
+  check('exactly one draft exists, locked nothing (#141)',
+    (await getJson('/invoices')).invoices.length === invsBefore + 1
+    && !!wfInv && wfInv.status === 'draft' && /^INV-/.test(wfInv.number));
+  const wfLine = wfInv.lines[0];
+  check('draft line is the reviewed entry with snapshot money (#141)',
+    wfInv.lines.length === 1 && wfLine.entry_id === wfEntry.id && wfLine.task_code === 'T1'
+    && wfLine.hours === 3.25 && wfLine.rate_minor === 7000 && wfLine.amount_minor === 22750);
+  const wfPdf = await fetch(`${BASE}/invoices/${wfInv.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } });
+  const wfPut = await fetch(`${BASE}/entries/${wfEntry.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
+    body: JSON.stringify({ date: '2031-04-11', customer_id: wfCust.id, project_code: 'W1', task_code: 'T1', hours: 3.25, note: 'wf: legal research', billable: true }),
+  });
+  check('draft issued nothing: PDF 409 and source entry still editable (#141)',
+    wfPdf.status === 409 && wfPut.status === 200);
+
+  // ---- DASHBOARD states (#135): hidden on Open, found on All + search ----
+  const wfOpen = window.document.getElementById('inv-tab-open');
+  const wfAll = window.document.getElementById('inv-tab-all');
+  const wfSearch = window.document.getElementById('invoice-search');
+  wfOpen.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  wfSearch.value = wfInv.number;
+  ev(wfSearch, 'input');
+  await tick(300);
+  const openHas = [...window.document.querySelectorAll('#invoice-table tbody tr')]
+    .some((r) => r.textContent.includes(wfInv.number));
+  wfAll.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  const allHas = [...window.document.querySelectorAll('#invoice-table tbody tr')]
+    .some((r) => r.textContent.includes(wfInv.number));
+  check('draft invisible on Open, searchable on All; tab states honest (#141/#135)',
+    !openHas && allHas && wfAll.getAttribute('aria-pressed') === 'true'
+    && wfOpen.getAttribute('aria-pressed') === 'false');
+  wfSearch.value = '';
+  ev(wfSearch, 'input');
+  await tick(200);
+
+  // ---- NO BILLABLE WORK: explains itself, persists nothing (#141) ----
+  window.document.getElementById('iw-customer').value = weCust.id;
+  window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  window.document.getElementById('iw-preset').value = 'custom';
+  ev(window.document.getElementById('iw-preset'), 'change');
+  const weFrom = window.document.getElementById('iw-from');
+  weFrom.value = '2031-05-01';
+  ev(weFrom, 'change');
+  await tick(200);
+  const weTo = window.document.getElementById('iw-to');
+  weTo.value = '2031-05-31';
+  ev(weTo, 'change');
+  await tick(300);
+  check('empty period explains there is no billable work (#141)',
+    /No uninvoiced billable work/i.test(window.document.getElementById('iw-projects').textContent));
+  window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(450);
+  const weErr = window.document.getElementById('iw-error');
+  check('forcing an empty period errors inline and drafts nothing (#141)',
+    weErr.hidden === false && /no billable|nothing/i.test(weErr.textContent)
+    && (await getJson('/invoices')).invoices.every((i) => i.customer_id !== weCust.id));
+
+  // ---- TEARDOWN: no fixture survives (#141) ----
+  const del = async (path) => {
+    const r = await fetch(BASE + path, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' } });
+    if (r.status >= 300) console.log(`TEARDOWN ${r.status} ${path} ${(await r.text()).slice(0, 120)}`);
+    return r;
+  };
+  await del(`/invoices/${wfInv.id}`);
+  await del(`/entries/${wfEntry.id}`);
+  await del(`/customers/${wfCust.id}/projects/W1/tasks/T1`);
+  await del(`/customers/${wfCust.id}/projects/W1`);
+  await del(`/customers/${wfCust.id}`);
+  await del(`/customers/${weCust.id}`);
+  const left = await getJson('/customers');
+  const leftInv = await getJson('/invoices');
+  const leftEnt = await getJson('/entries?date=2031-04-11');
+  console.log('LEFT ' + JSON.stringify(left.customers.map((c) => [c.name, c.id.slice(0, 8)])));
+  const goneCust = left.customers.every((c) => !c.name.startsWith(`WF-${tag}`) && !c.name.startsWith(`WE-${tag}`));
+  const goneInv = leftInv.invoices.every((i) => i.id !== wfInv.id);
+  const goneEnt = leftEnt.entries.every((e) => e.id !== wfEntry.id);
+  check('teardown removed fixture customers (#141)', goneCust);
+  check('teardown removed the draft (#141)', goneInv);
+  check('teardown removed the entry (#141)', goneEnt);
+}
+
 console.log(`\n${failures === 0 ? 'ALL GUI CHECKS PASSED' : failures + ' GUI CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);
 
