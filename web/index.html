@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TucanoTime — Timesheets</title>
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -62,6 +63,11 @@
           <div class="tab-sep" role="separator" aria-hidden="true"></div>
           <button type="button" id="wizard-open" title="Setup wizard — add your first customer and project" aria-haspopup="dialog">🚀 Setup wizard</button>
         </div>
+        <fieldset class="theme-switch" id="theme-switch">
+          <legend>Colour mode</legend>
+          <label><input type="radio" name="colour-mode" value="light"> Light</label>
+          <label><input type="radio" name="colour-mode" value="dark"> Dark</label>
+        </fieldset>
       </nav>
       <div id="account" class="account" hidden>
         <span id="who" class="who"></span>
@@ -624,24 +630,44 @@
 
       <section id="settings-panel-users" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-users" tabindex="0" hidden>
         <h2>User management</h2>
-        <p class="hint">Create, update, activate, deactivate, change passwords, and delete users. Deletion is blocked when a user has recorded data.</p>
-        <form id="user-form" class="card">
+        <button type="button" id="user-new">+ User</button>
+        <div class="bar user-filters">
+          <div><label for="user-search">Name or email</label><input id="user-search" type="search" autocomplete="off"></div>
+          <div><label for="user-filter-role">Role</label><select id="user-filter-role"><option value="">All roles</option><option value="admin">Administrator</option><option value="member">Member</option></select></div>
+          <div><label for="user-filter-active">Status</label><select id="user-filter-active"><option value="">All statuses</option><option value="true">Active</option><option value="false">Inactive</option></select></div>
+        </div>
+        <p id="user-list-status" role="status" aria-live="polite"></p>
+        <dialog id="user-dialog" aria-labelledby="user-dialog-title">
+        <h2 id="user-dialog-title">Add user</h2>
+        <form id="user-form">
           <input type="hidden" id="user-id">
           <div class="field"><label for="user-name">Name</label><input id="user-name" maxlength="120" required autocomplete="name"></div>
           <div class="field"><label for="user-email">Email</label><input id="user-email" type="email" maxlength="254" required autocomplete="email"></div>
-          <div class="field"><label for="user-password">Password <span id="user-password-label">required for new users</span></label><input id="user-password" type="password" minlength="8" autocomplete="new-password"></div>
+          <div class="field" id="user-password-field"><label for="user-password">Initial password</label><input id="user-password" type="password" minlength="8" autocomplete="new-password" required></div>
           <div class="field"><label for="user-role">Role</label><select id="user-role"><option value="member">Member</option><option value="admin">Administrator</option></select></div>
-          <div class="field"><label for="user-active">Active</label><input id="user-active" type="checkbox" checked></div>
-          <div class="field"><label for="user-default-rate">Default rate (cents/hour)</label><input id="user-default-rate" type="number" min="0" step="1" inputmode="numeric"></div>
-          <div class="field"><label for="user-cost-rate">Cost rate (cents/hour)</label><input id="user-cost-rate" type="number" min="0" step="1" inputmode="numeric"></div>
+          <div class="field checkbox"><label for="user-active"><input id="user-active" type="checkbox" checked> Active</label></div>
+          <details><summary>Billing and cost rates</summary>
+          <div class="field"><label for="user-default-rate">Default hourly rate</label><input id="user-default-rate" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0"></div>
+          <div class="field"><label for="user-cost-rate">Hourly cost rate</label><input id="user-cost-rate" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0"></div>
+          </details>
           <p class="form-error" id="user-error" role="alert" hidden></p>
-          <div class="buttons"><button type="submit" id="user-save">Add user</button><button type="button" class="secondary" id="user-cancel" hidden>Cancel</button></div>
+          <div class="buttons"><button type="submit" id="user-save">Add user</button><button type="button" class="secondary" id="user-cancel">Cancel</button></div>
         </form>
-        <table id="user-table">
+        </dialog>
+        <dialog id="user-password-dialog" aria-labelledby="user-password-title">
+          <h2 id="user-password-title">Change password</h2>
+          <form id="user-password-form">
+            <input type="hidden" id="user-password-id">
+            <div class="field"><label for="user-new-password">New password</label><input type="password" id="user-new-password" minlength="8" autocomplete="new-password" required></div>
+            <p id="user-password-error" class="form-error" role="alert" hidden></p>
+            <div class="buttons"><button type="submit">Change password</button><button type="button" id="user-password-cancel" class="secondary">Cancel</button></div>
+          </form>
+        </dialog>
+        <div class="table-scroll"><table id="user-table">
           <caption class="sr-only">Users</caption>
           <thead><tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Rates</th><th scope="col" class="actions-col">Actions</th></tr></thead>
           <tbody></tbody>
-        </table>
+        </table></div>
         <p id="user-empty" hidden>No users found.</p>
       </section>
 

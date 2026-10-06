@@ -32,7 +32,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #2c001e;          /* dark aubergine */
     --surface: #411934;     /* dark aubergine 90% */
     --fg: #f1e9ed;          /* canonical aubergine 10% — near-white */
@@ -53,6 +53,31 @@
     --shadow: none;
   }
 }
+
+:root[data-theme="dark"] {
+  --bg: #2c001e;
+  --surface: #411934;
+  --fg: #f1e9ed;
+  --muted: #d6becb;
+  --line: #56334b;
+  --brand: #e95420;
+  --brand-ink: #2c001e;
+  --brand-hover: #eb6536;
+  --accent: #f08763;
+  --accent-soft: #56334b;
+  --danger: #cfb4c2;
+  --brand-deep: #d6becb;
+  --field-bg: #2c001e;
+  --focus: #f5b29b;
+  --row-alt: #411934;
+  --cell-active: #56334b;
+  --sidebar-bg: #411934;
+  --shadow: none;
+}
+.theme-switch { border: 0; border-top: 1px solid var(--line); padding: .75rem .5rem; margin: .75rem 0 0; }
+.theme-switch legend { padding: 0 .25rem; font-size: .85rem; color: var(--muted); }
+.theme-switch label { display: inline-flex; align-items: center; gap: .3rem; margin-right: .65rem; font-weight: 400; cursor: pointer; }
+.theme-switch input { accent-color: var(--brand-deep); }
 
 * { box-sizing: border-box; }
 
@@ -242,7 +267,7 @@ td.cell.locked .cell-input { opacity: .6; }
 }
 
 /* ------------------------------------------- inline dialog (#102) ------- */
-#app-dialog, #wizard-dialog, #entry-dialog, #expense-dialog, #expense-category-dialog, #customer-dialog, #project-dialog, #task-dialog {
+#app-dialog, #wizard-dialog, #entry-dialog, #expense-dialog, #expense-category-dialog, #customer-dialog, #project-dialog, #task-dialog, #user-dialog, #user-password-dialog {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.1rem 1.2rem 1rem;
@@ -260,6 +285,13 @@ td.cell.locked .cell-input { opacity: .6; }
 #customer-dialog { max-width: 38rem; max-height: calc(100dvh - 3rem); overflow-y: auto; }
 #customer-dialog h2 { margin: 0 0 .75rem; font-size: 1.05rem; }
 #customer-dialog form { margin: 0; }
+#user-dialog, #user-password-dialog { max-width: 34rem; max-height: calc(100dvh - 3rem); overflow-y: auto; }
+#user-dialog::backdrop, #user-password-dialog::backdrop { background: rgba(44, 0, 30, .55); }
+#user-dialog form, #user-password-dialog form { margin: 0; }
+#user-dialog input:not([type="checkbox"]), #user-dialog select, #user-password-dialog input { width: 100%; }
+.user-filters { margin-top: 1rem; }
+.user-filters > div { min-width: 0; }
+#user-table { min-width: 40rem; }
 #project-dialog, #task-dialog { max-width: 32rem; max-height: calc(100dvh - 3rem); overflow-y: auto; }
 #project-dialog h2, #task-dialog h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
 #project-dialog form, #task-dialog form { margin: 0; }

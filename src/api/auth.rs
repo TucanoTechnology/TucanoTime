@@ -237,7 +237,8 @@ pub async fn sso_assertion(
             if role != u.role && !admin_group.is_empty() {
                 let mut updated = u.clone();
                 updated.role = role;
-                app.store.put_user(&updated)?;
+                updated.session_version += 1;
+                app.store.put_user_if_unchanged(&updated, &u)?;
                 updated
             } else {
                 u
