@@ -3904,11 +3904,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "sent_to"
+                    "sent_to",
+                    "transport"
                   ],
                   "properties": {
                     "sent_to": {
                       "type": "string"
+                    },
+                    "transport": {
+                      "type": "string",
+                      "enum": [
+                        "smtp",
+                        "disabled"
+                      ],
+                      "description": "Delivery path (#130). \"disabled\" = logged, NOT sent (no smtp.host configured)."
                     }
                   },
                   "additionalProperties": false
@@ -3986,11 +3995,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "sent_to"
+                    "sent_to",
+                    "transport"
                   ],
                   "properties": {
                     "sent_to": {
                       "type": "string"
+                    },
+                    "transport": {
+                      "type": "string",
+                      "enum": [
+                        "smtp",
+                        "disabled"
+                      ],
+                      "description": "Delivery path (#130). \"disabled\" = logged, NOT sent (no smtp.host configured)."
                     }
                   },
                   "additionalProperties": false
@@ -4808,7 +4826,8 @@
                   "required": [
                     "config",
                     "path",
-                    "vault_enabled"
+                    "vault_enabled",
+                    "email_transport"
                   ],
                   "properties": {
                     "config": {
@@ -4848,6 +4867,14 @@
                     },
                     "vault_enabled": {
                       "type": "boolean"
+                    },
+                    "email_transport": {
+                      "type": "string",
+                      "enum": [
+                        "smtp",
+                        "disabled"
+                      ],
+                      "description": "Whether invoice emails actually deliver (#130)."
                     }
                   },
                   "additionalProperties": false

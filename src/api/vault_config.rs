@@ -16,6 +16,9 @@ pub async fn admin_config(State(app): State<AppState>) -> ApiResult {
         "config": effective,
         "path": app.store.root().join("config.json").display().to_string(),
         "vault_enabled": app.vault.is_some(),
+        // #130: Settings shows whether email actually delivers ("smtp") or
+        // is a logged no-op ("disabled" until smtp.host is configured).
+        "email_transport": app.email.transport(),
     }))
     .into_response())
 }

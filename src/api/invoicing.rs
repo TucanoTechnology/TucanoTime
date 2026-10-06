@@ -410,7 +410,13 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
         })
     })
     .await?;
-    Ok(Json(serde_json::json!({ "sent_to": sent_to })).into_response())
+    // Honest delivery state (#130): with no SMTP configured the transport
+    // succeeds silently — clients must not read a 200 as "the customer got
+    // an email". `transport` is "smtp" only when a relay accepted the send.
+    Ok(
+        Json(serde_json::json!({ "sent_to": sent_to, "transport": app.email.transport() }))
+            .into_response(),
+    )
 }
 
 /// Body for `POST /invoices/{id}/email-copy` (#112).
@@ -488,9 +494,15 @@ pub async fn send_invoice_email_copy(
     match result {
         Ok(()) => {
             // #52: recipient + invoice, never the document bytes.
-            app.audit
-                .record("invoice_email_copy", &format!("{id}:{to}"), app.clock.now());
-            Ok(Json(serde_json::json!({ "sent_to": to })).into_response())
+            app.audit.record(
+                "invoice_email_copy",
+                &format!("{id}:{to}:{}", app.email.transport()),
+                app.clock.now(),
+            );
+            Ok(
+                Json(serde_json::json!({ "sent_to": to, "transport": app.email.transport() }))
+                    .into_response(),
+            )
         }
         Err(e) => Err(e),
     }

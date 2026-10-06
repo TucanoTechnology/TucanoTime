@@ -31,9 +31,15 @@ pub enum EmailError {
 }
 
 /// Delivers an `EmailMessage`. Adapters must never log message bodies or
-/// credentials.
+/// credentials. `transport()` names the delivery path so API responses and
+/// the GUI can be honest about whether a message actually left the building
+/// (#130: with no SMTP configured `send` succeeds silently, and "sent" in
+/// the UI was a lie).
 pub trait EmailSender: Send + Sync {
     fn send(&self, msg: &EmailMessage) -> Result<(), EmailError>;
+    /// Stable machine-readable transport id: `"smtp"`, `"disabled"`, or
+    /// `"recording"` (test adapter). Serialised into email endpoint results.
+    fn transport(&self) -> &'static str;
 }
 
 /// Sends nothing; logs at info. The default when SMTP is not configured.
@@ -44,6 +50,9 @@ impl EmailSender for DisabledEmailSender {
     fn send(&self, msg: &EmailMessage) -> Result<(), EmailError> {
         tracing::info!(to = %msg.to, subject = %msg.subject, "email (SMTP not configured, not sent)");
         Ok(())
+    }
+    fn transport(&self) -> &'static str {
+        "disabled"
     }
 }
 
@@ -66,6 +75,9 @@ impl EmailSender for RecordingEmailSender {
         }
         self.sent.lock().unwrap().push(msg.clone());
         Ok(())
+    }
+    fn transport(&self) -> &'static str {
+        "recording"
     }
 }
 
@@ -155,6 +167,9 @@ impl EmailSender for SmtpEmailSender {
             .set_read_timeout(Some(std::time::Duration::from_secs(15)))
             .ok();
         SmtpConn { stream }.run(&self.config, msg)
+    }
+    fn transport(&self) -> &'static str {
+        "smtp"
     }
 }
 
@@ -266,31 +281,49 @@ fn auth_line(s: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(s)
 }
 
+/// RFC 2047: headers are ASCII unless they carry a display name or a
+/// non-ASCII subject (org/customer names — #112 put the customer name in the
+/// copy subject, so "Café München" used to emit raw UTF-8 header bytes that
+/// strict relays reject). Encoded words are Base64 (`?B?`) — deterministic
+/// and safe for any value length.
+pub fn encode_header(value: &str) -> String {
+    if value.is_ascii() {
+        return value.to_string();
+    }
+    use base64::Engine;
+    let enc = base64::engine::general_purpose::STANDARD.encode(value.as_bytes());
+    format!("=?UTF-8?B?{enc}?=")
+}
+
 /// Serialises headers + body, multipart when an attachment is present.
 pub fn build_mime(msg: &EmailMessage) -> String {
     let mut h = format!(
         "From: TucanoTime\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n",
-        msg.to,
-        msg.subject,
+        encode_header(&msg.to),
+        encode_header(&msg.subject),
         chrono::Utc::now().to_rfc2822(),
     );
     match (&msg.html, &msg.attachment) {
         (None, None) => {
-            h.push_str("Content-Type: text/plain; charset=utf-8\r\n\r\n");
+            h.push_str(
+                "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n",
+            );
             h.push_str(&msg.text);
         }
         (Some(html), None) => {
-            h.push_str("MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n");
+            h.push_str("MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n");
             h.push_str(html);
         }
         _ => {
             h.push_str(
                 "MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"tt\"\r\n\r\n",
             );
-            h.push_str("--tt\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n");
+            h.push_str(
+                "--tt\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n",
+            );
             h.push_str(&msg.text);
             if let Some(html) = &msg.html {
-                h.push_str("\r\n--tt\r\nContent-Type: text/html; charset=utf-8\r\n\r\n");
+                h.push_str("\r\n--tt\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n");
                 h.push_str(html);
             }
             if let Some((name, bytes)) = &msg.attachment {
@@ -510,6 +543,46 @@ mod tests {
         assert!(mime.contains("attachment; filename=\"inv.csv\""));
         assert!(mime.contains("Content-Type: application/octet-stream"));
         assert!(mime.contains("aGk")); // base64("hi")
+    }
+
+    #[test]
+    fn non_ascii_headers_are_rfc2047_encoded() {
+        assert_eq!(encode_header("Plain Subject"), "Plain Subject");
+        let enc = encode_header("Copy of invoice INV-1 for Café München");
+        assert!(
+            enc.starts_with("=?UTF-8?B?") && enc.ends_with("?="),
+            "{enc}"
+        );
+        // The raw bytes must not survive into the header block.
+        let m = EmailMessage {
+            to: "x@y.co".into(),
+            subject: "Café München".into(),
+            text: "body".into(),
+            html: None,
+            attachment: None,
+        };
+        let mime = build_mime(&m);
+        assert!(mime.contains("Subject: =?UTF-8?B?"), "{mime}");
+        assert!(!mime.contains("Café"), "no raw UTF-8 in headers");
+        // Bodies keep their UTF-8, declared 8bit.
+        assert!(mime.contains("Content-Transfer-Encoding: 8bit"));
+    }
+
+    #[test]
+    fn transports_self_report() {
+        assert_eq!(DisabledEmailSender.transport(), "disabled");
+        assert_eq!(RecordingEmailSender::default().transport(), "recording");
+        assert_eq!(
+            SmtpEmailSender::new(SmtpConfig {
+                host: "h".into(),
+                port: 25,
+                from: "f@x.co".into(),
+                username: None,
+                password: None,
+            })
+            .transport(),
+            "smtp"
+        );
     }
 
     #[test]

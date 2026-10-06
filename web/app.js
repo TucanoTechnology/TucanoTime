@@ -1671,10 +1671,18 @@ async function issueInvoice(inv) {
   }
 }
 
+/// One phrasing for a delivered/queued send (#130): "disabled" means the
+/// transport is a logged no-op — the UI must not claim the customer got it.
+function emailOutcome(res, base) {
+  return res.transport === 'smtp'
+    ? base
+    : `NOT sent (SMTP not configured) — would go to ${res.sent_to}. Set smtp.host in Settings.`;
+}
+
 async function emailInvoice(id) {
   try {
     const res = await api.post(`/invoices/${id}/email`);
-    announce(`Invoice emailed to ${res.sent_to} (PDF attached).`);
+    announce(emailOutcome(res, `Invoice emailed to ${res.sent_to} (PDF attached).`));
   } catch (err) {
     announce(`Email failed: ${err.message}`);
   }
@@ -1691,7 +1699,7 @@ async function emailInvoiceCopy(id) {
   }
   try {
     const res = await api.post(`/invoices/${id}/email-copy`, { to });
-    announce(`PDF copy sent to ${res.sent_to}.`);
+    announce(emailOutcome(res, `PDF copy sent to ${res.sent_to}.`));
   } catch (err) {
     announce(`Email copy failed: ${err.message}`);
   }
@@ -1996,6 +2004,14 @@ async function refreshConfig() {
   let data;
   try {
     data = await api.get('/admin/config');
+    // #130: be honest about delivery. A 200 from the email endpoints with
+    // transport "disabled" means logged, not sent.
+    const es = $('email-status');
+    if (es) {
+      es.textContent = data.email_transport === 'smtp'
+        ? 'Email delivery: SMTP configured — invoices are actually sent.'
+        : 'Email delivery: NOT configured — messages are logged only. Set smtp.host in credentials above or TUCANO_SMTP_HOST.';
+    }
   } catch {
     $('config-table').hidden = true;
     $('config-form').hidden = true;
