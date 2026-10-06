@@ -20,6 +20,11 @@ pub struct EmailMessage {
     pub html: Option<String>,
     /// Optional attachment filename + bytes.
     pub attachment: Option<(String, Vec<u8>)>,
+    /// Sender display name override (#146); None keeps the built-in
+    /// "TucanoTime" — resolved from the org profile by the API layer.
+    pub from_name: Option<String>,
+    /// Reply-To header (#146): honoured by every transport; None omits it.
+    pub reply_to: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -297,12 +302,21 @@ pub fn encode_header(value: &str) -> String {
 
 /// Serialises headers + body, multipart when an attachment is present.
 pub fn build_mime(msg: &EmailMessage) -> String {
+    let from_display = msg
+        .from_name
+        .as_deref()
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or("TucanoTime");
     let mut h = format!(
-        "From: TucanoTime\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n",
+        "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n",
+        encode_header(from_display),
         encode_header(&msg.to),
         encode_header(&msg.subject),
         chrono::Utc::now().to_rfc2822(),
     );
+    if let Some(reply) = msg.reply_to.as_deref().filter(|r| !r.trim().is_empty()) {
+        h.push_str(&format!("Reply-To: {}\r\n", encode_header(reply.trim())));
+    }
     match (&msg.html, &msg.attachment) {
         (None, None) => {
             h.push_str(
@@ -463,6 +477,8 @@ mod tests {
             text: "t".into(),
             html: None,
             attachment: None,
+            from_name: None,
+            reply_to: None,
         });
         assert!(ok.is_ok());
         let bad = s.send(&EmailMessage {
@@ -471,6 +487,8 @@ mod tests {
             text: "t".into(),
             html: None,
             attachment: None,
+            from_name: None,
+            reply_to: None,
         });
         assert!(matches!(bad, Err(EmailError::Recipient)));
         assert_eq!(s.messages().len(), 1);
@@ -537,6 +555,8 @@ mod tests {
             text: "body".into(),
             html: None,
             attachment: Some(("inv.csv".into(), b"hi".to_vec())),
+            from_name: None,
+            reply_to: None,
         };
         let mime = build_mime(&m);
         assert!(mime.contains("multipart/mixed"));
@@ -560,12 +580,47 @@ mod tests {
             text: "body".into(),
             html: None,
             attachment: None,
+            from_name: None,
+            reply_to: None,
         };
         let mime = build_mime(&m);
         assert!(mime.contains("Subject: =?UTF-8?B?"), "{mime}");
         assert!(!mime.contains("Café"), "no raw UTF-8 in headers");
         // Bodies keep their UTF-8, declared 8bit.
         assert!(mime.contains("Content-Transfer-Encoding: 8bit"));
+    }
+
+    #[test]
+    fn sender_name_and_reply_to_headers() {
+        // Default: built-in From, no Reply-To — unchanged for legacy users.
+        let m = EmailMessage {
+            to: "x@y.co".into(),
+            subject: "S".into(),
+            text: "b".into(),
+            html: None,
+            attachment: None,
+            from_name: None,
+            reply_to: None,
+        };
+        let mime = build_mime(&m);
+        assert!(mime.contains("From: TucanoTime\r\n"), "{mime}");
+        assert!(!mime.contains("Reply-To"), "{mime}");
+        // Configured (#146): display name RFC 2047 when non-ASCII + Reply-To.
+        let m2 = EmailMessage {
+            from_name: Some("Café Tucano".into()),
+            reply_to: Some("billing@tucano.test".into()),
+            ..m
+        };
+        let mime2 = build_mime(&m2);
+        assert!(
+            mime2.starts_with("From: =?UTF-8?B?") || mime2.contains("From: =?UTF-8?B?"),
+            "{mime2}"
+        );
+        assert!(
+            mime2.contains("Reply-To: billing@tucano.test\r\n"),
+            "{mime2}"
+        );
+        assert!(!mime2.contains("Café"), "no raw UTF-8 in headers");
     }
 
     #[test]
@@ -593,6 +648,8 @@ mod tests {
             text: "body".into(),
             html: None,
             attachment: Some(("INV-0001.PDF".into(), b"%PDF-1.4".to_vec())),
+            from_name: None,
+            reply_to: None,
         };
         let mime = build_mime(&m);
         assert!(mime.contains("Content-Type: application/pdf"), "{mime}");

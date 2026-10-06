@@ -593,7 +593,7 @@
         <div class="buttons"><button type="submit" id="config-save">Apply to config.json</button></div>
       </form>
 
-      <h2>Company information</h2>
+      <h2>Invoice settings: company, appearance, messages</h2>
       <p class="hint">Printed on invoice documents and emails (#138). Leave the name empty to keep the boot-time <code>org_name</code> setting; due terms and message wording live in the invoice template below (one store, no parallel defaults).</p>
       <form id="org-form" class="card">
         <div class="field"><label for="org-name">Company name</label><input id="org-name" maxlength="120" autocomplete="off"></div>
@@ -602,6 +602,10 @@
         <div class="field"><label for="org-city">City</label><input id="org-city" maxlength="80" autocomplete="off"></div>
         <div class="field"><label for="org-postal">Postal code</label><input id="org-postal" maxlength="16" autocomplete="off"></div>
         <div class="field"><label for="org-country">Country</label><input id="org-country" maxlength="56" autocomplete="off"></div>
+                <div class="field"><label for="org-from">Email sender display name</label><input id="org-from" maxlength="120" autocomplete="off" placeholder="TucanoTime (#146)"></div>
+        <div class="field"><label for="org-reply">Reply-To address</label><input id="org-reply" type="email" maxlength="200" autocomplete="off" placeholder="billing@yourcompany.test"></div>
+        <div class="field"><label for="org-accent">Invoice accent color (#rrggbb)</label>
+          <span class="accent-row"><input id="org-accent" maxlength="7" pattern="^#[0-9a-fA-F]{6}$" placeholder="#E95420" autocomplete="off"><span id="accent-swatch" class="accent-swatch" aria-hidden="true"></span></span></div>
         <p class="form-error" id="org-error" role="alert" hidden></p>
         <div class="buttons"><button type="submit" id="org-save">Save company info</button></div>
       </form>

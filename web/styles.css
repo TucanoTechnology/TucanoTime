@@ -404,3 +404,9 @@ caption { padding-bottom: .35rem; }
 .sort-th { border: none; background: none; font: inherit; font-weight: 700; color: inherit; cursor: pointer; padding: 0; }
 .sort-th:hover { color: var(--brand-deep); }
 @media (max-width: 720px) { #inv-tiles { width: 100%; flex-direction: row; } .inv-bar { width: 5px; } }
+
+
+/* ---- appearance & messages settings (#146) ---- */
+.accent-row { display: flex; align-items: center; gap: .5rem; }
+.accent-swatch { width: 2rem; height: 1.4rem; border: 1px solid var(--line);
+  border-radius: calc(var(--radius) / 2); background: transparent; }

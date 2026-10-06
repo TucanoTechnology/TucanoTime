@@ -41,6 +41,8 @@ pub struct Org {
     /// VAT / company id printed under the From block (#138).
     pub legal_id: String,
     pub address: Option<crate::domain::Address>,
+    /// '#rrggbb' document accent (#146); empty keeps the ink-only default.
+    pub accent: String,
 }
 
 impl Org {
@@ -50,8 +52,26 @@ impl Org {
             name: name.into(),
             legal_id: String::new(),
             address: None,
+            accent: String::new(),
         }
     }
+}
+
+/// Parse a '#rrggbb' accent into PDF floats (case-insensitive, no alpha).
+/// Anything else is `None` — an unparseable accent must never corrupt bytes.
+#[must_use]
+pub fn parse_accent(hex: &str) -> Option<[f32; 3]> {
+    let h = hex.trim().strip_prefix('#')?;
+    if h.len() != 6 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let v = |i: usize| u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).ok();
+    let (r, g, b) = (v(0)?, v(1)?, v(2)?);
+    Some([
+        f32::from(r) / 255.0,
+        f32::from(g) / 255.0,
+        f32::from(b) / 255.0,
+    ])
 }
 
 /// Inline text with style flags. #116's markdown `**`/`*` map 1:1 onto these
@@ -130,6 +150,8 @@ pub struct Doc {
     /// Table column captions: [description, quantity, unit price] (#147);
     /// empty strings keep the built-in captions at layout time.
     pub column_labels: [String; 3],
+    /// Content accent for the totals section (#146); None = no color ops.
+    pub accent: Option<[f32; 3]>,
     pub header: Vec<Block>,
     pub blocks: Vec<Block>,
     pub lines: Vec<LineRow>,
@@ -257,6 +279,7 @@ pub fn doc_for_labeled(
             labels.quantity.clone(),
             labels.unit_price.clone(),
         ],
+        accent: parse_accent(&org.accent),
         header,
         blocks: vec![],
         lines,
@@ -373,6 +396,8 @@ impl Face {
 /// space; flipped to PDF's bottom-up space at emit time.
 #[derive(Debug, PartialEq)]
 enum Op {
+    /// Set fill+stroke color (#146 accent); emitted raw for determinism.
+    Color { rgb: [f32; 3] },
     Text {
         face: Face,
         size: i32,
@@ -676,8 +701,17 @@ fn layout(doc: &Doc) -> Vec<Vec<Op>> {
     }
 
     // Totals (bold rule above; prints total_minor, never a re-sum).
+    // #146: the configured accent paints the money section only.
+    if let Some(rgb) = doc.accent {
+        p.cur.push(Op::Color { rgb });
+    }
     for b in &doc.totals {
         emit_block(&mut p, b, 11, 0);
+    }
+    if doc.accent.is_some() {
+        p.cur.push(Op::Color {
+            rgb: [0.0, 0.0, 0.0],
+        });
     }
     p.advance(14);
 
@@ -1027,6 +1061,11 @@ fn emit(pages: &[Vec<Op>]) -> Vec<u8> {
         let mut content = Content::new();
         for op in ops {
             match op {
+                Op::Color { rgb } => {
+                    let [r, g, b] = *rgb;
+                    content.set_fill_rgb(r, g, b);
+                    content.set_stroke_rgb(r, g, b);
+                }
                 Op::Text {
                     face,
                     size,
@@ -1289,6 +1328,30 @@ mod tests {
     }
 
     #[test]
+    fn accent_parsing_and_color_ops_are_deterministic() {
+        assert_eq!(
+            parse_accent("#e95420"),
+            Some([0.9137255, 0.32941177, 0.1254902])
+        );
+        assert!(parse_accent("e95420").is_none(), "missing # is refused");
+        assert!(parse_accent("#12345").is_none());
+        assert!(parse_accent("#gggggg").is_none());
+        let o = Org {
+            accent: "#e95420".into(),
+            ..org()
+        };
+        let inv = sample_invoice();
+        let a = render_invoice_pdf(&doc_for(&inv, &customer(), &o));
+        let b = render_invoice_pdf(&doc_for(&inv, &customer(), &o));
+        assert_eq!(a, b, "accented render stays deterministic");
+        assert!(a.windows(3).any(|w| w == b" rg"), "fill color op emitted");
+        // Default (no accent) has no color ops at all.
+        let plain = render_invoice_pdf(&doc_for(&inv, &customer(), &org()));
+        assert!(!plain.windows(3).any(|w| w == b" rg"));
+        assert!(!plain.windows(3).any(|w| w == b" RG"));
+    }
+
+    #[test]
     fn truncate_marks_with_dots() {
         let long = "x".repeat(300).into_bytes();
         let lines = wrap_limited(Face::Regular, 9, &long, COL_DESC - 6, 2);
@@ -1301,6 +1364,7 @@ mod tests {
         let doc = Doc {
             title: "T".into(),
             column_labels: Default::default(),
+            accent: None,
             header: vec![],
             blocks: vec![Block::Paragraph(vec![
                 Span::bold("B"),
@@ -1317,7 +1381,7 @@ mod tests {
             .iter()
             .filter_map(|op| match op {
                 Op::Text { face, .. } | Op::TextRight { face, .. } => Some(*face),
-                Op::Line { .. } => None,
+                Op::Line { .. } | Op::Color { .. } => None,
             })
             .collect();
         assert!(faces.contains(&Face::Bold));
