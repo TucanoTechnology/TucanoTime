@@ -349,6 +349,41 @@ pub async fn create_schedule(
     Ok((StatusCode::CREATED, Json(schedule)).into_response())
 }
 
+/// Body for `PATCH /schedules/{id}` (#136): the management UI's pause/resume.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchedulePatch {
+    pub active: bool,
+}
+
+/// Pause or resume a recurring schedule. Identity, cadence and the
+/// `last_period_end` cursor are preserved: resuming continues where billing
+/// stopped, it does not re-bill a period.
+pub async fn update_schedule(
+    State(app): State<AppState>,
+    Path(id): Path<Uuid>,
+    ValidJson(patch): ValidJson<SchedulePatch>,
+) -> ApiResult {
+    let Some(schedule) = app.store.get_schedule(id)? else {
+        return Err(ApiError::not_found("schedule"));
+    };
+    let updated = crate::domain::RecurringSchedule {
+        active: patch.active,
+        ..schedule
+    };
+    app.store.put_schedule(&updated)?;
+    app.audit.record(
+        if patch.active {
+            "schedule_resumed"
+        } else {
+            "schedule_paused"
+        },
+        &format!("{}:{}", id, updated.customer_id),
+        app.clock.now(),
+    );
+    Ok(Json(updated).into_response())
+}
+
 pub async fn delete_schedule(State(app): State<AppState>, Path(id): Path<Uuid>) -> ApiResult {
     app.store.delete_schedule(id)?;
     Ok(StatusCode::NO_CONTENT.into_response())

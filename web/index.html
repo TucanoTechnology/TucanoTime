@@ -345,6 +345,29 @@
         <tbody></tbody>
       </table>
       <p id="invoice-empty" hidden>No invoices yet.</p>
+      <h2>Recurring schedules</h2>
+      <p class="hint">The daily scheduler (#61/#26) generates a draft invoice when a period closes for each <strong>active</strong> schedule. Paused schedules wait where they left off. Generated drafts still need an explicit Issue.</p>
+      <form id="rec-form" class="card">
+        <div class="field"><label for="rec-customer">Customer</label><select id="rec-customer" required></select></div>
+        <div class="field"><label for="rec-cadence">Cadence</label><select id="rec-cadence">
+          <option value="weekly">Weekly</option>
+          <option value="monthly" selected>Monthly</option>
+          <option value="quarterly">Quarterly</option>
+        </select></div>
+        <div class="field"><label for="rec-mode">Bills</label><select id="rec-mode">
+          <option value="time" selected>Tracked time + expenses</option>
+          <option value="retainer">Fixed retainer</option>
+        </select></div>
+        <div class="field"><label for="rec-amount">Retainer amount (only for fixed retainer)</label><input id="rec-amount" type="number" min="0" step="0.01" value="0" inputmode="decimal"></div>
+        <p class="form-error" id="rec-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="rec-add">Add schedule</button></div>
+      </form>
+      <table id="rec-table">
+        <caption class="sr-only">Recurring invoice schedules</caption>
+        <thead><tr><th scope="col">Customer</th><th scope="col">Cadence</th><th scope="col">Bills</th><th scope="col">Retainer</th><th scope="col">Last billed to</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="rec-empty" hidden>No recurring schedules yet.</p>
       <!-- #133: row selection opens the live document preview. -->
       <div id="invoice-preview" class="card" role="region" aria-label="Invoice document preview" hidden>
         <div class="ip-head">

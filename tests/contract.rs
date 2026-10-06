@@ -4454,3 +4454,87 @@ async fn email_result_reports_disabled_transport_honestly() {
             .ends_with(":disabled")
     );
 }
+
+// ------------------------------------------------------------------ #136 ---
+
+#[tokio::test]
+async fn recurring_schedule_pause_resume_keeps_the_cursor() {
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let (s, scd) = json_req(
+        &app,
+        "POST",
+        "/schedules",
+        Some(json!({"customer_id":cid,"cadence":"monthly","mode":"time","currency":"EUR"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{scd}");
+    let sid = scd["id"].as_str().unwrap().to_string();
+    // Pause: active=false, identity preserved.
+    let (sp, paused) = json_req(
+        &app,
+        "PUT",
+        &format!("/schedules/{sid}"),
+        Some(json!({"active": false})),
+    )
+    .await;
+    assert_eq!(sp, StatusCode::OK, "{paused}");
+    assert_eq!(paused["active"], false);
+    assert_eq!(paused["customer_id"], cid);
+    assert_eq!(paused["cadence"], "monthly");
+    // Resume via re-read.
+    let (_sr, list) = json_req(&app, "GET", "/schedules", None).await;
+    assert_eq!(list["schedules"].as_array().unwrap().len(), 1);
+    let (sa, act) = json_req(
+        &app,
+        "PUT",
+        &format!("/schedules/{sid}"),
+        Some(json!({"active": true})),
+    )
+    .await;
+    assert_eq!(sa, StatusCode::OK, "{act}");
+    assert_eq!(act["active"], true);
+    // Unknown schedule: 404; unknown field: 422 without change.
+    let (s4, _) = json_req(
+        &app,
+        "PUT",
+        "/schedules/00000000-0000-0000-0000-000000000000",
+        Some(json!({"active": false})),
+    )
+    .await;
+    assert_eq!(s4, StatusCode::NOT_FOUND);
+    let (s5, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/schedules/{sid}"),
+        Some(json!({"active": false, "cadence": "weekly"})),
+    )
+    .await;
+    assert_eq!(s5, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_s6, still) = json_req(&app, "GET", "/schedules", None).await;
+    assert_eq!(
+        still["schedules"][0]["active"], true,
+        "rejection persisted nothing"
+    );
+    // Member: admin tier.
+    json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(
+            json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
+        ),
+    )
+    .await;
+    let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
+    let (s7, _, _) = raw(
+        &app.router,
+        "PUT",
+        &format!("/schedules/{sid}"),
+        Some(json!({"active": false})),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(s7, StatusCode::FORBIDDEN);
+}

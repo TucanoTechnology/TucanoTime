@@ -1658,7 +1658,7 @@ async function refreshCustomerPickers() {
   // C7: every customer picker (day form, invoices, expenses, timer) refreshes
   // from one place — previously a newly added customer could not be invoiced
   // until a full page reload.
-  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer']) {
+  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer']) {
     const picker = $(id);
     if (picker) fillCustomerSelect(picker, picker.value, true);
   }
@@ -2063,6 +2063,95 @@ async function removeInvoice(id) {
     announce('Invoice deleted.');
   } catch (err) {
     announce(err.message);
+  }
+}
+
+// ------------------------------------------------- recurring schedules ----
+//
+// #136: management UI for the Phase-4 recurring engine (#26). The backend
+// already generates drafts for ACTIVE schedules; this surface lists them and
+// pauses/resumes/deletes without touching the billing cursor
+// (last_period_end), so a resumed schedule continues where it stopped.
+
+async function refreshSchedules() {
+  let schedules = [];
+  try {
+    schedules = (await api.get('/schedules')).schedules || [];
+  } catch {
+    return; // members cannot see this admin surface
+  }
+  const tbody = $('rec-table').querySelector('tbody');
+  tbody.textContent = '';
+  const action = (cls, text, fn, title) =>
+    el('button', { cls, type: 'button', text, attrs: title ? { title } : {}, on: { click: fn } });
+  for (const scd of schedules) {
+    const active = scd.active !== false;
+    tbody.appendChild(
+      el('tr', {}, [
+        el('th', { attrs: { scope: 'row' }, text: customerName(scd.customer_id) }),
+        el('td', { text: scd.cadence }),
+        el('td', { text: scd.mode === 'retainer' ? 'Fixed retainer' : 'Time + expenses' }),
+        el('td', {
+          cls: 'num',
+          text: scd.mode === 'retainer' ? `${scd.currency} ${formatMoney(scd.retainer_amount_minor)}` : '\u2014',
+        }),
+        el('td', { text: scd.last_period_end || 'never' }),
+        el('td', {}, [
+          el('span', { cls: active ? 'badge on' : 'badge', text: active ? 'active' : 'paused' }),
+        ]),
+        el('td', { cls: 'actions-col' }, [
+          action('link', active ? 'Pause' : 'Resume', () => toggleSchedule(scd),
+            active ? 'Pause generation (drafts stop until resumed)' : 'Resume generation'),
+          action('danger', 'Delete', () => removeSchedule(scd), 'Delete the schedule'),
+        ]),
+      ]),
+    );
+  }
+  $('rec-table').hidden = schedules.length === 0;
+  $('rec-empty').hidden = schedules.length !== 0;
+}
+
+async function addRecurring(evt) {
+  evt.preventDefault();
+  clearFormError($('rec-error'));
+  const cid = $('rec-customer').value;
+  const c = state.customers.find((x) => x.id === cid);
+  const body = {
+    customer_id: cid,
+    cadence: $('rec-cadence').value,
+    mode: $('rec-mode').value,
+    retainer_amount_minor: Math.round(Number($('rec-amount').value || 0) * 100),
+    currency: c ? c.currency : 'EUR',
+    active: true,
+  };
+  try {
+    await api.post('/schedules', body);
+    announce('Recurring schedule added.');
+    $('rec-amount').value = '0';
+    await refreshSchedules();
+  } catch (err) {
+    showFormError($('rec-error'), err);
+  }
+}
+
+async function toggleSchedule(scd) {
+  try {
+    const next = await api.put(`/schedules/${scd.id}`, { active: scd.active === false });
+    announce(next.active ? 'Schedule resumed.' : 'Schedule paused.');
+    await refreshSchedules();
+  } catch (err) {
+    announce(`Schedule change failed: ${err.message}`);
+  }
+}
+
+async function removeSchedule(scd) {
+  if (!(await askConfirm(`Delete the ${scd.cadence} schedule for ${customerName(scd.customer_id)}? Already-generated drafts are unaffected.`))) return;
+  try {
+    await api.del(`/schedules/${scd.id}`);
+    announce('Schedule deleted.');
+    await refreshSchedules();
+  } catch (err) {
+    announce(`Delete failed: ${err.message}`);
   }
 }
 
@@ -2647,7 +2736,10 @@ function refreshPanel(tabId) {
   // C7: customers & settings were missing — re-shown panels re-pull now.
   const fn = {
     'tab-timesheet': refreshTimesheetView,
-    'tab-invoices': refreshInvoices,
+    'tab-invoices': async () => {
+      await refreshInvoices();
+      await refreshSchedules();
+    },
     'tab-expenses': refreshExpenses,
     'tab-submissions': refreshSubmissions,
     'tab-customers': async () => {
@@ -2821,6 +2913,7 @@ async function startApp() {
   $('invoice-preview').addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeInvoicePreview();
   });
+  $('rec-form').addEventListener('submit', addRecurring);
   $('template-form').addEventListener('submit', saveInvoiceTemplate);
   $('template-terms').addEventListener('change', () => {
     $('template-terms-days-field').hidden = $('template-terms').value !== 'custom';
@@ -2861,6 +2954,7 @@ async function startApp() {
 
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
+  refreshSchedules().catch?.(() => {});
   // First-run trigger (#111): zero customers after a successful login opens
   // the wizard as a modal. Once a customer exists it never auto-opens — the
   // sidebar entry reopens it manually.
