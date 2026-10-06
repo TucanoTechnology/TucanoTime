@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TucanoTime — Timesheets</title>
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -62,6 +63,11 @@
           <div class="tab-sep" role="separator" aria-hidden="true"></div>
           <button type="button" id="wizard-open" title="Setup wizard — add your first customer and project" aria-haspopup="dialog">🚀 Setup wizard</button>
         </div>
+        <fieldset class="theme-switch" id="theme-switch">
+          <legend>Colour mode</legend>
+          <label><input type="radio" name="colour-mode" value="light"> Light</label>
+          <label><input type="radio" name="colour-mode" value="dark"> Dark</label>
+        </fieldset>
       </nav>
       <div id="account" class="account" hidden>
         <span id="who" class="who"></span>
