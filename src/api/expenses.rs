@@ -331,7 +331,7 @@ pub async fn create_claim(
             ));
             continue;
         }
-        total += x.amount_minor;
+        total = total.saturating_add(x.amount_minor); // #190
         match &currency {
             None => currency = Some(x.currency.clone()),
             Some(c) if *c == x.currency => {}

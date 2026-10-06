@@ -694,7 +694,9 @@ pub fn invoice_totals(
         subtotal_minor,
         discount_minor,
         tax_minor,
-        total_minor: net + tax_minor,
+        total_minor: net.saturating_add(tax_minor), // #190: guard against a
+                                                    // corrupt subtotal saturating into u64::MAX (#13/D); validated
+                                                    // inputs never reach the ceiling.
     }
 }
 
@@ -782,23 +784,25 @@ pub struct Invoice {
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issued_at: Option<DateTime<Utc>>,
-    /// Payment terms (net-14 from issue, #27). None until issued.
+    /// Resolved due date at issue (#27, #116): payment terms come from the
+    /// customer, else the org invoice template, else a net-14 fallback.
+    /// None until issued.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub due_date: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paid_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub payment_reference: String,
-    /// Archived PDF document hint (#113): metadata about the immutable
-    /// `invoices/<id>.pdf` written at issue time. `None` for drafts and for
-    /// legacy issued invoices whose PDF has not been resolved yet (the first
-    /// download renders it from the snapshot-locked invoice).
     /// VAT percent in hundredths (2100 = 21.00%) — manual/draft feature
     /// (#143); tracked invoices keep 0 and their sum-of-lines total.
     #[serde(default, skip_serializing_if = "is_zero_u16")]
     pub tax_hundredths: u16,
     #[serde(default, skip_serializing_if = "is_zero_u16")]
     pub discount_hundredths: u16,
+    /// Archived PDF document hint (#113): metadata about the immutable
+    /// `invoices/<id>.pdf` written at issue time. `None` for drafts and for
+    /// legacy issued invoices whose PDF has not been resolved yet (the first
+    /// download renders it from the snapshot-locked invoice).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pdf: Option<PdfHint>,
     /// Recorded payments ledger (#114). Legacy documents default to empty;
@@ -908,7 +912,11 @@ pub fn summarise_invoices(invoices: &[Invoice], today: NaiveDate) -> InvoiceSumm
             if inv.due_date.is_some_and(|d| d < today) {
                 s.overdue += 1;
             }
-            *s.outstanding.entry(inv.currency.0.clone()).or_insert(0) += inv.balance_minor();
+            // #190: saturating — a corrupt document can carry u64::MAX
+            // amounts (the saturation ceiling), and a plain `+=` would
+            // panic in debug / wrap in release on the receivables total.
+            let outstanding = s.outstanding.entry(inv.currency.0.clone()).or_insert(0);
+            *outstanding = outstanding.saturating_add(inv.balance_minor());
         }
     }
     s
@@ -1396,7 +1404,9 @@ pub fn generate_invoice(
     if lines.is_empty() {
         return Err(InvoiceError::NothingToInvoice);
     }
-    let total_minor = lines.iter().map(|l| l.amount_minor).sum();
+    let total_minor = lines
+        .iter()
+        .fold(0u64, |acc, l| acc.saturating_add(l.amount_minor)); // #190
     Ok(Invoice {
         id: Uuid::new_v4(),
         number,

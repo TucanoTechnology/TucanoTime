@@ -3435,6 +3435,14 @@ async fn accounting_sync_failure_is_recorded_not_fatal() {
     assert_eq!(sf, StatusCode::OK, "{body}");
     assert_eq!(body["failed"], true);
     assert_eq!(body["record"]["status"], "failed");
+    // #190: the persisted/serialised error is a stable marker; the raw
+    // transport text ("stub offline") stays in the server log only.
+    assert_eq!(body["record"]["error"], "sync failed (see server log)");
+    let (_sv, st) = json_req(&app, "GET", "/sync/accounting", None).await;
+    assert!(
+        !st.to_string().contains("stub offline"),
+        "sync_status must not echo provider detail: {st}"
+    );
 
     // Retry (second post succeeds) -> synced. The failed record is not
     // short-circuited (only synced records are).
@@ -3605,6 +3613,18 @@ async fn admin_config_roundtrip_precedence_and_guards() {
     // Effective view: everything starts at its default source.
     let (s1, body) = json_req(&app, "GET", "/admin/config", None).await;
     assert_eq!(s1, StatusCode::OK, "{body}");
+    // #190: no on-disk path is serialised (AGENTS.md: responses never expose
+    // paths). The old `path` key leaked `<data>/config.json`.
+    assert_eq!(
+        body.get("path"),
+        None,
+        "GET /admin/config must not expose the filesystem path: {body}"
+    );
+    let serialized = body.to_string();
+    assert!(
+        !serialized.contains("config.json") && !serialized.contains(d.path().to_str().unwrap()),
+        "no filesystem paths in the body: {serialized}"
+    );
     let days = body["config"]
         .as_array()
         .unwrap()

@@ -329,6 +329,21 @@ pub fn record_sync(
         now,
         detail,
     } = attempt;
+    // #190: provider/transport error text can carry upstream URLs and
+    // response bodies, and these records are echoed to clients by
+    // GET /sync/accounting. Log the detail server-side; persist a stable
+    // short marker (status/attempts still drive the retry job).
+    let error = if error.is_empty() {
+        String::new()
+    } else {
+        tracing::warn!(
+            provider = %provider,
+            invoice = %invoice.number,
+            detail = %error,
+            "accounting sync failed"
+        );
+        "sync failed (see server log)".to_string()
+    };
     // Whole read-modify-write under one store lock (review B4/D3): two
     // concurrent syncs must never clobber each other's records.
     let mut outcome: Option<SyncRecord> = None;
