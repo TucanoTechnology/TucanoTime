@@ -353,3 +353,24 @@ td.cell.locked .cell-input { opacity: .6; }
 @media (prefers-color-scheme: dark) {
   .cal-chip { color: var(--brand-deep); }
 }
+
+/* ---- shared alignment pass (#131): reusable rhythm, no component changes ---- */
+fieldset.field {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .6rem .75rem .15rem; margin: 0 0 .65rem;
+}
+fieldset.field > legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
+.buttons { flex-wrap: wrap; }
+.dlg-actions { gap: .6rem; }
+h3 { font-size: 1.02rem; margin: 1.1rem 0 .4rem; }
+caption { padding-bottom: .35rem; }
+.badge { display: inline-block; line-height: 1.4; vertical-align: middle; }
+.contact-row {
+  display: grid; grid-template-columns: 1.2fr 1fr 1.4fr auto auto;
+  gap: .4rem; align-items: center; margin-bottom: .35rem;
+}
+.contact-row input[type=checkbox] { margin: 0; }
+@media (max-width: 720px) {
+  .contact-row { grid-template-columns: 1fr 1fr; }
+  .contact-row > .link, .contact-row label { grid-column: auto; }
+}
