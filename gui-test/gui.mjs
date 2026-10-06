@@ -537,6 +537,51 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   await fetch(BASE + `/invoices/${draft.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' } });
 }
 
+// ---- CALENDAR VIEW (#140): month grid of logged time ----
+{
+  await fetch(BASE + '/entries', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
+    body: JSON.stringify({ date: '2026-12-25', customer_id: acmeOpt.value, project_code: 'P-9', hours: 3.5, note: 'xmas call' }),
+  });
+  window.document.getElementById('ts-cal').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  const calPanel = window.document.getElementById('panel-calendar');
+  check('calendar tab shows the month grid (#140)', calPanel.hidden === false);
+  // Navigate to Dec 2026 (initial month follows the displayed day; walk forward).
+  let guard = 0;
+  while (!window.document.getElementById('cal-label').textContent.includes('Dec 2026') && guard < 24) {
+    window.document.getElementById('cal-next').dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(120);
+    guard += 1;
+  }
+  check('month navigation reaches Dec 2026 (#140)',
+    window.document.getElementById('cal-label').textContent.includes('Dec 2026'));
+  const xmas = [...calPanel.querySelectorAll('td.cal-cell.has button')]
+    .find((b) => (b.getAttribute('aria-label') || '').includes('25 Dec 2026'));
+  check('day cell shows hours + project chip (#140)',
+    !!xmas && xmas.textContent.includes('3:30') && xmas.textContent.includes('P-9'));
+  check('month total announced live (#140)',
+    /Dec 2026: .+ logged/.test(window.document.getElementById('cal-total').textContent));
+  if (xmas) {
+    xmas.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(300);
+    check('clicking a day hands over to the Day view (#140)',
+      window.document.getElementById('ts-day').getAttribute('aria-selected') === 'true'
+      && window.document.getElementById('day-date').value === '2026-12-25'
+      && /Opened 2026-12-25/.test(window.document.getElementById('live-region').textContent));
+  }
+  const empty = [...calPanel.querySelectorAll('td.cal-cell:not(.has) .cal-plain')].length;
+  check('entry-less days render plain (#140)', empty > 20);
+  window.document.getElementById('cal-today').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(200);
+  const curMonth = new Date().toISOString().slice(0, 7);
+  check('Today jumps to the current month (#140)',
+    window.document.getElementById('cal-label').textContent.includes(
+      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(curMonth.slice(5,7)) - 1]));
+  window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
+}
+
 
 // ---- EMAIL (#35): set a billing email, then email the issued invoice ----
 const custObj = (await (await fetch(BASE + `/customers/${acmeOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
