@@ -2573,6 +2573,14 @@ async function startApp() {
   initTabs();
   initSegTabs(); // Day | Week inside the Timesheets section (#107)
   initWizard(); // first-run setup wizard (#111)
+  // #142: rail shortcuts. Invoice selects the existing tab; Timer navigates
+  // to the timesheet and focuses the timer — it NEVER presses Start.
+  $('shortcut-invoices').addEventListener('click', () => $('tab-invoices').click());
+  $('shortcut-timer').addEventListener('click', () => {
+    $('tab-timesheet').click();
+    $('timer-customer').focus();
+    announce('Timer ready — choose customer and project, then press Start.');
+  });
 
   $('day-add').addEventListener('click', () => {
     resetEntryForm();

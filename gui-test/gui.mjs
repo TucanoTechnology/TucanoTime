@@ -80,6 +80,24 @@ check('"Set up later" dismisses the wizard cleanly', !wzOpen());
 // The sidebar icon sits directly under "Customers & projects" and reopens it.
 const wzOrder = [...window.document.querySelectorAll('#tabs button')].map((b) => b.id);
 check('wizard entry is the last item in the sidebar (#125)', wzOrder[wzOrder.length - 1] === 'wizard-open');
+
+// #142: grouped rail + shortcuts.
+check('rail has the four groups (#142)',
+  [...window.document.querySelectorAll('#tabs .nav-label')].map((n) => n.textContent).join(',') === 'Track,Organize,Bill,Review');
+check('tabs keep roving order inside the groups (#142)',
+  [...window.document.querySelectorAll('#tabs [role=\"tab\"]')].map((t) => t.id).join(',') ===
+    'tab-timesheet,tab-expenses,tab-customers,tab-invoices,tab-reports,tab-submissions,tab-settings');
+window.document.getElementById('shortcut-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
+check('Invoice shortcut selects the invoices tab (#142)',
+  window.document.getElementById('tab-invoices').getAttribute('aria-selected') === 'true');
+window.document.getElementById('shortcut-timer').dispatchEvent(new window.Event('click', { bubbles: true }));
+await tick(250);
+check('Timer shortcut focuses the timer without starting it (#142)',
+  window.document.getElementById('tab-timesheet').getAttribute('aria-selected') === 'true'
+  && window.document.activeElement.id === 'timer-customer'
+  && window.document.getElementById('timer-start').hidden === false
+  && window.document.getElementById('timer-display').hidden === true);
 window.document.getElementById('wizard-open').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('the icon reopens the wizard fresh', wzOpen() && !window.document.getElementById('wz-step-0').hidden);
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
