@@ -1712,7 +1712,11 @@ async function refreshCustomerPickers() {
   // until a full page reload.
   for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer', 'ed-customer', 'iw-customer', 'ret-customer']) {
     const picker = $(id);
-    if (picker) fillCustomerSelect(picker, picker.value, true);
+    if (picker) {
+      fillCustomerSelect(picker, picker.value, true);
+      // #135: for the dashboard filter the placeholder means "no filter".
+      if (id === 'inv-f-customer' && picker.options.length) picker.options[0].text = 'All customers';
+    }
   }
   const keep = $('entry-customer').value;
   if (keep && !state.customers.some((c) => c.id === keep)) {
@@ -1759,8 +1763,8 @@ async function refreshInvoices() {
   const seq = ++invoicesRenderSeq;
   const data = await api.get('/invoices');
   if (seq !== invoicesRenderSeq) return; // a newer refresh superseded this one
-  const invoices = data.invoices || [];
-  state.invoices = invoices; // #133: the preview re-renders against fresh data
+  const invoices = dashFilter(data.invoices || []); // #135 filters + sort
+  state.invoices = data.invoices || []; // #133: the preview re-renders against fresh data
   const tbody = $('invoice-table').querySelector('tbody');
   tbody.textContent = '';
   const action = (cls, text, fn, title) =>
@@ -1842,6 +1846,10 @@ async function refreshInvoices() {
     );
   }
   $('invoice-empty').hidden = invoices.length !== 0;
+  $('invoice-empty').textContent = (data.invoices || []).length && !invoices.length
+    ? 'No invoices match the current filters.'
+    : 'No invoices yet.';
+  dashApplyColumns(); // #135 column visibility
   if (invoicePreview) {
     const fresh = invoices.find((i) => i.id === invoicePreview.id);
     if (fresh) {
@@ -1865,6 +1873,28 @@ async function refreshInvoiceSummary() {
     ` · Paid ${s.paid}` +
     (s.written_off ? ` · Written off ${s.written_off}` : '') +
     (outstanding ? ` · Outstanding: ${outstanding}` : '');
+  // #135 overview band: tiles + monthly chart (balances & ledger are the truth)
+  try {
+    const all = (await api.get('/invoices')).invoices || [];
+    if (all.length && !dash.currency) dash.currency = all.find((i) => i.status !== 'draft')?.currency || '';
+    dashRenderOverview(all);
+    // project filter options follow the customer filter
+    const projSel = $('inv-f-project');
+    const keep = projSel.value;
+    projSel.textContent = '';
+    projSel.appendChild(el('option', { attrs: { value: '' }, text: 'All projects' }));
+    const seen = new Set();
+    for (const i of all) {
+      if (dash.customer && i.customer_id !== dash.customer) continue;
+      for (const l of i.lines || []) {
+        if (l.project_code && !seen.has(l.project_code)) {
+          seen.add(l.project_code);
+          projSel.appendChild(el('option', { attrs: { value: l.project_code }, text: l.project_code }));
+        }
+      }
+    }
+    if (keep) projSel.value = keep;
+  } catch { /* overview is additive; table remains authoritative */ }
 }
 
 /// Record a full or partial payment (#114). The amount is prefilled with the
@@ -2037,6 +2067,152 @@ async function downloadInvoicePdf(id, number) {
     announce(`Invoice PDF downloaded (${blob.size} bytes).`);
   } catch (err) {
     announce(`Download failed: ${err.message}`);
+  }
+}
+
+// -------------------------------------------------- invoice dashboard (#135) --
+//
+// Overview band (open/paid tiles, monthly Open-vs-Paid chart with year
+// navigation) + Open/All lists with search, client/project/date filters,
+// sortable columns and column visibility. Everything derives from the
+// existing GET /invoices + ledger semantics (#114 balances) — no records
+// are ever mutated by filtering/sorting; row selection still opens the
+// #133 preview.
+
+const dash = {
+  year: new Date().getUTCFullYear(),
+  openOnly: true,
+  q: '',
+  customer: '',
+  project: '',
+  from: '',
+  to: '',
+  sortKey: 'number',
+  sortDir: 1,
+  currency: '',
+};
+
+function invBalance(inv) {
+  const paid = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
+  if (inv.status === 'paid' || inv.status === 'written_off') return 0;
+  return Math.max(inv.total_minor - paid, 0);
+}
+
+function dashFilter(invoices) {
+  let rows = invoices;
+  if (dash.openOnly) rows = rows.filter((i) => i.status === 'issued' || i.status === 'partly_paid');
+  const q = dash.q.trim().toLowerCase();
+  if (q) {
+    rows = rows.filter(
+      (i) =>
+        i.number.toLowerCase().includes(q) ||
+        customerName(i.customer_id).toLowerCase().includes(q) ||
+        (i.lines || []).some((l) => (l.note || '').toLowerCase().includes(q)),
+    );
+  }
+  if (dash.customer) rows = rows.filter((i) => i.customer_id === dash.customer);
+  if (dash.project) rows = rows.filter((i) => (i.lines || []).some((l) => l.project_code === dash.project));
+  if (dash.from) rows = rows.filter((i) => i.period_to >= dash.from);
+  if (dash.to) rows = rows.filter((i) => i.period_from <= dash.to);
+  const key = {
+    number: (i) => i.number,
+    customer: (i) => customerName(i.customer_id),
+    period: (i) => i.period_to,
+    total: (i) => i.total_minor,
+    balance: (i) => invBalance(i),
+    status: (i) => i.status,
+  }[dash.sortKey] || ((i) => i.number);
+  return [...rows].sort((a, b) => {
+    const x = key(a), y = key(b);
+    const cmp = typeof x === 'number' ? x - y : String(x).localeCompare(String(y));
+    return cmp * dash.sortDir;
+  });
+}
+
+function dashChartMonths(invoices) {
+  const open = Array(12).fill(0);
+  const paid = Array(12).fill(0);
+  for (const i of invoices) {
+    const cy = i.period_to.slice(0, 4) === String(dash.year);
+    if (cy && (i.status === 'issued' || i.status === 'partly_paid')) {
+      open[Number(i.period_to.slice(5, 7)) - 1] += invBalance(i);
+    }
+    for (const p of i.payments || []) {
+      const m = String(p.received_at).slice(0, 7);
+      if (m.slice(0, 4) === String(dash.year)) paid[Number(m.slice(5, 7)) - 1] += p.amount_minor;
+    }
+    if (!i.payments || i.payments.length === 0) {
+      const pm = String(i.paid_at || '').slice(0, 7);
+      if (i.status === 'paid' && pm.slice(0, 4) === String(dash.year)) {
+        paid[Number(pm.slice(5, 7)) - 1] += i.total_minor;
+      }
+    }
+  }
+  return { open, paid };
+}
+
+function dashRenderOverview(invoices) {
+  const cur = dash.currency || invoices.find((i) => i.status !== 'draft')?.currency || 'EUR';
+  const mine = invoices.filter((i) => i.currency === cur);
+  const totalOpen = mine.reduce((a, i) => a + invBalance(i), 0);
+  const months = dashChartMonths(mine);
+  const totalPaid = months.paid.reduce((a, b) => a + b, 0);
+  const multi = new Set(invoices.filter((i) => i.status !== 'draft').map((i) => i.currency));
+  const openByCur = {};
+  for (const i of invoices) {
+    if (i.status === 'issued' || i.status === 'partly_paid') {
+      openByCur[i.currency] = (openByCur[i.currency] || 0) + invBalance(i);
+    }
+  }
+  const tileOpen = multi.size > 1
+    ? Object.entries(openByCur).map(([c, v]) => `${c} ${formatMoney(v)}`).join(' · ')
+    : `${cur} ${formatMoney(totalOpen)}`;
+  $('inv-tile-open').textContent = tileOpen;
+  $('inv-tile-paid').textContent = `${cur} ${formatMoney(totalPaid)}`;
+  $('inv-year-label').textContent = String(dash.year);
+  $('inv-chart-title').textContent = `Open vs paid (${cur}) — ${dash.year}`;
+  const max = Math.max(...months.open, ...months.paid, 1);
+  const chart = $('inv-chart');
+  chart.textContent = '';
+  const names = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+  const labels = [];
+  const bars = [];
+  for (let m = 0; m < 12; m += 1) {
+    const col = el('div', { cls: 'inv-col-chart' }, [
+      el('div', { cls: 'inv-bars' }, [
+        el('span', {
+          cls: 'inv-bar open',
+          style: `height:${Math.max(2, Math.round((months.open[m] / max) * 54))}px`,
+          attrs: { title: `Open ${cur} ${formatMoney(months.open[m])}` },
+        }),
+        el('span', {
+          cls: 'inv-bar paid',
+          style: `height:${Math.max(2, Math.round((months.paid[m] / max) * 54))}px`,
+          attrs: { title: `Paid ${cur} ${formatMoney(months.paid[m])}` },
+        }),
+      ]),
+    ]);
+    col.appendChild(el('span', { cls: 'inv-clabel', text: names[m] }));
+    bars.push(col);
+    labels.push(`${names[m]}: open ${formatMoney(months.open[m])}, paid ${formatMoney(months.paid[m])}`);
+  }
+  chart.appendChild(el('span', { cls: 'sr-only', text: labels.join('; ') }));
+  for (const b of bars) chart.appendChild(b);
+}
+
+function dashApplyColumns() {
+  const on = new Set([...document.querySelectorAll('.inv-col:checked')].map((c) => c.value));
+  const table = $('invoice-table');
+  for (const th of table.querySelectorAll('thead th[data-hide], tbody th[data-hide], tbody td[data-hide]')) {
+    // headers get data-hide at build time below; fall back to index map
+  }
+  const idx = { customer: 1, period: 2, total: 3, balance: 4, status: 5 };
+  for (const [name, i] of Object.entries(idx)) {
+    const hide = !on.has(name);
+    table.querySelectorAll('tr').forEach((row) => {
+      const cell = row.children[i];
+      if (cell) cell.hidden = hide;
+    });
   }
 }
 
@@ -3582,6 +3758,61 @@ async function startApp() {
   $('cal-today').addEventListener('click', () => {
     calState.month = isoDate(new Date()).slice(0, 7);
     refreshTimeCal().catch?.(() => {});
+  });
+  // #135 dashboard controls
+  $('inv-tab-open').addEventListener('click', () => {
+    dash.openOnly = true;
+    $('inv-tab-open').setAttribute('aria-pressed', 'true');
+    $('inv-tab-all').setAttribute('aria-pressed', 'false');
+    refreshInvoices().catch?.(() => {});
+  });
+  $('inv-tab-all').addEventListener('click', () => {
+    dash.openOnly = false;
+    $('inv-tab-all').setAttribute('aria-pressed', 'true');
+    $('inv-tab-open').setAttribute('aria-pressed', 'false');
+    refreshInvoices().catch?.(() => {});
+  });
+  $('invoice-search').addEventListener('input', () => {
+    dash.q = $('invoice-search').value;
+    refreshInvoices().catch?.(() => {});
+  });
+  $('inv-f-customer').addEventListener('change', () => {
+    dash.customer = $('inv-f-customer').value;
+    refreshInvoiceSummary().catch?.(() => {});
+    refreshInvoices().catch?.(() => {});
+  });
+  $('inv-f-project').addEventListener('change', () => {
+    dash.project = $('inv-f-project').value;
+    refreshInvoices().catch?.(() => {});
+  });
+  $('inv-f-from').addEventListener('change', () => {
+    dash.from = $('inv-f-from').value;
+    refreshInvoices().catch?.(() => {});
+  });
+  $('inv-f-to').addEventListener('change', () => {
+    dash.to = $('inv-f-to').value;
+    refreshInvoices().catch?.(() => {});
+  });
+  for (const cb of document.querySelectorAll('.inv-col')) {
+    cb.addEventListener('change', dashApplyColumns);
+  }
+  for (const btn of document.querySelectorAll('.sort-th')) {
+    btn.addEventListener('click', () => {
+      const col = btn.getAttribute('data-col');
+      if (dash.sortKey === col) dash.sortDir = -dash.sortDir;
+      else { dash.sortKey = col; dash.sortDir = 1; }
+      for (const b2 of document.querySelectorAll('.sort-th')) b2.closest('th').removeAttribute('aria-sort');
+      btn.closest('th').setAttribute('aria-sort', dash.sortDir === 1 ? 'ascending' : 'descending');
+      refreshInvoices().catch?.(() => {});
+    });
+  }
+  $('inv-year-prev').addEventListener('click', () => {
+    dash.year -= 1;
+    refreshInvoiceSummary().catch?.(() => {});
+  });
+  $('inv-year-next').addEventListener('click', () => {
+    dash.year += 1;
+    refreshInvoiceSummary().catch?.(() => {});
   });
   $('entry-form').addEventListener('submit', saveEntry);
   $('entry-cancel').addEventListener('click', () => {

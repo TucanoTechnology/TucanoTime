@@ -70,6 +70,13 @@ function check(name, cond) {
   if (!cond) failures++;
 }
 
+// #135: the invoice table defaults to the Open tab; row checks that need
+// drafts/paid go through the All tab first.
+const showAllInvoices = async () => {
+  window.document.getElementById('inv-tab-all').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+};
+
 // ---- FIRST-RUN WIZARD (#111): auto-open on zero customers ----
 const wzDlg = window.document.getElementById('wizard-dialog');
 const wzOpen = () => wzDlg.open === true || wzDlg.hasAttribute('open');
@@ -512,6 +519,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   panel.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await tick(120);
   check('Escape closes the preview (#133)', panel.hidden === true);
+  await showAllInvoices(); // #135 default Open tab hides drafts
   // A draft says "no document yet" instead of offering a 409 download.
   await fetch(BASE + '/entries', {
     method: 'POST',
@@ -837,6 +845,64 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     && !window.document.getElementById('rec-empty').hidden);
 }
 
+
+// ---- INVOICE OVERVIEW (#135): tabs, search, sort, columns, tiles, keyboard ----
+{
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(350);
+  check('overview tiles + chart render (#135)',
+    /EUR \d/.test(window.document.getElementById('inv-tile-open').textContent)
+    && window.document.getElementById('inv-chart').querySelectorAll('.inv-bar').length === 24);
+  const countRows = () => window.document.querySelectorAll('#invoice-table tbody tr').length;
+  const openRows = countRows();
+  window.document.getElementById('inv-tab-all').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(350);
+  check('All tab shows at least the Open rows (#135)', countRows() >= openRows);
+  const sBox = window.document.getElementById('invoice-search');
+  sBox.value = 'ZZZ-no-match';
+  sBox.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await tick(400);
+  check('search empty-state is explicit (#135)',
+    window.document.getElementById('invoice-empty').hidden === false
+    && /match the current filters/i.test(window.document.getElementById('invoice-empty').textContent));
+  sBox.value = 'INV';
+  sBox.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await tick(350);
+  check('search matches by number (#135)', countRows() >= 1);
+  sBox.value = '';
+  sBox.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await tick(350);
+  window.document.getElementById('inv-tab-all').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  // sort by total desc then asc
+  const totalBtn = window.document.querySelector('.sort-th[data-col="total"]');
+  totalBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  const asc = [...window.document.querySelectorAll('#invoice-table tbody tr')].map((r) => r.children[3].textContent);
+  totalBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(300);
+  const desc = [...window.document.querySelectorAll('#invoice-table tbody tr')].map((r) => r.children[3].textContent);
+  check('sorting by total toggles direction (#135)', asc.length > 1 && JSON.stringify(asc) !== JSON.stringify(desc)
+    && totalBtn.closest('th').getAttribute('aria-sort') === 'descending');
+  // column toggle
+  const colCb = window.document.querySelector('.inv-col[value="customer"]');
+  colCb.checked = false;
+  colCb.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(150);
+  check('column toggle hides the customer column (#135)',
+    window.document.querySelector('#invoice-table tbody tr').children[1].hidden === true);
+  colCb.checked = true;
+  colCb.dispatchEvent(new window.Event('change', { bubbles: true }));
+  // keyboard selection opens the #133 preview
+  const kbRow = window.document.querySelector('#invoice-table tbody tr');
+  kbRow.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await tick(400);
+  check('keyboard Enter on a row opens the preview (#135/#133)',
+    window.document.getElementById('invoice-preview').hidden === false
+    && /Previewing invoice/.test(window.document.getElementById('live-region').textContent));
+  window.document.getElementById('ip-close').dispatchEvent(new window.Event('click', { bubbles: true }));
+  // leave the All tab on: downstream checks (paid rows etc.) need every status
+}
 
 // ---- EMAIL (#35): set a billing email, then email the issued invoice ----
 const custObj = (await (await fetch(BASE + `/customers/${acmeOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
