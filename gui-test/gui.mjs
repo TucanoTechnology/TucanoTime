@@ -548,12 +548,14 @@ await tick(150);
 taskProject.value = 'MKT-2';
 window.document.getElementById('task-code').value = 't1';
 window.document.getElementById('task-name').value = 'Sprint';
-window.document.getElementById('task-rate').value = '95.00';
+check('task popup has no rate or currency override controls',
+  !window.document.getElementById('task-rate') && !window.document.getElementById('task-currency'));
 window.document.getElementById('task-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(250);
 const tasks = (await (await fetch(BASE + `/customers/${acmeOpt.value}/projects/MKT-2/tasks`)).json()).tasks;
 const t1 = tasks.find((t) => t.code === 'T1');
-check('task created via form with rate override', t1 && t1.rate_minor === 9500);
+check('task created without billing override fields',
+  t1 && !('rate_minor' in t1) && !('currency' in t1));
 check('task save closes its popup', !taskDialog.open);
 const taskEdit = [...window.document.querySelectorAll('#task-table tbody button')].find((button) => button.textContent === 'Edit');
 taskEdit.click();

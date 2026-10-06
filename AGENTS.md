@@ -33,6 +33,9 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   carries its own currency + rate (required, #11); the customer holds the
   *default* used only to prefill new projects and to resolve legacy documents
   (see `domain::effective_rates`, `domain::project_from_bytes`).
+- Tasks carry no currency or rate overrides. Legacy task billing fields are
+  ignored on load; task entries use the existing person/project/customer rate
+  resolution and project/customer currency resolution.
 - Storage layout below `TUCANO_DATA_DIR` (the API is the only writer):
   `customers/<id>.json`, `customers/<id>/projects/<CODE>.json`,
   `customers/<id>/projects/<CODE>/tasks/<TASK>.json` (optional task tier, #38),

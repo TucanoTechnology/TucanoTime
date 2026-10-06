@@ -556,18 +556,13 @@ pub fn project_from_bytes(bytes: &[u8], customer: &Customer) -> Result<Project, 
     Ok(doc.resolve(customer))
 }
 
-/// An optional work level under a project (#38). A task may override the
-/// project's currency/rate; otherwise it inherits the project's values.
+/// An optional work level under a project (#38), without billing overrides.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Task {
     pub customer_id: Uuid,
     pub project_code: ProjectCode,
     pub code: ProjectCode,
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub currency: Option<Currency>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub rate_minor: Option<u64>,
     pub active: bool,
 }
 
@@ -1276,7 +1271,7 @@ pub struct InvoiceSources<'a> {
 
 /// Build a draft invoice from the billable entries (and, if enabled, billable
 /// expenses) in `[from, to]` for one customer. Time-line rates are resolved per
-/// entry (task > person > project > customer) and snapshotted, so a later rate
+/// entry (person > project > customer) and snapshotted, so a later rate
 /// change never rewrites an issued invoice. Items already on an issued invoice
 /// (`excluded_*`) are skipped.
 pub fn generate_invoice(
@@ -1452,24 +1447,22 @@ pub struct Entry {
 }
 
 /// Effective (currency, rate) of an entry. Rate precedence (#21):
-/// **task → person → project → customer default**. Currency precedence:
-/// task → project → customer. `user_rate` is the logging person's default
+/// **person → project → customer default**. Currency precedence:
+/// project → customer. `user_rate` is the logging person's default
 /// (Some only when > 0), kept as a plain number so `domain` stays independent
 /// of the `auth` module.
 pub fn effective_rates(
     _entry: &Entry,
     customer: &Customer,
     project: Option<&Project>,
-    task: Option<&Task>,
+    _task: Option<&Task>,
     user_rate: Option<u64>,
 ) -> (Currency, u64) {
-    let currency = task
-        .and_then(|t| t.currency.clone())
-        .or_else(|| project.map(|p| p.currency.clone()))
+    let currency = project
+        .map(|p| p.currency.clone())
         .unwrap_or_else(|| customer.currency.clone());
-    let rate = task
-        .and_then(|t| t.rate_minor)
-        .or(user_rate.filter(|r| *r > 0))
+    let rate = user_rate
+        .filter(|r| *r > 0)
         .or_else(|| project.map(|p| p.rate_minor))
         .unwrap_or(customer.default_rate_minor);
     (currency, rate)
@@ -1527,12 +1520,6 @@ pub struct TaskInput {
     pub code: ProjectCode,
     #[serde(default)]
     pub name: String,
-    /// Optional override of the project currency.
-    #[serde(default)]
-    pub currency: Option<Currency>,
-    /// Optional override of the project rate (minor units per hour).
-    #[serde(default)]
-    pub rate_minor: Option<u64>,
     #[serde(default = "default_active")]
     pub active: bool,
 }
@@ -1772,8 +1759,6 @@ pub struct EntryDraft {
 pub struct TaskDraft {
     pub code: String,
     pub name: String,
-    pub currency: Option<String>,
-    pub rate_minor: Option<u64>,
     pub active: bool,
 }
 
@@ -1787,15 +1772,10 @@ pub fn validate_task_input(input: &TaskInput) -> Result<TaskDraft, Vec<FieldErro
         errors.push(FieldError::new("name", "at most 120 characters"));
         String::new()
     };
-    if let Some(rate) = input.rate_minor {
-        validate_rate_minor(rate, "rate_minor", &mut errors);
-    }
     if errors.is_empty() {
         Ok(TaskDraft {
             code: input.code.0.clone(),
             name,
-            currency: input.currency.as_ref().map(|c| c.0.clone()),
-            rate_minor: input.rate_minor,
             active: input.active,
         })
     } else {
@@ -1913,7 +1893,7 @@ mod tests {
     }
 
     #[test]
-    fn effective_rate_precedence_task_person_project_customer() {
+    fn effective_rate_precedence_person_project_customer_ignores_legacy_tasks() {
         let entry = Entry {
             id: Uuid::new_v4(),
             date: chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
@@ -1968,20 +1948,27 @@ mod tests {
             effective_rates(&entry, &customer, Some(&project), None, Some(4500)),
             (Currency("USD".into()), 4500)
         );
-        // A task override beats the person rate.
-        let task = Task {
-            customer_id: customer.id,
-            project_code: entry.project_code.clone(),
-            code: ProjectCode::parse("T1").unwrap(),
-            name: "T1".into(),
-            currency: Some(Currency("GBP".into())),
-            rate_minor: Some(5000),
-            active: true,
-        };
+        let task: Task = serde_json::from_value(serde_json::json!({
+            "customer_id": customer.id,
+            "project_code": entry.project_code,
+            "code": "T1",
+            "name": "T1",
+            "currency": "GBP",
+            "rate_minor": 5000,
+            "active": true,
+        }))
+        .unwrap();
         assert_eq!(
             effective_rates(&entry, &customer, Some(&project), Some(&task), Some(4500)),
-            (Currency("GBP".into()), 5000)
+            (Currency("USD".into()), 4500)
         );
+        assert_eq!(
+            effective_rates(&entry, &customer, Some(&project), Some(&task), None),
+            (Currency("USD".into()), 3000)
+        );
+        let serialized = serde_json::to_value(task).unwrap();
+        assert!(serialized.get("currency").is_none());
+        assert!(serialized.get("rate_minor").is_none());
     }
 
     fn inv(status: InvoiceStatus, total: u64, due: Option<NaiveDate>) -> Invoice {
