@@ -217,6 +217,7 @@ function formatMoney(minor) {
 // ----------------------------------------------------------------- cache ---
 
 const state = {
+  invoices: [], // #133: last rendered invoice list
   customers: [],           // Customer[]
   projectsByCustomer: {},  // id -> Project[]
 };
@@ -1567,9 +1568,14 @@ async function runReport(evt) {
 
 // -------------------------------------------------------------- invoices ---
 
+let invoicesRenderSeq = 0; // last-call-wins (same guard the week grid uses)
+
 async function refreshInvoices() {
+  const seq = ++invoicesRenderSeq;
   const data = await api.get('/invoices');
+  if (seq !== invoicesRenderSeq) return; // a newer refresh superseded this one
   const invoices = data.invoices || [];
+  state.invoices = invoices; // #133: the preview re-renders against fresh data
   const tbody = $('invoice-table').querySelector('tbody');
   tbody.textContent = '';
   const action = (cls, text, fn, title) =>
@@ -1618,8 +1624,24 @@ async function refreshInvoices() {
           'Send a PDF copy to another address, e.g. the accountant'),
       );
     }
+    // #133: selecting the row (its Preview button, a click anywhere on the
+    // row, or Enter with the row focused) opens the live document preview.
+    actions.unshift(
+      action('link', 'Preview', (evt) => openInvoicePreview(inv, evt.currentTarget),
+        'Preview this invoice document'),
+    );
     tbody.appendChild(
-      el('tr', {}, [
+      el('tr', {
+        attrs: { tabindex: '0', 'aria-label': `Invoice ${inv.number} — activate to preview` },
+        on: {
+          click: (e) => {
+            if (!e.target.closest('button')) openInvoicePreview(inv, null);
+          },
+          keydown: (e) => {
+            if (e.key === 'Enter') openInvoicePreview(inv, e.currentTarget);
+          },
+        },
+      }, [
         el('th', { attrs: { scope: 'row' }, text: inv.number }),
         el('td', { text: customerName(inv.customer_id) }),
         el('td', { text: `${inv.period_from} → ${inv.period_to}` }),
@@ -1633,6 +1655,15 @@ async function refreshInvoices() {
     );
   }
   $('invoice-empty').hidden = invoices.length !== 0;
+  if (invoicePreview) {
+    const fresh = invoices.find((i) => i.id === invoicePreview.id);
+    if (fresh) {
+      const opener = invoicePreview.opener;
+      openInvoicePreview({ ...fresh }, opener && document.contains(opener) ? opener : null);
+    } else {
+      closeInvoicePreview();
+    }
+  }
   await refreshInvoiceSummary();
 }
 
@@ -1820,6 +1851,75 @@ async function downloadInvoicePdf(id, number) {
   } catch (err) {
     announce(`Download failed: ${err.message}`);
   }
+}
+
+// ------------------------------------------------ invoice document preview --
+//
+// #133: selecting an invoice row opens a live preview built from
+// GET /invoices/{id}/document (#116). The returned HTML is reduced to text
+// through the DOM (childNodes' textContent) — markup is NEVER injected, the
+// invariant holds; the full-format document remains the Download PDF action
+// (#113). Drafts have no archived PDF yet: the panel says so honestly.
+
+let invoicePreview = null; // { id, inv, opener }
+
+function invoiceBalance(inv) {
+  const paid = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
+  if (inv.status === 'paid' || inv.status === 'written_off') return 0;
+  return Math.max((inv.total_minor || 0) - paid, 0);
+}
+
+async function openInvoicePreview(inv, opener) {
+  invoicePreview = { id: inv.id, inv, opener: opener || null };
+  const card = $('invoice-preview');
+  card.hidden = false;
+  const facts = $('ip-facts');
+  facts.textContent = '';
+  const dl = (label, value) => {
+    facts.appendChild(el('dt', { text: label }));
+    facts.appendChild(el('dd', { text: value }));
+  };
+  dl('Number', inv.number);
+  dl('Customer', customerName(inv.customer_id));
+  dl('Period', `${inv.period_from} → ${inv.period_to}`);
+  dl('Status', inv.status.replace(/_/g, ' '));
+  dl('Total', `${inv.currency} ${formatMoney(inv.total_minor)}`);
+  const bal = invoiceBalance(inv);
+  dl('Balance', bal ? `${inv.currency} ${formatMoney(bal)}` : 'Settled');
+  if (inv.due_date) dl('Due', inv.due_date);
+  if (inv.write_off_reason) dl('Written off', inv.write_off_reason);
+  $('ip-subject').textContent = '';
+  $('ip-letter').textContent = '';
+  const draft = inv.status === 'draft';
+  $('ip-download').hidden = draft;
+  $('ip-pdf-state').hidden = !draft;
+  if (draft) {
+    $('ip-pdf-state').textContent =
+      'Draft — issuing the invoice archives its PDF document. Nothing is locked or sent yet.';
+  } else {
+    try {
+      const doc = await api.get(`/invoices/${inv.id}/document`);
+      if (!invoicePreview || invoicePreview.id !== inv.id) return; // superseded
+      $('ip-subject').textContent = doc.subject || '';
+      const parsed = new DOMParser().parseFromString(doc.html || '', 'text/html');
+      $('ip-letter').textContent = [...parsed.body.childNodes]
+        .map((n) => (n.textContent || '').trim())
+        .filter(Boolean)
+        .join('\n');
+    } catch {
+      $('ip-letter').textContent = 'Preview unavailable — the document could not be rendered.';
+    }
+  }
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  announce(`Previewing invoice ${inv.number}.`);
+}
+
+function closeInvoicePreview() {
+  if (!invoicePreview) return;
+  const { opener } = invoicePreview;
+  invoicePreview = null;
+  $('invoice-preview').hidden = true;
+  if (opener && document.contains(opener)) opener.focus();
 }
 
 async function removeInvoice(id) {
@@ -2541,6 +2641,13 @@ async function startApp() {
     $('week-add-row').focus();
   });
 
+  $('ip-close').addEventListener('click', closeInvoicePreview);
+  $('ip-download').addEventListener('click', () => {
+    if (invoicePreview) downloadInvoicePdf(invoicePreview.inv.id, invoicePreview.inv.number);
+  });
+  $('invoice-preview').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeInvoicePreview();
+  });
   $('template-form').addEventListener('submit', saveInvoiceTemplate);
   $('template-terms').addEventListener('change', () => {
     $('template-terms-days-field').hidden = $('template-terms').value !== 'custom';

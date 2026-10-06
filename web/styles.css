@@ -302,3 +302,15 @@ td.cell.locked .cell-input { opacity: .6; }
   background: transparent; color: var(--fg); border-radius: 0 var(--radius) var(--radius) 0;
 }
 #tabs #wizard-open:hover, #tabs #wizard-open:focus-visible { background: var(--row-alt); }
+
+/* ---- invoice document preview (#133) ---- */
+#invoice-preview { margin-top: .8rem; }
+.ip-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.ip-title { margin: 0 0 .5rem; font-size: 1.05rem; }
+.ip-facts { display: grid; grid-template-columns: auto 1fr; gap: .15rem .9rem; margin: .3rem 0 .7rem; }
+.ip-facts dt { color: var(--muted); font-weight: 600; }
+.ip-facts dd { margin: 0; }
+.ip-subject { font-weight: 700; margin: .2rem 0; }
+.ip-letter { white-space: pre-line; color: var(--fg); margin: .3rem 0 .6rem; }
+#invoice-table tbody tr { cursor: default; }
+#invoice-table tbody tr[tabindex="0"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
