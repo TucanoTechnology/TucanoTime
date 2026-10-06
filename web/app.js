@@ -699,7 +699,7 @@ async function saveEntry(evt) {
 // live client-side until their cells get hours.
 
 const weekState = {
-  extraRows: [], // [{customer_id, project_code, week}] — week-scoped (#128)
+  extraRows: [], // [{customer_id, project_code, task_code, week}] — week-scoped (#128/#137)
   rowKeys: new Set(), // `${customer_id}::${project_code}` shown in this week (#127)
   days: [],
   seq: 0, // render guard: only the newest fetch may touch the DOM
@@ -763,21 +763,24 @@ async function refreshWeek() {
   const locked = await weekLockIds();
   if (seq !== weekState.seq) return; // a newer render superseded this one
 
-  const keyFor = (e) => `${e.customer_id}::${e.project_code}`;
+  // #137: a line is identified by customer + project + TASK (empty task =
+  // project-level), so tasks of one project no longer collapse into a row.
+  const keyFor = (e) => `${e.customer_id}::${e.project_code}::${e.task_code || ''}`;
   const byKey = new Map();
-  const rowFor = (customerId, projectCode) => {
-    const k = `${customerId}::${projectCode}`;
-    if (!byKey.has(k)) byKey.set(k, { customer_id: customerId, project_code: projectCode, cells: {}, ids: {}, notes: {} });
+  const rowFor = (customerId, projectCode, taskCode) => {
+    const k = `${customerId}::${projectCode}::${taskCode || ''}`;
+    if (!byKey.has(k))
+      byKey.set(k, { customer_id: customerId, project_code: projectCode, task_code: taskCode || '', cells: {}, ids: {}, notes: {} });
     return byKey.get(k);
   };
   for (const e of entries) {
-    const row = rowFor(e.customer_id, e.project_code);
+    const row = rowFor(e.customer_id, e.project_code, e.task_code || '');
     row.cells[e.date] = (row.cells[e.date] || 0) + Math.round(e.hours * 100);
     (row.ids[e.date] = row.ids[e.date] || []).push(e.id);
     if (e.note) row.notes[e.date] = e.note;
   }
   for (const r of weekState.extraRows)
-    if (r.week === start) rowFor(r.customer_id, r.project_code);
+    if (r.week === start) rowFor(r.customer_id, r.project_code, r.task_code);
   weekState.rowKeys = new Set(byKey.keys()); // what "Add row" must not offer again (#127)
 
   const table = $('week-table');
@@ -809,7 +812,8 @@ async function refreshWeek() {
   const sorted = Array.from(byKey.values()).sort(
     (a, b) =>
       customerName(a.customer_id).localeCompare(customerName(b.customer_id)) ||
-      a.project_code.localeCompare(b.project_code),
+      a.project_code.localeCompare(b.project_code) ||
+      a.task_code.localeCompare(b.task_code),
   );
   const dayTotals = days.map(() => 0);
   for (const row of sorted) {
@@ -835,12 +839,13 @@ async function refreshWeek() {
           max: '24',
           step: '0.01',
           inputmode: 'decimal',
-          'aria-label': `${row.project_code}, ${customerName(row.customer_id)}, ${d}: hours`,
+          'aria-label': `${row.project_code}${row.task_code ? ' / ' + row.task_code : ''}, ${customerName(row.customer_id)}, ${d}: hours`,
           ...(isLocked ? { disabled: '' } : {}),
         },
         data: {
           customer: row.customer_id,
           project: row.project_code,
+          task: row.task_code,
           date: d,
           ids: ids.join(','),
           was: hundredths ? (hundredths / 100).toFixed(2) : '',
@@ -880,7 +885,8 @@ async function refreshWeek() {
         el('th', { attrs: { scope: 'row' }, cls: 'row-band' }, [
           el('div', {
             cls: 'entry-project',
-            text: projName ? `${row.project_code} — ${projName.name}` : row.project_code,
+            text: `${row.project_code}${row.task_code ? ' · ' + row.task_code : ''}${projName && !row.task_code ? ` — ${projName.name}` : ''}`,
+            attrs: row.task_code ? { title: `${row.project_code} / ${row.task_code}` } : {},
           }),
           el('div', { cls: 'entry-customer', text: customerName(row.customer_id) }),
         ]),
@@ -968,11 +974,12 @@ async function commitCell(input) {
         date,
         customer_id: customerId,
         project_code: projectCode,
+        task_code: input.dataset.task || null,
         hours: Number(raw),
         note: '',
         billable: true,
       });
-      announce(`Added ${raw}h — ${projectCode}, ${date}.`);
+      announce(`Added ${raw}h — ${projectCode}${input.dataset.task ? ' / ' + input.dataset.task : ''}, ${date}.`);
     }
     await refreshWeek();
   } catch (err) {
@@ -983,7 +990,8 @@ async function commitCell(input) {
       await refreshWeek();
       const again = [...document.querySelectorAll('#week-table input.cell-input')].find(
         (i) =>
-          i.dataset.customer === customerId && i.dataset.project === projectCode && i.dataset.date === date,
+          i.dataset.customer === customerId && i.dataset.project === projectCode &&
+          (i.dataset.task || '') === (input.dataset.task || '') && i.dataset.date === date,
       );
       if (again) {
         again.value = raw;
@@ -1000,9 +1008,24 @@ function navigateWeek(delta) {
 
 function toggleWeekAddRow(show) {
   $('week-add-project').hidden = !show;
+  $('week-add-task').hidden = !show;
   $('week-add-confirm').hidden = !show;
   $('week-add-cancel').hidden = !show;
   if (show) $('week-add-project').focus();
+}
+
+/// Task options for the project chosen in the Add-row picker (#137). The
+/// first entry keeps project-level rows possible.
+async function fillWeekTaskSelect() {
+  const sel = $('week-add-task');
+  const [cid, code] = ($('week-add-project').value || '|').split('|');
+  if (!cid || !code) {
+    sel.textContent = '';
+    return;
+  }
+  await fillTaskSelect(sel, cid, code, null);
+  // relabel the generic "None" so project-level rows read clearly
+  if (sel.options.length) sel.options[0].text = '— project-level (no task) —';
 }
 
 async function fillWeekProjectSelect() {
@@ -1014,7 +1037,7 @@ async function fillWeekProjectSelect() {
       if (!p.active) continue;
       // #127: a project that already has a line in this week is not offered —
       // confirming it before added nothing yet still claimed "Row added".
-      if (weekState.rowKeys.has(`${c.id}::${p.code}`)) continue;
+      if (weekState.rowKeys.has(`${c.id}::${p.code}::`)) continue; // project-level row shown
       options.push({ value: `${c.id}|${p.code}`, text: `${c.name} / ${p.code} — ${p.name}` });
     }
   }
@@ -1029,15 +1052,19 @@ async function fillWeekProjectSelect() {
 
 /// Append an extra grid row for the displayed week; returns false when the
 /// line already exists (#127/#128 — the row set belongs to one week).
-function addWeekRow(customerId, projectCode, week) {
+function addWeekRow(customerId, projectCode, taskCode, week) {
   if (
     weekState.extraRows.some(
-      (r) => r.week === week && r.customer_id === customerId && r.project_code === projectCode,
+      (r) =>
+        r.week === week &&
+        r.customer_id === customerId &&
+        r.project_code === projectCode &&
+        (r.task_code || '') === (taskCode || ''),
     )
   ) {
     return false;
   }
-  weekState.extraRows.push({ customer_id: customerId, project_code: projectCode, week });
+  weekState.extraRows.push({ customer_id: customerId, project_code: projectCode, task_code: taskCode || '', week });
   return true;
 }
 
@@ -1089,10 +1116,10 @@ async function copyLastWeek(weeksAgo = 1) {
     const seen = new Set();
     let added = 0;
     for (const e of data.entries || []) {
-      const k = `${e.customer_id}|${e.project_code}`;
+      const k = `${e.customer_id}|${e.project_code}|${e.task_code || ''}`;
       if (seen.has(k)) continue;
       seen.add(k);
-      if (addWeekRow(e.customer_id, e.project_code, targetWeek)) added += 1;
+      if (addWeekRow(e.customer_id, e.project_code, e.task_code || '', targetWeek)) added += 1;
     }
     await refreshWeek();
     if (seen.size === 0) {
@@ -2488,11 +2515,14 @@ async function startApp() {
   });
   $('week-add-row').addEventListener('click', async () => {
     await fillWeekProjectSelect();
+    $('week-add-task').textContent = '';
     toggleWeekAddRow(true);
   });
   $('week-add-cancel').addEventListener('click', () => toggleWeekAddRow(false));
+  $('week-add-project').addEventListener('change', fillWeekTaskSelect);
   $('week-add-confirm').addEventListener('click', async () => {
     const [cid, code] = $('week-add-project').value.split('|');
+    const task = $('week-add-task').value || '';
     if (!cid || !code) {
       // Exhausted picker (or nothing chosen): explain, keep the grid as-is.
       announce('All active projects are already in this week.');
@@ -2500,13 +2530,14 @@ async function startApp() {
       $('week-add-row').focus();
       return;
     }
-    const added = addWeekRow(cid, code, $('week-date').value);
+    const added = addWeekRow(cid, code, task, $('week-date').value);
     toggleWeekAddRow(false);
     await refreshWeek();
     // #127: the announcement tells the truth about what happened.
+    const label = code + (task ? ` / ${task}` : '');
     announce(added
-      ? `Row added for ${code} — type hours to save.`
-      : `${code} is already in this week — no row added.`);
+      ? `Row added for ${label} — type hours to save.`
+      : `${label} is already in this week — no row added.`);
     $('week-add-row').focus();
   });
 
