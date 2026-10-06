@@ -1283,6 +1283,232 @@ async fn password_change_revokes_existing_sessions_and_accepts_new_password() {
 }
 
 #[tokio::test]
+async fn user_management_validation_and_authorization_persist_nothing() {
+    let (app, dir) = app().await;
+    let (_, user) = json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(json!({"name":"QA","email":"qa@test.local","password":"qa-password1"})),
+    )
+    .await;
+    let id = user["id"].as_str().unwrap();
+    let path = format!("/users/{id}");
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let uid = uuid::Uuid::parse_str(id).unwrap();
+    let before = serde_json::to_value(store.get_user(uid).unwrap().unwrap()).unwrap();
+    for invalid in [
+        json!({"name":""}),
+        json!({"email":"invalid"}),
+        json!({"role":"owner"}),
+        json!({"default_rate_minor":100000001}),
+        json!({"cost_rate_minor":-1}),
+        json!({"cost_rate_minor":1.5}),
+        json!({"unexpected":true}),
+    ] {
+        let (status, body) = json_req(&app, "PUT", &path, Some(invalid.clone())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert!(body["error"].is_object());
+        let mut create =
+            json!({"name":"New","email":"new@test.local","password":"initial-password1"});
+        create
+            .as_object_mut()
+            .unwrap()
+            .extend(invalid.as_object().unwrap().clone());
+        let (status, _) = json_req(&app, "POST", "/users", Some(create)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(store.list_users().unwrap().len(), 2);
+        assert_eq!(
+            serde_json::to_value(store.get_user(uid).unwrap().unwrap()).unwrap(),
+            before
+        );
+    }
+    for method in ["POST", "PUT"] {
+        let path = if method == "POST" {
+            "/users".to_string()
+        } else {
+            format!("/users/{id}/password")
+        };
+        let payload = if method == "POST" {
+            json!({"name":"New","email":"new@test.local","password":"short"})
+        } else {
+            json!({"password":"short"})
+        };
+        let (status, _) = json_req(&app, method, &path, Some(payload)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    let cookie = login_cookie(&app.router, "qa@test.local", "qa-password1").await;
+    for (method, path, payload) in [
+        ("GET", "/users".to_string(), None),
+        (
+            "POST",
+            "/users".to_string(),
+            Some(json!({"name":"New","email":"new@test.local","password":"initial-password1"})),
+        ),
+        (
+            "PUT",
+            format!("/users/{id}"),
+            Some(json!({"name":"Changed"})),
+        ),
+        (
+            "PUT",
+            format!("/users/{id}/password"),
+            Some(json!({"password":"changed-password1"})),
+        ),
+        ("DELETE", format!("/users/{id}"), None),
+    ] {
+        let (status, _, _) = raw(&app.router, method, &path, payload, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    assert_eq!(
+        serde_json::to_value(store.get_user(uid).unwrap().unwrap()).unwrap(),
+        before
+    );
+}
+
+#[tokio::test]
+async fn user_management_preserves_admin_history_and_revalidates_sessions() {
+    let (app, dir) = app().await;
+    let (_, me) = json_req(&app, "GET", "/auth/me", None).await;
+    let admin_id = me["id"].as_str().unwrap();
+    for body in [json!({"role":"member"}), json!({"active":false})] {
+        let (status, _) = json_req(&app, "PUT", &format!("/users/{admin_id}"), Some(body)).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+    let (status, _) = json_req(&app, "DELETE", &format!("/users/{admin_id}"), None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (_, user) = json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(json!({"name":"QA","email":"qa@test.local","password":"qa-password1"})),
+    )
+    .await;
+    let id = user["id"].as_str().unwrap();
+    let path = format!("/users/{id}");
+    let cookie = login_cookie(&app.router, "qa@test.local", "qa-password1").await;
+    let (status, _) = json_req(
+        &app,
+        "PUT",
+        &path,
+        Some(json!({"email":"renamed@test.local","role":"member","active":true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        raw(&app.router, "GET", "/auth/me", None, Some(&cookie))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert!(
+        login_cookie(&app.router, "qa@test.local", "qa-password1")
+            .await
+            .is_empty()
+    );
+    let renamed_cookie = login_cookie(&app.router, "renamed@test.local", "qa-password1").await;
+    assert!(!renamed_cookie.is_empty());
+    let (status, _) = json_req(&app, "PUT", &path, Some(json!({"email":ADMIN_EMAIL}))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    json_req(&app, "PUT", &path, Some(json!({"role":"admin"}))).await;
+    assert_eq!(
+        raw(&app.router, "GET", "/auth/me", None, Some(&renamed_cookie))
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let admin_cookie = login_cookie(&app.router, "renamed@test.local", "qa-password1").await;
+    json_req(&app, "PUT", &path, Some(json!({"active":false}))).await;
+    assert_eq!(
+        raw(&app.router, "GET", "/auth/me", None, Some(&admin_cookie))
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    json_req(
+        &app,
+        "PUT",
+        &path,
+        Some(json!({"active":true,"role":"member"})),
+    )
+    .await;
+    let cookie = login_cookie(&app.router, "renamed@test.local", "qa-password1").await;
+    let customer = new_customer(&app, "History", "EUR", 6000).await;
+    let cid = customer["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({})).await;
+    let (timer_status, _, _) = raw(
+        &app.router,
+        "POST",
+        "/timer",
+        Some(json!({"customer_id":cid,"project_code":"P1"})),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(timer_status, StatusCode::CREATED);
+    assert_eq!(
+        json_req(&app, "DELETE", &path, None).await.0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        raw(&app.router, "DELETE", "/timer", None, Some(&cookie))
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (status, _, _) = raw(
+        &app.router,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-06","customer_id":cid,"project_code":"P1","hours":1})),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        json_req(&app, "DELETE", &path, None).await.0,
+        StatusCode::CONFLICT
+    );
+    json_req(&app, "PUT", &path, Some(json!({"active":false}))).await;
+    assert_eq!(
+        json_req(&app, "DELETE", &path, None).await.0,
+        StatusCode::CONFLICT
+    );
+    let (_, list) = json_req(&app, "GET", "/users", None).await;
+    assert!(!list.to_string().contains("password"));
+    let (_, disposable) = json_req(&app, "POST", "/users", Some(json!({"name":"Disposable","email":"disposable@test.local","password":"disposable-password1"}))).await;
+    assert_eq!(
+        json_req(
+            &app,
+            "DELETE",
+            &format!("/users/{}", disposable["id"].as_str().unwrap()),
+            None
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let mut last_admin = store
+        .get_user(uuid::Uuid::parse_str(admin_id).unwrap())
+        .unwrap()
+        .unwrap();
+    let expected = last_admin.clone();
+    last_admin.active = false;
+    assert!(store.put_user_if_unchanged(&last_admin, &expected).is_err());
+    assert!(store.delete_user(expected.id).is_err());
+    let stale = store
+        .get_user(uuid::Uuid::parse_str(id).unwrap())
+        .unwrap()
+        .unwrap();
+    let mut updated = stale.clone();
+    updated.name = "Concurrent edit".into();
+    store.put_user_if_unchanged(&updated, &stale).unwrap();
+    assert!(store.put_user_if_unchanged(&stale, &stale).is_err());
+    let audit = std::fs::read_to_string(dir.path().join("data/audit.log")).unwrap();
+    assert!(!audit.contains("qa-password1"));
+}
+
+#[tokio::test]
 async fn report_applies_person_rate_tier_and_attributes_entry() {
     let (app, _d) = app().await;
     // Customer default 60/h; project rate 30/h.

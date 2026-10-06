@@ -242,7 +242,7 @@ td.cell.locked .cell-input { opacity: .6; }
 }
 
 /* ------------------------------------------- inline dialog (#102) ------- */
-#app-dialog, #wizard-dialog, #entry-dialog, #expense-dialog, #expense-category-dialog, #customer-dialog, #project-dialog, #task-dialog {
+#app-dialog, #wizard-dialog, #entry-dialog, #expense-dialog, #expense-category-dialog, #customer-dialog, #project-dialog, #task-dialog, #user-dialog, #user-password-dialog {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.1rem 1.2rem 1rem;
@@ -260,6 +260,13 @@ td.cell.locked .cell-input { opacity: .6; }
 #customer-dialog { max-width: 38rem; max-height: calc(100dvh - 3rem); overflow-y: auto; }
 #customer-dialog h2 { margin: 0 0 .75rem; font-size: 1.05rem; }
 #customer-dialog form { margin: 0; }
+#user-dialog, #user-password-dialog { max-width: 34rem; max-height: calc(100dvh - 3rem); overflow-y: auto; }
+#user-dialog::backdrop, #user-password-dialog::backdrop { background: rgba(44, 0, 30, .55); }
+#user-dialog form, #user-password-dialog form { margin: 0; }
+#user-dialog input:not([type="checkbox"]), #user-dialog select, #user-password-dialog input { width: 100%; }
+.user-filters { margin-top: 1rem; }
+.user-filters > div { min-width: 0; }
+#user-table { min-width: 40rem; }
 #project-dialog, #task-dialog { max-width: 32rem; max-height: calc(100dvh - 3rem); overflow-y: auto; }
 #project-dialog h2, #task-dialog h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
 #project-dialog form, #task-dialog form { margin: 0; }

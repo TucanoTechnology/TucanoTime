@@ -3382,9 +3382,33 @@ async function decideSubmission(id, decision) {
 
 // --------------------------------------------------------------- settings --
 
+let managedUsers = [];
+let userSaving = false;
+let userDialogGeneration = 0;
+let passwordDialogGeneration = 0;
+let passwordSaving = false;
+let passwordReturnFocus = null;
+
 async function refreshUsers() {
-  const data = await api.get('/users');
-  const users = data.users || [];
+  if ($('settings-tab-users').hidden) return;
+  $('user-list-status').textContent = 'Loading users...';
+  try {
+    const data = await api.get('/users');
+    managedUsers = data.users || [];
+    renderUsers();
+  } catch (err) {
+    $('user-list-status').textContent = `Could not load users: ${err.message}`;
+  }
+}
+
+function renderUsers() {
+  const search = $('user-search').value.trim().toLowerCase();
+  const role = $('user-filter-role').value;
+  const active = $('user-filter-active').value;
+  const users = managedUsers.filter((user) =>
+    (!search || `${user.name} ${user.email}`.toLowerCase().includes(search))
+    && (!role || user.role === role)
+    && (!active || String(user.active) === active));
   const tbody = $('user-table').querySelector('tbody');
   tbody.textContent = '';
   for (const user of users) {
@@ -3404,46 +3428,67 @@ async function refreshUsers() {
     tbody.appendChild(row);
   }
   $('user-empty').hidden = users.length !== 0;
+  $('user-list-status').textContent = `${users.length} of ${managedUsers.length} users`;
 }
 
 function editUser(user) {
+  userDialogGeneration += 1;
   $('user-id').value = user.id;
   $('user-name').value = user.name;
   $('user-email').value = user.email;
   $('user-role').value = user.role;
   $('user-active').checked = user.active;
-  $('user-default-rate').value = user.default_rate_minor;
-  $('user-cost-rate').value = user.cost_rate_minor;
+  $('user-default-rate').value = formatMoney(user.default_rate_minor);
+  $('user-cost-rate').value = formatMoney(user.cost_rate_minor);
   $('user-password').value = '';
   $('user-password').required = false;
-  $('user-password-label').textContent = 'Leave blank to keep the current password';
+  $('user-password-field').hidden = true;
   $('user-save').textContent = 'Save user';
-  $('user-cancel').hidden = false;
+  $('user-dialog-title').textContent = 'Edit user';
   $('user-error').hidden = true;
+  $('user-dialog').showModal();
   $('user-name').focus();
 }
 
 function newUserForm() {
+  userDialogGeneration += 1;
   $('user-form').reset();
   $('user-id').value = '';
   $('user-active').checked = true;
   $('user-password').required = true;
-  $('user-password-label').textContent = 'required for new users';
+  $('user-password-field').hidden = false;
   $('user-save').textContent = 'Add user';
-  $('user-cancel').hidden = true;
+  $('user-dialog-title').textContent = 'Add user';
   $('user-error').hidden = true;
+  $('user-form').querySelector('details').open = false;
+}
+
+function closeUserForm() {
+  $('user-dialog').close();
+  newUserForm();
+  $('user-new').focus();
+}
+
+function userRateMinor(value) {
+  const token = value.trim() || '0';
+  if (!/^\d+(?:\.\d{1,2})?$/.test(token)) throw new Error('Rates must be non-negative amounts with at most 2 decimal places.');
+  const [whole, fractional = ''] = token.split('.');
+  const minor = Number(whole) * 100 + Number(fractional.padEnd(2, '0'));
+  if (!Number.isSafeInteger(minor) || minor > 100000000) throw new Error('Hourly rates must not exceed 1000000.00.');
+  return minor;
 }
 
 async function saveUser(evt) {
   evt.preventDefault();
+  if (userSaving) return;
+  clearFormError($('user-error'));
   const id = $('user-id').value;
+  const generation = userDialogGeneration;
   const body = {
     name: $('user-name').value.trim(),
     email: $('user-email').value.trim(),
     role: $('user-role').value,
     active: $('user-active').checked,
-    default_rate_minor: Number($('user-default-rate').value || 0),
-    cost_rate_minor: Number($('user-cost-rate').value || 0),
   };
   const password = $('user-password').value;
   if (!id) {
@@ -3454,13 +3499,20 @@ async function saveUser(evt) {
     }
   }
   try {
+    body.default_rate_minor = userRateMinor($('user-default-rate').value);
+    body.cost_rate_minor = userRateMinor($('user-cost-rate').value);
+    userSaving = true;
+    $('user-save').disabled = true;
     if (id) await api.put(`/users/${id}`, body);
     else await api.post('/users', body);
     announce(id ? 'User updated.' : 'User added.');
-    newUserForm();
+    if (generation === userDialogGeneration) closeUserForm();
     await refreshUsers();
   } catch (err) {
-    showFormError($('user-error'), err);
+    if (!handleUserAuthError(err) && generation === userDialogGeneration) showFormError($('user-error'), err);
+  } finally {
+    userSaving = false;
+    $('user-save').disabled = false;
   }
 }
 
@@ -3474,18 +3526,50 @@ async function toggleUserActive(id, active) {
   }
 }
 
-async function changeUserPassword(user) {
-  const value = await askPrompt('New password', '');
-  if (value === null) return;
-  if (value.length < 8) {
-    announce('Password must be at least 8 characters.');
-    return;
-  }
+function changeUserPassword(user) {
+  passwordDialogGeneration += 1;
+  passwordReturnFocus = document.activeElement;
+  $('user-password-form').reset();
+  $('user-password-id').value = user.id;
+  $('user-password-title').textContent = `Change password for ${user.name}`;
+  clearFormError($('user-password-error'));
+  $('user-password-dialog').showModal();
+  $('user-new-password').focus();
+}
+
+function closeUserPassword() {
+  passwordDialogGeneration += 1;
+  $('user-password-dialog').close();
+  $('user-password-form').reset();
+  if (passwordReturnFocus?.isConnected) passwordReturnFocus.focus();
+}
+
+function handleUserAuthError(error) {
+  if (error.status !== 401 && error.status !== 403) return false;
+  closeUserForm();
+  closeUserPassword();
+  showAuth('login');
+  return true;
+}
+
+async function saveUserPassword(event) {
+  event.preventDefault();
+  if (passwordSaving) return;
+  const generation = passwordDialogGeneration;
+  const id = $('user-password-id').value;
+  const value = $('user-new-password').value;
+  clearFormError($('user-password-error'));
   try {
-    await api.put(`/users/${user.id}/password`, { password: value });
-    announce(`Password changed for ${user.name}; current sessions were revoked.`);
+    passwordSaving = true;
+    $('user-password-form').querySelector('[type="submit"]').disabled = true;
+    await api.put(`/users/${id}/password`, { password: value });
+    if (generation === passwordDialogGeneration) closeUserPassword();
+    announce('Password changed; existing sessions were revoked.');
   } catch (err) {
-    announce(err.message);
+    if (!handleUserAuthError(err) && generation === passwordDialogGeneration) showFormError($('user-password-error'), err);
+  } finally {
+    passwordSaving = false;
+    $('user-password-form').querySelector('[type="submit"]').disabled = false;
   }
 }
 
@@ -4292,7 +4376,23 @@ async function startApp() {
   $('expense-form').addEventListener('submit', addExpense);
   $('submission-form').addEventListener('submit', submitWeek);
   $('user-form').addEventListener('submit', saveUser);
-  $('user-cancel').addEventListener('click', newUserForm);
+  $('user-new').addEventListener('click', () => {
+    newUserForm();
+    $('user-dialog').showModal();
+    $('user-name').focus();
+  });
+  $('user-cancel').addEventListener('click', closeUserForm);
+  $('user-search').addEventListener('input', renderUsers);
+  $('user-filter-role').addEventListener('change', renderUsers);
+  $('user-filter-active').addEventListener('change', renderUsers);
+  $('user-password-form').addEventListener('submit', saveUserPassword);
+  $('user-password-cancel').addEventListener('click', closeUserPassword);
+  for (const [dialogId, close] of [['user-dialog', closeUserForm], ['user-password-dialog', closeUserPassword]]) {
+    $(dialogId).addEventListener('cancel', (event) => { event.preventDefault(); close(); });
+    $(dialogId).addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); close(); }
+    });
+  }
   $('secret-form').addEventListener('submit', addSecret);
   $('config-form').addEventListener('submit', saveConfig);
   $('timer-open').addEventListener('click', () => {

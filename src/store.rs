@@ -516,6 +516,40 @@ impl Store {
 
     pub fn put_user(&self, user: &User) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        self.put_user_locked(user)
+    }
+
+    pub fn put_user_if_unchanged(&self, user: &User, expected: &User) -> Result<(), StoreError> {
+        let _guard = self.write_lock()?;
+        let current = self.get_user(user.id)?.ok_or(StoreError::NotFound)?;
+        if serde_json::to_value(&current).map_err(|error| StoreError::Io(error.to_string()))?
+            != serde_json::to_value(expected).map_err(|error| StoreError::Io(error.to_string()))?
+        {
+            return Err(StoreError::Conflict(
+                "user changed; reload and try again".into(),
+            ));
+        }
+        self.put_user_locked(user)
+    }
+
+    fn put_user_locked(&self, user: &User) -> Result<(), StoreError> {
+        let users = self.list_users()?;
+        if users
+            .iter()
+            .any(|other| other.id != user.id && other.email.eq_ignore_ascii_case(&user.email))
+        {
+            return Err(StoreError::Conflict("a user with that email exists".into()));
+        }
+        if users.iter().any(|other| other.id == user.id)
+            && !(user.active && user.role == crate::auth::Role::Admin)
+            && !users.iter().any(|other| {
+                other.id != user.id && other.active && other.role == crate::auth::Role::Admin
+            })
+        {
+            return Err(StoreError::Conflict(
+                "at least one active administrator is required".into(),
+            ));
+        }
         std::fs::create_dir_all(self.doc_dir::<User>())?;
         write_json(&self.doc_path::<User>(&user.id.to_string()), user)?;
         self.index_user_locked(user)
@@ -523,6 +557,37 @@ impl Store {
 
     pub fn delete_user(&self, id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        let target = self.get_user(id)?.ok_or(StoreError::NotFound)?;
+        if target.active
+            && target.role == crate::auth::Role::Admin
+            && !self
+                .list_users()?
+                .iter()
+                .any(|user| user.id != id && user.active && user.role == crate::auth::Role::Admin)
+        {
+            return Err(StoreError::Conflict(
+                "at least one active administrator is required".into(),
+            ));
+        }
+        if self
+            .list_all_entries()?
+            .iter()
+            .any(|entry| entry.user_id == Some(id))
+            || self
+                .list_expenses()?
+                .iter()
+                .any(|expense| expense.user_id == Some(id))
+            || self
+                .list_submissions()?
+                .iter()
+                .any(|submission| submission.user_id == id)
+            || self.list_claims()?.iter().any(|claim| claim.user_id == id)
+            || self.get_timer(id)?.is_some()
+        {
+            return Err(StoreError::Conflict(
+                "user has recorded history or a running timer; deactivate instead".into(),
+            ));
+        }
         self.remove_doc_locked::<User>(&id.to_string())?;
         self.unindex_user_locked(&id.to_string())
     }

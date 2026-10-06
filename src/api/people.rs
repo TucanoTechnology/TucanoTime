@@ -50,6 +50,12 @@ pub async fn create_user(
     State(app): State<AppState>,
     ValidJson(input): ValidJson<UserInput>,
 ) -> ApiResult {
+    let mut errors = Vec::new();
+    crate::domain::validate_rate_minor(input.default_rate_minor, "default_rate_minor", &mut errors);
+    crate::domain::validate_rate_minor(input.cost_rate_minor, "cost_rate_minor", &mut errors);
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
     let email = normalise_email(&input.email)
         .ok_or_else(|| ApiError::validation(vec![FieldError::new("email", "invalid email")]))?;
     if app.store.get_user_by_email(&email)?.is_some() {
@@ -90,10 +96,23 @@ pub async fn update_user(
     Path(id): Path<Uuid>,
     ValidJson(input): ValidJson<UserUpdateInput>,
 ) -> ApiResult {
+    let mut errors = Vec::new();
+    if let Some(rate) = input.default_rate_minor {
+        crate::domain::validate_rate_minor(rate, "default_rate_minor", &mut errors);
+    }
+    if let Some(rate) = input.cost_rate_minor {
+        crate::domain::validate_rate_minor(rate, "cost_rate_minor", &mut errors);
+    }
+    if !errors.is_empty() {
+        return Err(ApiError::validation(errors));
+    }
     let mut user = app
         .store
         .get_user(id)?
         .ok_or_else(|| ApiError::not_found("user"))?;
+    let security_changed = input.role.is_some_and(|role| role != user.role)
+        || input.active.is_some_and(|active| active != user.active);
+    let expected = user.clone();
     if actor.0.id == id
         && ((input.role.is_some_and(|role| role != Role::Admin)) || input.active == Some(false))
     {
@@ -149,10 +168,10 @@ pub async fn update_user(
             "at least one active administrator is required",
         ));
     }
-    if input.role.is_some() || input.active.is_some() {
+    if security_changed {
         user.session_version += 1;
     }
-    app.store.put_user(&user)?;
+    app.store.put_user_if_unchanged(&user, &expected)?;
     app.audit
         .record("user_updated", &user.email, app.clock.now());
     Ok(Json(PublicUser::from(&user)).into_response())
@@ -167,6 +186,7 @@ pub async fn change_user_password(
         .store
         .get_user(id)?
         .ok_or_else(|| ApiError::not_found("user"))?;
+    let expected = user.clone();
     if !valid_password(&input.password) {
         return Err(ApiError::validation(vec![FieldError::new(
             "password",
@@ -176,7 +196,7 @@ pub async fn change_user_password(
     user.password_hash = crate::auth::hash_password(&input.password)
         .map_err(|_| ApiError::internal("password hashing failed".into()))?;
     user.session_version += 1;
-    app.store.put_user(&user)?;
+    app.store.put_user_if_unchanged(&user, &expected)?;
     app.audit
         .record("user_password_changed", &user.email, app.clock.now());
     Ok(StatusCode::NO_CONTENT.into_response())
@@ -222,6 +242,12 @@ pub async fn delete_user(
             .list_submissions()?
             .iter()
             .any(|submission| submission.user_id == id)
+        || app
+            .store
+            .list_claims()?
+            .iter()
+            .any(|claim| claim.user_id == id)
+        || app.store.get_timer(id)?.is_some()
     {
         return Err(ApiError::conflict(
             "user has recorded history and cannot be deleted; deactivate instead",
