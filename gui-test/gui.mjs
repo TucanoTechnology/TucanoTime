@@ -452,7 +452,13 @@ check('issued invoice renders an Email button', !!emailBtn);
 if (emailBtn) {
   emailBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(300);
-  check('Email button announces the send', /emailed to billing@acme.test/i.test(window.document.getElementById('live-region').textContent));
+  {
+  const t = window.document.getElementById('live-region').textContent;
+  // #130 honesty: either a real send (smtp) or an explicit NOT-sent with the
+  // address — never a bare success claim when the transport is disabled.
+  check('Email button announces honestly',
+    /billing@acme.test/.test(t) && /Invoice emailed to|NOT sent \(SMTP not configured\)/.test(t));
+}
 }
 
 // ---- PDF DOWNLOAD (#113): GUI button fetches the blob and saves it ----
@@ -485,7 +491,7 @@ if (copyBtn) {
   window.document.getElementById('dlg-input').value = 'accountant@gui.test';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(400);
-  check('Email copy announces the send', /PDF copy sent to accountant@gui.test/i.test(window.document.getElementById('live-region').textContent));
+  check('Email copy announces honestly', /accountant@gui.test/.test(window.document.getElementById('live-region').textContent));
   const audit = await (await fetch(BASE + '/audit', { headers: { Cookie: SESSION_COOKIE } })).json();
   check(
     'Email copy lands in the audit log with the recipient',
@@ -637,6 +643,8 @@ check('secret-shaped config keys are refused', badCfg.status === 422);
 // ---- INVOICE TEMPLATE (#116): admin editor, cheat-sheet, rejection, preview ----
 window.document.getElementById('tab-settings').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(300);
+check('Settings discloses the email transport state (#130)',
+  /Email delivery:/i.test(window.document.getElementById('email-status').textContent));
 const varRows = [...window.document.querySelectorAll('#template-vars tbody tr')];
 check('template editor renders the variable cheat-sheet from the server', varRows.length >= 12 && varRows.some((r) => r.textContent.includes('%invoice_issue_month%')));
 // Unknown variable: inline error, no save.

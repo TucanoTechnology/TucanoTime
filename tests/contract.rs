@@ -2488,6 +2488,8 @@ async fn invoice_email_sends_to_customer() {
     let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK, "{body}");
     assert_eq!(body["sent_to"], "billing@acme.test");
+    // #130: the result names the transport; the test recorder never claims smtp.
+    assert_eq!(body["transport"], "recording");
     let msgs = app.email.messages();
     assert_eq!(msgs.len(), 1);
     assert!(
@@ -3455,6 +3457,7 @@ async fn email_copy_sends_pdf_to_third_party_with_audit_trail() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["sent_to"], "accountant@firm.co");
+    assert_eq!(body["transport"], "recording");
 
     let msgs = app.email.messages();
     assert_eq!(msgs.len(), 1);
@@ -4369,4 +4372,85 @@ async fn legacy_paid_docs_read_with_synthesised_ledger() {
     let row = rep2["rows"].as_array().unwrap().first().unwrap();
     assert_eq!(row["paid_minor"], 18000);
     assert_eq!(row["balance_minor"], 0);
+}
+
+#[tokio::test]
+async fn email_result_reports_disabled_transport_honestly() {
+    // #130: the DEFAULT production wiring (no SMTP env, no vault) boots
+    // DisabledEmailSender — sends succeed as logged no-ops. The response must
+    // disclose transport "disabled" so no client can read a 200 as delivery.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).expect("store");
+    let router = tucano_time::build_router(AppState::new(store));
+    raw(
+        &router,
+        "POST",
+        "/auth/bootstrap",
+        Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
+        None,
+    )
+    .await;
+    let cookie = login_cookie(&router, ADMIN_EMAIL, ADMIN_PW).await;
+    let call = |m: String, u: String, b: Option<Value>| {
+        let r = router.clone();
+        let c = cookie.clone();
+        async move {
+            let (s, v, _) = raw(&r, &m, &u, b, Some(&c)).await;
+            (s, v)
+        }
+    };
+    let (sc, cust) = call(
+        "POST".to_string(),
+        "/customers".into(),
+        Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
+    )
+    .await;
+    assert_eq!(sc, StatusCode::CREATED, "{cust}");
+    let cid = cust["id"].as_str().unwrap().to_string();
+    call(
+        "POST".to_string(),
+        format!("/customers/{cid}/projects"),
+        Some(json!({"code":"P1","currency":"EUR","rate_minor":6000})),
+    )
+    .await;
+    call(
+        "POST".to_string(),
+        "/entries".into(),
+        Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = call(
+        "POST".to_string(),
+        "/invoices".into(),
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    call("POST".into(), format!("/invoices/{iid}/issue"), None).await;
+    let (se, body) = call("POST".into(), format!("/invoices/{iid}/email"), None).await;
+    assert_eq!(se, StatusCode::OK, "{body}");
+    assert_eq!(body["sent_to"], "billing@acme.test");
+    assert_eq!(body["transport"], "disabled", "no SMTP => honest label");
+    let (sc2, copy) = call(
+        "POST".to_string(),
+        format!("/invoices/{iid}/email-copy"),
+        Some(json!({"to": "books@firm.co"})),
+    )
+    .await;
+    assert_eq!(sc2, StatusCode::OK, "{copy}");
+    assert_eq!(copy["transport"], "disabled");
+    // The audit line records the transport alongside the recipient (#52).
+    let (_sa, audit) = call("GET".into(), "/audit".into(), None).await;
+    let hit = audit["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["event"] == "invoice_email_copy");
+    assert!(hit.is_some());
+    assert!(
+        hit.unwrap()["subject"]
+            .as_str()
+            .unwrap()
+            .ends_with(":disabled")
+    );
 }
