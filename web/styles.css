@@ -319,3 +319,15 @@ td.cell.locked .cell-input { opacity: .6; }
 #entry-dialog { max-width: 28rem; }
 #entry-dialog form.card { box-shadow: none; padding: 0; margin: 0; }
 #entry-dialog .field { margin: 0 0 .7rem; }
+/* ---- grouped rail (#142) ---- */
+.rail-shortcuts { display: flex; gap: .4rem; padding: .25rem .5rem .6rem; }
+.rail-shortcuts button { flex: 1; font: inherit; cursor: pointer; border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg); border-radius: var(--radius); padding: .45rem .4rem; }
+.rail-shortcuts button:hover, .rail-shortcuts button:focus-visible { border-color: var(--accent); }
+.nav-group { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .45rem; }
+.nav-label { font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); padding: .1rem .7rem 0; font-weight: 700; }
+@media (max-width: 720px) {
+  .nav-group { flex-direction: row; flex-wrap: wrap; margin-bottom: 0; }
+  .nav-label { width: 100%; padding-left: 0; }
+}

@@ -38,13 +38,31 @@
     <aside class="sidebar">
       <div class="brand">TucanoTime</div>
       <nav aria-label="Sections">
+        <!-- #142: quick actions above the grouped rail. Neither starts nor
+             invoices anything on its own — they only navigate/focus. -->
+        <div class="rail-shortcuts">
+          <button type="button" id="shortcut-invoices" title="Go to invoices">🧾 Invoice</button>
+          <button type="button" id="shortcut-timer" title="Focus the timer (does not start it)">⏱ Timer</button>
+        </div>
         <div class="tabs" role="tablist" id="tabs" aria-orientation="vertical">
-          <button role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true">Timesheets</button>
-          <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
-          <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
-          <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
-          <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
-          <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Approvals</button>
+          <div class="nav-group" role="presentation">
+            <span class="nav-label">Track</span>
+            <button role="tab" id="tab-timesheet" aria-controls="panel-timesheet" aria-selected="true">Timesheets</button>
+            <button role="tab" id="tab-expenses" aria-controls="panel-expenses" aria-selected="false" tabindex="-1">Expenses</button>
+          </div>
+          <div class="nav-group" role="presentation">
+            <span class="nav-label">Organize</span>
+            <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1">Customers &amp; projects</button>
+          </div>
+          <div class="nav-group" role="presentation">
+            <span class="nav-label">Bill</span>
+            <button role="tab" id="tab-invoices" aria-controls="panel-invoices" aria-selected="false" tabindex="-1">Invoices</button>
+          </div>
+          <div class="nav-group" role="presentation">
+            <span class="nav-label">Review</span>
+            <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1">Reports</button>
+            <button role="tab" id="tab-submissions" aria-controls="panel-submissions" aria-selected="false" tabindex="-1">Approvals</button>
+          </div>
           <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button>
           <!-- #111/#125: utility action (not a tab), pinned to the bottom of
                the rail, visually separated from the section tabs. -->
