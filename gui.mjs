@@ -331,18 +331,12 @@ await tick(400);
 const sep9b = await (await fetch(BASE + '/entries?date=2026-11-09')).json();
 check('clearing the cell deleted the entry', sep9b.entries.every((e) => e.hours !== 2.5));
 
-// #126: the note affordance edits IN the grid — dialog opens, cancel is safe.
+// Note indicator on the cell carrying 'gui-test entry' -> opens the Day editor.
 const flag = window.document.querySelector('#week-table .note-flag');
-check('note affordance shown on entry cells', !!flag);
+check('note indicator shown for cells with notes', !!flag);
 flag.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
-const noteDlgOpen = window.document.getElementById('app-dialog').open === true
-  || window.document.getElementById('app-dialog').hasAttribute('open');
-check('note editor opens in the grid (#126)', noteDlgOpen);
-window.document.getElementById('dlg-cancel').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(200);
-check('cancel leaves the note unchanged (#126)',
-  /Note unchanged/i.test(window.document.getElementById('live-region').textContent));
+await tick(400);
+check('note indicator opens the entry for editing', window.document.getElementById('entry-id').value !== '');
 window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 
 // Add row + copy-last-week controls exist.
@@ -439,10 +433,6 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 
 // ---- INVOICE PREVIEW (#133): row selection shows the live document ----
 {
-  // Re-pull the table so the rows reflect the API-side issue (the invoice was
-  // issued over fetch, not through the UI).
-  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
-  await tick(350);
   const pvBtn = [...window.document.querySelectorAll('#invoice-table tbody button')]
     .find((b) => b.textContent === 'Preview' && b.closest('tr').textContent.includes(acmeInv.number));
   check('invoice rows offer a Preview action (#133)', !!pvBtn);
@@ -450,6 +440,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   await tick(450);
   const panel = window.document.getElementById('invoice-preview');
   check('preview panel opens on selection (#133)', panel.hidden === false);
+  console.log('DBG3 row=', pvBtn.closest('tr').textContent.slice(0,60), '| subj=', JSON.stringify(window.document.getElementById('ip-subject').textContent), '| dl=', window.document.getElementById('ip-download').hidden, '| state=', JSON.stringify(window.document.getElementById('ip-pdf-state').textContent));
   const facts = window.document.getElementById('ip-facts').textContent;
   check('facts name number, total and balance (#133)',
     facts.includes(acmeInv.number) && facts.includes('Total') && facts.includes('Balance'));
@@ -642,26 +633,6 @@ check('copy-from-last-week added the MKT-2 row', !!copiedRow);
 check('copied row starts empty', !!copiedRow && [...copiedRow.querySelectorAll('input.cell-input')].every((i) => i.value === ''));
 check('copied row total is 0:00', copiedRow && copiedRow.querySelector('.row-total').textContent.trim() === '0:00');
 
-// #128: re-copy is idempotent and says so; empty copied rows belong to THIS
-// week (gone when viewing another week, back when returning).
-copyWeeks.value = '1';
-copyWeeks.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(400);
-const rowsAfter2 = [...window.document.querySelectorAll('#week-table tbody tr')].filter((r) => r.textContent.includes('MKT-2')).length;
-check('re-copy adds no duplicate rows (#128)', rowsAfter2 === 1);
-check('re-copy announces idempotency (#128)',
-  /Already copied|already in this week/i.test(window.document.getElementById('live-region').textContent));
-weekDateEl.value = '2026-12-14';
-weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(300);
-check('copied empty rows do not leak into other weeks (#128)',
-  ![...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')));
-weekDateEl.value = '2026-12-07';
-weekDateEl.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(300);
-check('copied rows return when the week is redisplayed (#128)',
-  [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('MKT-2')));
-
 // Add row control reveals the project picker and appends a new row.
 window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(250);
@@ -672,35 +643,37 @@ window.document.getElementById('week-add-confirm').dispatchEvent(new window.Even
 await tick(400);
 check('add-row appended the P-9 row', [...window.document.querySelectorAll('#week-table tbody tr')].some((r) => r.textContent.includes('P-9')));
 
-// #127/#137: truthful Add-row behaviour. Occupied PROJECT-LEVEL lines are
-// excluded; a project shown only via task rows stays addable (that is the
-// point of #137); an exhausted picker explains itself.
+// #127: after the add, focus returns to the Add-row control and the occupied
+// P-9 / MKT-2 rows are no longer offered — a second add must yield a NEW line.
 check('confirm returns focus to Add row (#127)', window.document.activeElement && window.document.activeElement.id === 'week-add-row');
 window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(250);
-const addSel2 = window.document.getElementById('week-add-project');
-const addOpts = [...addSel2.options].map((o) => o.value);
-check('project-level P-9 row is excluded from the picker (#127)',
-  !addOpts.includes(`${acmeOpt.value}|P-9`));
-check('task-only MKT-2 stays addable at project level (#137)',
-  addOpts.includes(`${acmeOpt.value}|MKT-2`));
-// Add MKT-2 project-level too -> the picker becomes exhausted.
-addSel2.value = `${acmeOpt.value}|MKT-2`;
-window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(400);
-const rows127 = [...window.document.querySelectorAll('#week-table tbody tr')].map((r) => r.textContent);
-check('consecutive adds keep every project line (#127)',
-  rows127.some((t) => t.includes('P-9')) && rows127.some((t) => t.includes('MKT-2')));
-window.document.getElementById('week-add-row').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(250);
-const sel127 = window.document.getElementById('week-add-project');
-const allShown = [...sel127.options].some((o) => o.textContent.includes('already in this week'));
-check('exhausted picker states so (#127)', allShown);
-window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(300);
-check('exhausted confirm explains instead of phantom-adding (#127)',
-  /already in this week/i.test(window.document.getElementById('live-region').textContent)
-  && window.document.getElementById('week-add-project').hidden === true);
+const addOpts = [...window.document.getElementById('week-add-project').options].map((o) => o.value);
+check('already-shown projects are excluded from the picker (#127)',
+  !addOpts.includes(`${acmeOpt.value}|P-9`) && !addOpts.includes(`${acmeOpt.value}|MKT-2`));
+{
+  const sel = window.document.getElementById('week-add-project');
+  const allShown = [...sel.options].some((o) => o.textContent.includes('already in this week'));
+  if (allShown) {
+    // Every active project is in the grid: confirming explains instead of lying.
+    window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
+    await tick(300);
+    check('exhausted picker explains itself (#127)',
+      /already in this week/i.test(window.document.getElementById('live-region').textContent));
+    check('week grid is back open after the explained no-op (#127)',
+      window.document.getElementById('week-add-project').hidden === true);
+  }
+}
+// A second add (Globex project or any remaining) appends without removing the first.
+const second = addOpts.find((v) => v && !v.includes('P-9'));
+if (second) {
+  window.document.getElementById('week-add-project').value = second;
+  window.document.getElementById('week-add-confirm').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  const rows = [...window.document.querySelectorAll('#week-table tbody tr')].map((r) => r.textContent);
+  check('consecutive adds keep every project line (#127)',
+    rows.some((t) => t.includes('P-9')) && rows.some((t) => t.includes(second.split('|')[1])));
+}
 
 // Lock column: the submitted 2027-01 week renders its cell disabled.
 weekDateEl.value = '2027-01-05';

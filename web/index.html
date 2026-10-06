@@ -306,6 +306,18 @@
         <tbody></tbody>
       </table>
       <p id="invoice-empty" hidden>No invoices yet.</p>
+      <!-- #133: row selection opens the live document preview. -->
+      <div id="invoice-preview" class="card" role="region" aria-label="Invoice document preview" hidden>
+        <div class="ip-head">
+          <h2 class="ip-title">Invoice document</h2>
+          <button type="button" id="ip-close" class="link secondary">Close preview</button>
+        </div>
+        <dl id="ip-facts" class="ip-facts"></dl>
+        <p id="ip-subject" class="ip-subject"></p>
+        <div id="ip-letter" class="ip-letter"></div>
+        <p id="ip-pdf-state" class="hint" hidden></p>
+        <div class="buttons"><button type="button" id="ip-download" class="primary">Download PDF</button></div>
+      </div>
     </section>
 
     <!-- EXPENSES -->
