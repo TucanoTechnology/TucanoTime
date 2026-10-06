@@ -31,6 +31,7 @@ pub mod ratelimit;
 pub mod recurring;
 pub mod reminders;
 pub mod report;
+pub mod retainer;
 pub mod revoke;
 pub mod scheduler;
 pub mod sso;
@@ -163,6 +164,23 @@ pub fn build_router(state: AppState) -> Router {
         .route("/users", get(api::list_users).post(api::create_user))
         .route("/users/{id}", axum::routing::delete(api::delete_user))
         .route("/audit", get(api::audit_log))
+        // Retainer balances (#144): admin tier like invoices.
+        .route(
+            "/retainers",
+            get(api::list_retainers).post(api::create_retainer),
+        )
+        .route(
+            "/retainers/{id}",
+            get(api::get_retainer).post(api::close_retainer),
+        )
+        .route(
+            "/retainers/{id}/credit",
+            axum::routing::post(api::credit_retainer),
+        )
+        .route(
+            "/retainers/{id}/draw",
+            axum::routing::post(api::draw_retainer),
+        )
         // Management reporting (cost rates, budgets) is admin-only (review A4):
         // members see their own work via /reports/summary, not margins.
         .route("/reports/profitability", get(api::profitability))

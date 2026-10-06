@@ -39,6 +39,7 @@ pub mod entries_reports;
 pub mod expenses;
 pub mod invoicing;
 pub mod people;
+pub mod retainers;
 pub mod timer_calendar;
 pub mod vault_config;
 
@@ -483,6 +484,10 @@ pub use self::people::{
     delete_project, delete_task, delete_user, get_customer_handler, get_project_handler,
     get_task_handler, list_customers, list_projects, list_tasks, list_users, update_customer,
     update_project, update_task,
+};
+pub use self::retainers::{
+    RetainerCreate, RetainerTxInput, close_retainer, create_retainer, credit_retainer,
+    draw_retainer, get_retainer, list_retainers,
 };
 pub use self::timer_calendar::{
     ScheduleInput, SchedulePatch, calendar_events, calendar_oauth_callback, calendar_oauth_start,

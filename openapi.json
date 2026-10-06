@@ -2109,6 +2109,182 @@
           }
         },
         "additionalProperties": false
+      },
+      "RetainerStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "closed"
+        ]
+      },
+      "TxKind": {
+        "type": "string",
+        "enum": [
+          "opening",
+          "credit",
+          "draw",
+          "correction"
+        ]
+      },
+      "RetainerTx": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "amount_minor",
+          "recorded_by",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TxKind"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recorded_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Retainer": {
+        "type": "object",
+        "required": [
+          "id",
+          "customer_id",
+          "project_code",
+          "currency",
+          "status",
+          "transactions",
+          "created_at"
+        ],
+        "description": "Retainer aggregate; balance is ALWAYS the reconciled ledger (#144).",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RetainerStatus"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RetainerTx"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RetainerCreate": {
+        "type": "object",
+        "required": [
+          "customer_id",
+          "project_code"
+        ],
+        "properties": {
+          "customer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_code": {
+            "$ref": "#/components/schemas/ProjectCode"
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "opening_amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "RetainerTxInput": {
+        "type": "object",
+        "required": [
+          "amount_minor"
+        ],
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional check; mismatch is 422."
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Repeats are rejected 409, never double-posted (#144)."
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -6358,6 +6534,357 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/retainers": {
+      "get": {
+        "operationId": "listRetainers",
+        "tags": [
+          "retainers"
+        ],
+        "summary": "Retainer list with balances (#144)",
+        "responses": {
+          "200": {
+            "description": "Summaries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "retainers"
+                  ],
+                  "properties": {
+                    "retainers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "customer_id",
+                          "project_code",
+                          "currency",
+                          "status",
+                          "balance_minor"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "customer_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "project_code": {
+                            "$ref": "#/components/schemas/ProjectCode"
+                          },
+                          "currency": {
+                            "$ref": "#/components/schemas/Currency"
+                          },
+                          "status": {
+                            "$ref": "#/components/schemas/RetainerStatus"
+                          },
+                          "balance_minor": {
+                            "type": "integer"
+                          },
+                          "last_activity": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          }
+        }
+      },
+      "post": {
+        "operationId": "createRetainer",
+        "tags": [
+          "retainers"
+        ],
+        "summary": "Create a retainer (#144)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetainerCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Retainer with reconciled balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "retainer",
+                    "balance_minor"
+                  ],
+                  "properties": {
+                    "retainer": {
+                      "$ref": "#/components/schemas/Retainer"
+                    },
+                    "balance_minor": {
+                      "type": "integer",
+                      "description": "Signed reconciled ledger balance, minor units."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/retainers/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getRetainer",
+        "tags": [
+          "retainers"
+        ],
+        "summary": "Retainer detail + full ledger (#144)",
+        "responses": {
+          "200": {
+            "description": "Retainer with reconciled balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "retainer",
+                    "balance_minor"
+                  ],
+                  "properties": {
+                    "retainer": {
+                      "$ref": "#/components/schemas/Retainer"
+                    },
+                    "balance_minor": {
+                      "type": "integer",
+                      "description": "Signed reconciled ledger balance, minor units."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "description": "Admin role required."
+          }
+        }
+      },
+      "post": {
+        "operationId": "closeRetainer",
+        "tags": [
+          "retainers"
+        ],
+        "summary": "Close a retainer (final) (#144)",
+        "responses": {
+          "200": {
+            "description": "Retainer with reconciled balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "retainer",
+                    "balance_minor"
+                  ],
+                  "properties": {
+                    "retainer": {
+                      "$ref": "#/components/schemas/Retainer"
+                    },
+                    "balance_minor": {
+                      "type": "integer",
+                      "description": "Signed reconciled ledger balance, minor units."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "403": {
+            "description": "Admin role required."
+          }
+        }
+      }
+    },
+    "/retainers/{id}/credit": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "creditRetainer",
+        "tags": [
+          "retainers"
+        ],
+        "summary": "Retainer add funds (#144)",
+        "description": "A draw is NOT an invoice payment (#114 owns payments): it records a ledger application against the retainer.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetainerTxInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Retainer with reconciled balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "retainer",
+                    "balance_minor"
+                  ],
+                  "properties": {
+                    "retainer": {
+                      "$ref": "#/components/schemas/Retainer"
+                    },
+                    "balance_minor": {
+                      "type": "integer",
+                      "description": "Signed reconciled ledger balance, minor units."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/retainers/{id}/draw": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "drawRetainer",
+        "tags": [
+          "retainers"
+        ],
+        "summary": "Retainer apply funds (reason required) (#144)",
+        "description": "A draw is NOT an invoice payment (#114 owns payments): it records a ledger application against the retainer.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetainerTxInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Retainer with reconciled balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "retainer",
+                    "balance_minor"
+                  ],
+                  "properties": {
+                    "retainer": {
+                      "$ref": "#/components/schemas/Retainer"
+                    },
+                    "balance_minor": {
+                      "type": "integer",
+                      "description": "Signed reconciled ledger balance, minor units."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }

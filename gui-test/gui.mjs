@@ -726,6 +726,73 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     window.document.getElementById('iw-step1').hidden === false && window.document.getElementById('iw-title').textContent.includes('1 of 3'));
 }
 
+// ---- RETAINERS (#144): create, add, draw, history, guards ----
+{
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(350);
+  window.document.getElementById('ret-customer').value = acmeOpt.value;
+  window.document.getElementById('ret-customer').dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(200);
+  const projSel = window.document.getElementById('ret-project');
+  projSel.value = projSel.options[projSel.options.length - 1].value; // P-9 (seeded by wizard earlier)
+  window.document.getElementById('ret-opening').value = '500.00';
+  window.document.getElementById('ret-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick(450);
+  let rets = (await (await fetch(BASE + '/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
+  check('retainer created with opening funds (#144)', rets.length === 1 && rets[0].balance_minor === 50000 && rets[0].status === 'open');
+  const row = window.document.querySelector('#ret-table tbody tr');
+  check('balance and status render from the ledger (#144)',
+    row.textContent.includes('500.00') && /open/i.test(row.textContent));
+  // Draw without a reason must cancel cleanly (no ledger growth).
+  row.querySelectorAll('button').forEach((b) => {
+    if (b.textContent === 'History') b.dispatchEvent(new window.Event('click', { bubbles: true }));
+  });
+  await tick(250);
+  check('history panel shows the opening entry (#144)',
+    window.document.getElementById('ret-detail').hidden === false
+    && /opening\s\+500\.00/.test(window.document.getElementById('ret-history').textContent));
+  window.document.getElementById('ret-detail-close').dispatchEvent(new window.Event('click', { bubbles: true }));
+  // Add funds via the dialog flow (amount step then confirm step of draw tested separately).
+  row.querySelectorAll('button').forEach((b) => {
+    if (b.textContent === 'Add funds') b.dispatchEvent(new window.Event('click', { bubbles: true }));
+  });
+  await tick(200);
+  window.document.getElementById('dlg-input').value = '100.00';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(450);
+  rets = (await (await fetch(BASE + '/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
+  check('add funds credits the ledger (#144)', rets[0].balance_minor === 60000);
+  // Draw with a reason.
+  const row2 = window.document.querySelector('#ret-table tbody tr');
+  row2.querySelectorAll('button').forEach((b) => {
+    if (b.textContent === 'Draw funds') b.dispatchEvent(new window.Event('click', { bubbles: true }));
+  });
+  await tick(200);
+  window.document.getElementById('dlg-input').value = '25.00';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(250);
+  window.document.getElementById('dlg-input').value = 'advance against March work';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(450);
+  rets = (await (await fetch(BASE + '/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
+  check('draw reduces balance with reason (#144)', rets[0].balance_minor === 57500
+    && /draw recorded/i.test(window.document.getElementById('live-region').textContent));
+  // Over-draw is refused by the API and announced.
+  row2.querySelectorAll('button').forEach((b) => {
+    if (b.textContent === 'Draw funds') b.dispatchEvent(new window.Event('click', { bubbles: true }));
+  });
+  await tick(200);
+  window.document.getElementById('dlg-input').value = '999.00';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(250);
+  window.document.getElementById('dlg-input').value = 'greed';
+  window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(450);
+  rets = (await (await fetch(BASE + '/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
+  check('overdraw refused, balance intact (#144)', rets[0].balance_minor === 57500
+    && /Draw failed/i.test(window.document.getElementById('live-region').textContent));
+}
+
 // ---- RECURRING SCHEDULE MANAGEMENT (#136) ----
 {
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
