@@ -41,6 +41,9 @@ pub struct User {
     pub cost_rate_minor: u64,
     pub password_hash: String,
     pub created_at: DateTime<Utc>,
+    /// Incremented whenever security-sensitive identity data changes.
+    #[serde(default)]
+    pub session_version: u64,
 }
 
 /// A user without the password hash — what the API ever returns.
@@ -92,6 +95,7 @@ struct Claims {
     uid: String,
     jti: String,
     exp: i64,
+    session_version: u64,
 }
 
 /// Verified session token contents.
@@ -100,6 +104,7 @@ pub struct SessionClaims {
     pub uid: Uuid,
     pub jti: String,
     pub exp: i64,
+    pub session_version: u64,
 }
 
 /// Issues and verifies signed session tokens: `base64(json claims).base64(hmac)`.
@@ -134,6 +139,7 @@ impl Session {
             uid: user.id.to_string(),
             jti: Uuid::new_v4().to_string(),
             exp: now.timestamp() + self.ttl_secs,
+            session_version: user.session_version,
         };
         let payload =
             URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).expect("claims serialise"));
@@ -158,6 +164,7 @@ impl Session {
             uid: Uuid::parse_str(&claims.uid).ok()?,
             jti: claims.jti,
             exp: claims.exp,
+            session_version: claims.session_version,
         })
     }
 
@@ -329,6 +336,7 @@ mod tests {
             cost_rate_minor: 0,
             password_hash: String::new(),
             created_at: Utc::now(),
+            session_version: 1,
         };
         let now = Utc::now();
         let token = s.issue(&user, now);
@@ -392,6 +400,7 @@ mod persistence_tests {
             cost_rate_minor: 0,
             password_hash: String::new(),
             created_at: Utc::now(),
+            session_version: 1,
         }
     }
 

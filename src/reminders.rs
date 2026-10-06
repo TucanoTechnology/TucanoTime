@@ -151,6 +151,7 @@ mod job_tests {
             cost_rate_minor: 0,
             password_hash: String::new(),
             created_at: Utc::now(),
+            session_version: 1,
         };
         store.put_user(&user).unwrap();
         let now = Utc.timestamp_opt(1_730_000_000, 0).unwrap(); // a weekday

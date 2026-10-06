@@ -792,6 +792,49 @@
         },
         "additionalProperties": false
       },
+      "UserUpdateInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "default_rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          },
+          "cost_rate_minor": {
+            "$ref": "#/components/schemas/RateMinor"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UserPasswordInput": {
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 8
+          }
+        },
+        "additionalProperties": false
+      },
       "InvoiceStatus": {
         "type": "string",
         "enum": [
@@ -2712,6 +2755,47 @@
           }
         }
       ],
+      "put": {
+        "operationId": "updateUser",
+        "tags": [
+          "users"
+        ],
+        "summary": "Update a user (admin only)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdateInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUser"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
       "delete": {
         "operationId": "deleteUser",
         "tags": [
@@ -2730,6 +2814,50 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/users/{id}/password": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "put": {
+        "operationId": "changeUserPassword",
+        "tags": [
+          "users"
+        ],
+        "summary": "Change a user's password (admin only)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPasswordInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Password changed; current sessions were revoked."
+          },
+          "403": {
+            "description": "Admin role required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }

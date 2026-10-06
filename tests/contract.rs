@@ -1178,6 +1178,111 @@ async fn member_cannot_manage_users() {
 }
 
 #[tokio::test]
+async fn admin_can_update_user_and_duplicate_email_is_rejected_without_persistence() {
+    let (app, _d) = app().await;
+    let (s, bob) = json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(json!({
+            "name":"Bob","email":"bob@test.local","password":"bobpass123","role":"member",
+            "active":true,"default_rate_minor":4500,"cost_rate_minor":2200
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let bob_id = bob["id"].as_str().unwrap();
+
+    let (s, updated) = json_req(
+        &app,
+        "PUT",
+        &format!("/users/{bob_id}"),
+        Some(json!({
+            "name":"Bob Q","email":"bob@test.local","role":"admin","active":false,
+            "default_rate_minor":5000,"cost_rate_minor":2400
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(updated["name"], "Bob Q");
+    assert_eq!(updated["role"], "admin");
+    assert_eq!(updated["active"], false);
+    assert_eq!(updated["default_rate_minor"], 5000);
+    assert_eq!(updated["cost_rate_minor"], 2400);
+
+    let (s, _) = json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(json!({
+            "name":"Other","email":"BOB@test.local","password":"otherpass1","role":"member"
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn member_cannot_update_user() {
+    let (app, _d) = app().await;
+    let (s, user) = json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(
+            json!({"name":"Pam","email":"pam@test.local","password":"memberpass1","role":"member"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let cookie = login_cookie(&app.router, "pam@test.local", "memberpass1").await;
+    let (s, _, _) = raw(
+        &app.router,
+        "PUT",
+        &format!("/users/{}", user["id"].as_str().unwrap()),
+        Some(json!({"name":"Changed"})),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn password_change_revokes_existing_sessions_and_accepts_new_password() {
+    let (app, _d) = app().await;
+    let (s, user) = json_req(
+        &app,
+        "POST",
+        "/users",
+        Some(json!({
+            "name":"Pam",
+            "email":"pam@test.local",
+            "password":"memberpass1",
+            "role":"member"
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let old_cookie = login_cookie(&app.router, "pam@test.local", "memberpass1").await;
+    let id = user["id"].as_str().unwrap();
+    let (s, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/users/{id}/password"),
+        Some(json!({ "password": "newmemberpass1" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    let (s_old, _, _) = raw(&app.router, "GET", "/auth/me", None, Some(&old_cookie)).await;
+    assert_eq!(s_old, StatusCode::UNAUTHORIZED);
+
+    let new_cookie = login_cookie(&app.router, "pam@test.local", "newmemberpass1").await;
+    let (s_new, _, _) = raw(&app.router, "GET", "/auth/me", None, Some(&new_cookie)).await;
+    assert_eq!(s_new, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn report_applies_person_rate_tier_and_attributes_entry() {
     let (app, _d) = app().await;
     // Customer default 60/h; project rate 30/h.

@@ -1755,6 +1755,7 @@ mod txn_tests {
             cost_rate_minor: 0,
             password_hash: String::new(),
             created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+            session_version: 1,
         }
     }
 
@@ -2000,6 +2001,7 @@ mod index_tests {
             cost_rate_minor: 0,
             password_hash: String::new(),
             created_at: Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap(),
+            session_version: 1,
         }
     }
 

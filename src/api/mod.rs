@@ -283,6 +283,9 @@ fn authenticate(state: &AppState, headers: &http::HeaderMap) -> Result<User, Api
         return Err(unauth()); // logged out (#45)
     }
     let user = state.store.get_user(claims.uid)?.ok_or_else(unauth)?;
+    if claims.session_version != user.session_version {
+        return Err(unauth()); // credential or role changed since session issuance
+    }
     if !user.active {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -341,6 +344,7 @@ pub(crate) fn new_user(
         cost_rate_minor: p.cost_rate_minor,
         password_hash,
         created_at: app.clock.now(),
+        session_version: 1,
     };
     app.store.put_user(&user)?;
     Ok(user)
@@ -480,10 +484,11 @@ pub use self::invoicing::{
     sync_status, update_invoice_draft, update_item_type, write_off_invoice,
 };
 pub use self::people::{
-    UserInput, create_customer, create_project, create_task, create_user, delete_customer,
-    delete_project, delete_task, delete_user, get_customer_handler, get_project_handler,
-    get_task_handler, list_customers, list_projects, list_tasks, list_users, update_customer,
-    update_project, update_task,
+    UserInput, UserPasswordInput, UserUpdateInput, change_user_password, create_customer,
+    create_project, create_task, create_user, delete_customer, delete_project, delete_task,
+    delete_user, get_customer_handler, get_project_handler, get_task_handler, list_customers,
+    list_projects, list_tasks, list_users, update_customer, update_project, update_task,
+    update_user,
 };
 pub use self::retainers::{
     RetainerCreate, RetainerTxInput, close_retainer, create_retainer, credit_retainer,

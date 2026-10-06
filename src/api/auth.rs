@@ -76,6 +76,7 @@ pub async fn bootstrap(
         cost_rate_minor: 0,
         password_hash,
         created_at: app.clock.now(),
+        session_version: 1,
     };
     match app.store.put_user_if_none(&user) {
         Ok(()) => {}
