@@ -343,6 +343,46 @@
     <!-- INVOICES -->
     <section id="panel-invoices" role="tabpanel" aria-labelledby="tab-invoices" tabindex="0" hidden>
       <h2>Invoices</h2>
+      <div id="inv-overview" class="inv-overview">
+        <div id="inv-tiles">
+          <div class="inv-tile"><span class="inv-tile-label">Total open</span><span id="inv-tile-open" class="inv-tile-value">—</span></div>
+          <div class="inv-tile"><span class="inv-tile-label">Paid in <span id="inv-year-label"></span></span><span id="inv-tile-paid" class="inv-tile-value">—</span></div>
+        </div>
+        <div id="inv-chart-wrap">
+          <div class="chart-nav">
+            <button type="button" id="inv-year-prev" aria-label="Previous year">&larr;</button>
+            <span id="inv-chart-title">Open vs paid by month</span>
+            <button type="button" id="inv-year-next" aria-label="Next year">&rarr;</button>
+          </div>
+          <div id="inv-chart" role="img" aria-label="Monthly open versus paid amounts"></div>
+        </div>
+      </div>
+      <div id="inv-list-head">
+        <div class="seg" role="group" aria-label="Invoice list filter">
+          <button type="button" id="inv-tab-open" class="seg-btn" aria-pressed="true">Open</button>
+          <button type="button" id="inv-tab-all" class="seg-btn" aria-pressed="false">All</button>
+        </div>
+        <div class="inv-filters">
+          <label class="sr-only" for="invoice-search">Search invoices</label>
+          <input id="invoice-search" type="search" placeholder="Number, customer, note…" autocomplete="off">
+          <label class="sr-only" for="inv-f-customer">Customer filter</label>
+          <select id="inv-f-customer"><option value="">All customers</option></select>
+          <label class="sr-only" for="inv-f-project">Project filter</label>
+          <select id="inv-f-project"><option value="">All projects</option></select>
+          <label class="sr-only" for="inv-f-from">Period from</label>
+          <input id="inv-f-from" type="date" title="Period from">
+          <label class="sr-only" for="inv-f-to">Period to</label>
+          <input id="inv-f-to" type="date" title="Period to">
+          <details class="cols-pop">
+            <summary>Columns</summary>
+            <label><input type="checkbox" class="inv-col" value="customer" checked> Customer</label>
+            <label><input type="checkbox" class="inv-col" value="period" checked> Period</label>
+            <label><input type="checkbox" class="inv-col" value="total" checked> Total</label>
+            <label><input type="checkbox" class="inv-col" value="balance" checked> Balance</label>
+            <label><input type="checkbox" class="inv-col" value="status" checked> Status</label>
+          </details>
+        </div>
+      </div>
       <p id="invoice-summary" class="hint" role="status" aria-live="polite"></p>
       <!-- #134: staged tracked-work wizard: source -> period & projects ->
            review (POST /invoices/preview, nothing saved) -> save draft. -->
@@ -411,7 +451,7 @@
       </div>
       <table id="invoice-table">
         <caption class="sr-only">Invoices</caption>
-        <thead><tr><th scope="col">Number</th><th scope="col">Customer</th><th scope="col">Period</th><th scope="col">Total</th><th scope="col">Balance</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <thead><tr><th scope="col"><button type="button" class="sort-th" data-col="number">Number</button></th><th scope="col"><button type="button" class="sort-th" data-col="customer">Customer</button></th><th scope="col"><button type="button" class="sort-th" data-col="period">Period</button></th><th scope="col" class="num"><button type="button" class="sort-th" data-col="total">Total</button></th><th scope="col" class="num"><button type="button" class="sort-th" data-col="balance">Balance</button></th><th scope="col"><button type="button" class="sort-th" data-col="status">Status</button></th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table>
       <p id="invoice-empty" hidden>No invoices yet.</p>
