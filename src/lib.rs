@@ -207,6 +207,8 @@ pub fn build_router(state: AppState) -> Router {
             "/admin/invoice-template",
             get(api::invoice_template_get).put(api::invoice_template_put),
         )
+        // Company identity (#138).
+        .route("/admin/org", get(api::org_get).put(api::org_put))
         .route("/invoices/{id}/document", get(api::invoice_document))
         .route("/invoices/summary", get(api::invoice_summary))
         .route("/invoices/report", get(api::invoice_report_handler))

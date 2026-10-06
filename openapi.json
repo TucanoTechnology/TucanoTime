@@ -1791,6 +1791,33 @@
           }
         },
         "additionalProperties": false
+      },
+      "OrgProfile": {
+        "type": "object",
+        "description": "Company legal identity, stored as org_profile.json (#138). Empty name falls back to the org_name config key.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "legal_id": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "VAT / company registration id printed on documents."
+          },
+          "address": {
+            "description": "Postal address printed under From.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -5705,6 +5732,66 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/admin/org": {
+      "get": {
+        "operationId": "getOrg",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Company identity (#138)",
+        "responses": {
+          "200": {
+            "description": "Org profile (defaults when unset).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProfile"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
+          }
+        }
+      },
+      "put": {
+        "operationId": "putOrg",
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Save company identity (#138)",
+        "description": "Validated before persistence (lengths; address country required when any part is set). Printed on invoice PDFs (From block + VAT id) and used by emails/reminders.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgProfile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProfile"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required."
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"

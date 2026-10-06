@@ -177,9 +177,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.email.clone(),
             cfg.get_int("reminder_days", &tucano_time::appconfig::process_env),
             &root,
-            tucano_time::pdf::Org {
-                name: cfg.get_str("org_name", &tucano_time::appconfig::process_env),
-            },
+            tucano_time::pdf::Org::named(
+                cfg.get_str("org_name", &tucano_time::appconfig::process_env),
+            ),
         )),
         Arc::new(tucano_time::accounting::AccountingRetryJob::new(
             state.store.clone(),

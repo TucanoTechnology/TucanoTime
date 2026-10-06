@@ -475,6 +475,19 @@
         <div class="buttons"><button type="submit" id="config-save">Apply to config.json</button></div>
       </form>
 
+      <h2>Company information</h2>
+      <p class="hint">Printed on invoice documents and emails (#138). Leave the name empty to keep the boot-time <code>org_name</code> setting; due terms and message wording live in the invoice template below (one store, no parallel defaults).</p>
+      <form id="org-form" class="card">
+        <div class="field"><label for="org-name">Company name</label><input id="org-name" maxlength="120" autocomplete="off"></div>
+        <div class="field"><label for="org-legal">VAT / company id</label><input id="org-legal" maxlength="60" autocomplete="off" placeholder="BE0123456789"></div>
+        <div class="field"><label for="org-street">Street</label><input id="org-street" maxlength="120" autocomplete="off"></div>
+        <div class="field"><label for="org-city">City</label><input id="org-city" maxlength="80" autocomplete="off"></div>
+        <div class="field"><label for="org-postal">Postal code</label><input id="org-postal" maxlength="16" autocomplete="off"></div>
+        <div class="field"><label for="org-country">Country</label><input id="org-country" maxlength="56" autocomplete="off"></div>
+        <p class="form-error" id="org-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="org-save">Save company info</button></div>
+      </form>
+
       <h2>Invoice template</h2>
       <p class="hint">Subject, body and footer for invoice documents and emails (#116). <code>%variable%</code> placeholders resolve at issue/render time; unknown variables are rejected on save. Leave everything empty to keep the built-in wording.</p>
       <form id="template-form" class="card">
