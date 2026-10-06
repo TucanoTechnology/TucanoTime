@@ -606,8 +606,28 @@ async function copyPreviousDay(ago = 1) {
   announce(`${seen.size} project row(s) ready — enter hours to copy them to ${target}.`);
 }
 
+let entryOpener = null; // focus return target when the dialog closes (#145)
+let entrySaving = false; // guards Escape/close while a save is in flight
+
+/// The Day entry form is a modal dialog now (#145): open records the opener
+/// so closing restores focus; jsdom lacks showModal so the attribute
+/// fallback (same pattern as #102/#111) keeps the harness honest.
 function showEntryForm(show) {
-  $('entry-wrap').hidden = !show;
+  const dlg = $('entry-dialog');
+  if (show) {
+    if (!(dlg.open === true || dlg.hasAttribute('open'))) entryOpener = document.activeElement;
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    else dlg.setAttribute('open', '');
+    return;
+  }
+  if (dlg.open === true || dlg.hasAttribute('open')) {
+    if (typeof dlg.close === 'function') dlg.close();
+    else dlg.removeAttribute('open');
+  }
+  if (entryOpener && document.contains(entryOpener) && typeof entryOpener.focus === 'function') {
+    entryOpener.focus();
+  }
+  entryOpener = null;
 }
 
 function startEdit(e) {
@@ -623,6 +643,7 @@ function startEdit(e) {
   $('entry-form-title').textContent = `Edit entry ${e.id.slice(0, 8)}`;
   $('entry-save').textContent = 'Update entry';
   $('entry-cancel').hidden = false;
+  $('entry-hours').focus(); // dialog is open — start where the edit happens
   clearFormError($('entry-error'));
   $('entry-customer').focus();
   $('entry-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -672,6 +693,7 @@ async function saveEntry(evt) {
     note: $('entry-note').value,
     billable: $('entry-billable').checked,
   };
+  entrySaving = true;
   try {
     if (id) {
       await api.put(`/entries/${id}`, body);
@@ -680,16 +702,28 @@ async function saveEntry(evt) {
       await api.post('/entries', body);
       announce('Entry added.');
     }
+    // #145: saving returns to the timesheet — the dialog closes for creates
+    // too; Track time re-opens it with the day kept for the next entry.
+    const wasEdit = Boolean(id);
+    const savedDate = body.date;
     // Keep the table aligned with whatever day was just written, even if it
     // differs from the one being viewed.
-    $('day-date').value = body.date;
-    const savedId = id || null;
+    $('day-date').value = savedDate;
     resetEntryForm();
-    if (savedId) showEntryForm(false); // editing closes the inline row
+    showEntryForm(false);
+    if (!wasEdit) {
+      // Fast re-track: reopen primed for the same day (Harvest behaviour).
+      $('entry-date').value = savedDate;
+      showEntryForm(true);
+      $('entry-hours').focus();
+    } else {
+      $('day-add').focus();
+    }
     await refreshDay();
-    if (!savedId) $('entry-note').focus(); // note is the next useful field
   } catch (err) {
     showFormError($('entry-error'), err);
+  } finally {
+    entrySaving = false;
   }
 }
 
@@ -2565,6 +2599,25 @@ async function startApp() {
   $('entry-cancel').addEventListener('click', () => {
     resetEntryForm();
     showEntryForm(false);
+    announce('Entry cancelled — nothing was saved.');
+  });
+  $('entry-dialog').addEventListener('cancel', (e) => {
+    // native Escape on real browsers: never close mid-save, cancel otherwise
+    if (entrySaving) e.preventDefault();
+    else {
+      e.preventDefault();
+      resetEntryForm();
+      showEntryForm(false);
+      announce('Entry cancelled — nothing was saved.');
+    }
+  });
+  $('entry-dialog').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !entrySaving) {
+      // jsdom never fires 'cancel'; emulate it here (browsers do both).
+      resetEntryForm();
+      showEntryForm(false);
+      announce('Entry cancelled — nothing was saved.');
+    }
   });
   $('entry-customer').addEventListener('change', async (e) => {
     await fillProjectSelect($('entry-project'), e.target.value, null);

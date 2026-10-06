@@ -225,7 +225,7 @@ td.cell.locked .cell-input { opacity: .6; }
 }
 
 /* ------------------------------------------- inline dialog (#102) ------- */
-#app-dialog, #wizard-dialog {
+#app-dialog, #wizard-dialog, #entry-dialog {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.1rem 1.2rem 1rem;
@@ -235,8 +235,8 @@ td.cell.locked .cell-input { opacity: .6; }
   color: var(--text);
   box-shadow: 0 10px 30px rgba(44, 0, 30, 0.35);
 }
-#app-dialog::backdrop, #wizard-dialog::backdrop { background: rgba(44, 0, 30, 0.55); } /* dark aubergine */
-#app-dialog h2, #wizard-dialog h2 { margin: 0 0 .4rem; font-size: 1.05rem; }
+#app-dialog::backdrop, #wizard-dialog::backdrop, #entry-dialog::backdrop { background: rgba(44, 0, 30, 0.55); } /* dark aubergine */
+#app-dialog h2, #wizard-dialog h2, #entry-dialog h2 { margin: 0 0 .4rem; font-size: 1.05rem; }
 #dlg-message { margin: 0 0 .8rem; white-space: pre-line; }
 #dlg-input-wrap { display: block; margin: 0 0 .9rem; }
 #dlg-input-wrap[hidden] { display: none; }
@@ -314,3 +314,8 @@ td.cell.locked .cell-input { opacity: .6; }
 .ip-letter { white-space: pre-line; color: var(--fg); margin: .3rem 0 .6rem; }
 #invoice-table tbody tr { cursor: default; }
 #invoice-table tbody tr[tabindex="0"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ---- focused Day-entry dialog (#145) ---- */
+#entry-dialog { max-width: 28rem; }
+#entry-dialog form.card { box-shadow: none; padding: 0; margin: 0; }
+#entry-dialog .field { margin: 0 0 .7rem; }
