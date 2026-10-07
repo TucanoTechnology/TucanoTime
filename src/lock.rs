@@ -31,9 +31,17 @@ impl LockReason {
     }
 }
 
+/// The backing collection could not be read, so the lock state of an entry
+/// cannot be verified (#185). Handlers must treat this as **fail closed**:
+/// refuse the write (503), never allow it because verification failed.
+#[derive(Debug)]
+pub struct LockUnavailable(pub String);
+
 pub trait EntryLock: Send + Sync {
-    /// `Some(reason)` if the entry is locked and must not be edited or deleted.
-    fn entry_lock(&self, entry_id: Uuid) -> Option<LockReason>;
+    /// `Ok(Some(reason))` if the entry is locked and must not be edited or
+    /// deleted; `Ok(None)` if provably unlocked; `Err` if the state cannot be
+    /// verified — callers must fail closed (#185).
+    fn entry_lock(&self, entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable>;
 }
 
 /// Default: nothing is locked.
@@ -41,12 +49,13 @@ pub trait EntryLock: Send + Sync {
 pub struct NoLocks;
 
 impl EntryLock for NoLocks {
-    fn entry_lock(&self, _entry_id: Uuid) -> Option<LockReason> {
-        None
+    fn entry_lock(&self, _entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        Ok(None)
     }
 }
 
-/// Any provider that locks the entry wins.
+/// Any provider that locks the entry wins; a provider that cannot verify
+/// fails the whole check closed (#185).
 pub struct CombinedLocks {
     providers: Vec<Box<dyn EntryLock>>,
 }
@@ -58,8 +67,13 @@ impl CombinedLocks {
 }
 
 impl EntryLock for CombinedLocks {
-    fn entry_lock(&self, entry_id: Uuid) -> Option<LockReason> {
-        self.providers.iter().find_map(|p| p.entry_lock(entry_id))
+    fn entry_lock(&self, entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        for provider in &self.providers {
+            if let Some(reason) = provider.entry_lock(entry_id)? {
+                return Ok(Some(reason));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -77,10 +91,12 @@ impl InvoiceLock {
 }
 
 impl EntryLock for InvoiceLock {
-    fn entry_lock(&self, entry_id: Uuid) -> Option<LockReason> {
-        self.store
+    fn entry_lock(&self, entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        let invoices = self
+            .store
             .list_invoices()
-            .ok()?
+            .map_err(|e| LockUnavailable(e.to_string()))?;
+        Ok(invoices
             .iter()
             .find(|inv| {
                 // Open invoices freeze their entries; #114 adds the
@@ -89,7 +105,7 @@ impl EntryLock for InvoiceLock {
             })
             .map(|inv| LockReason::Invoiced {
                 id: inv.number.clone(),
-            })
+            }))
     }
 }
 
@@ -106,10 +122,12 @@ impl SubmissionLock {
 }
 
 impl EntryLock for SubmissionLock {
-    fn entry_lock(&self, entry_id: Uuid) -> Option<LockReason> {
-        self.store
+    fn entry_lock(&self, entry_id: Uuid) -> Result<Option<LockReason>, LockUnavailable> {
+        let submissions = self
+            .store
             .list_submissions()
-            .ok()?
+            .map_err(|e| LockUnavailable(e.to_string()))?;
+        Ok(submissions
             .iter()
             .find(|s| {
                 (s.state == crate::domain::SubmissionState::Submitted
@@ -118,6 +136,6 @@ impl EntryLock for SubmissionLock {
             })
             .map(|s| LockReason::Submitted {
                 id: s.week_start.format("%Y-%m-%d").to_string(),
-            })
+            }))
     }
 }
