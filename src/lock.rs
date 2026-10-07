@@ -77,9 +77,12 @@ impl EntryLock for CombinedLocks {
     }
 }
 
-/// Lock provider backed by issued invoices: an entry referenced by an
-/// `issued` invoice is frozen (#8). Reads are unaffected; only edit/delete
-/// consult this.
+/// Lock provider backed by *open* invoices (`InvoiceStatus::is_open()` =
+/// `issued | partly_paid`, #8/#114): an entry referenced by one is frozen.
+/// Settled (`paid`) and written-off invoices deliberately release their
+/// entries — the issued document can no longer change (rate snapshots), and
+/// the timesheet stays correctable (decision recorded in AGENTS.md /
+/// adr-001). Reads are unaffected; only edit/delete consult this.
 pub struct InvoiceLock {
     store: std::sync::Arc<crate::store::Store>,
 }
