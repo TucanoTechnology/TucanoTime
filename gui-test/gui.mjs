@@ -117,15 +117,16 @@ check('redundant Invoice and Timer shortcut buttons are absent',
   !window.document.getElementById('shortcut-invoices') && !window.document.getElementById('shortcut-timer'));
 const timerOpen = window.document.getElementById('timer-open');
 const timerSetup = window.document.getElementById('timerbar');
-// The heading-slot layout: Track time LEADS the left cluster (where the
-// section H2 used to be), timer follows, navigation centered, quiet links right.
-check('Track time leads the day bar left cluster before the timer',
-  window.document.getElementById('day-add').previousElementSibling === null
-  && window.document.getElementById('day-add').nextElementSibling.id === 'timer-open'
-  && window.document.getElementById('day-today').parentElement.className.includes('day-end'));
-check('week bar mirrors the placement',
-  window.document.getElementById('week-track').parentElement.className.includes('day-actions')
-  && window.document.getElementById('week-today').parentElement.className.includes('day-end'));
+// Heading-slot layout: Track time lives in .ts-head beside the Day|Week|
+// Calendar segments (one button for the whole section); the bars keep the
+// timer cluster, centered navigation and quiet links.
+check('Track time sits in the timesheet heading row beside the segments',
+  window.document.getElementById('day-add').parentElement.className.includes('ts-head')
+  && window.document.getElementById('day-add').nextElementSibling.id === 'ts-seg');
+check('bars hold timer/nav/links only',
+  window.document.getElementById('timer-open').parentElement.className.includes('day-actions')
+  && window.document.getElementById('week-today').parentElement.className.includes('day-end')
+  && !window.document.getElementById('week-track'));
 check('timer selections are hidden until requested', timerSetup.hidden);
 timerOpen.click();
 check('Start timer reveals setup and focuses customer',
@@ -758,6 +759,26 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('Today jumps to the current month (#140)',
     window.document.getElementById('cal-label').textContent.includes(
       ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(curMonth.slice(5,7)) - 1]));
+  // #231: with the Calendar segment active, leave Timesheets via the sidebar rail.
+  // The panel sat *outside* panel-timesheet once, so nothing hid it and the month
+  // grid stayed visible on every section. jsdom's `hidden` does not inherit, so
+  // assert both halves: the panel nests inside the section, and navigation hides
+  // the section.
+  window.document.getElementById('ts-cal').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  check('calendar segment panel nests inside the timesheet section (#231)',
+    window.document.getElementById('panel-calendar').closest('#panel-timesheet') !== null
+    && window.document.getElementById('panel-calendar').hidden === false);
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(350);
+  check('navigating away hides the timesheet section that contains the calendar (#231)',
+    window.document.getElementById('panel-timesheet').hidden === true);
+  window.document.getElementById('tab-timesheet').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  check('returning to Timesheets keeps the calendar segment selected and shown (#231)',
+    window.document.getElementById('panel-timesheet').hidden === false
+    && window.document.getElementById('panel-calendar').hidden === false
+    && window.document.getElementById('ts-cal').getAttribute('aria-selected') === 'true');
   window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 }
 
