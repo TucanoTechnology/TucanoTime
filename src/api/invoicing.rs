@@ -50,10 +50,6 @@ fn build_draft(
                 .collect()
         }
     };
-    let mut tasks = Vec::new();
-    for p in &projects {
-        tasks.extend(app.store.list_tasks(customer.id, &p.code.0)?);
-    }
     let users = app.store.list_users()?;
     let entries = app.store.list_range(from, to)?;
     let expenses = app.store.list_expenses()?;
@@ -74,7 +70,6 @@ fn build_draft(
         .collect();
     let sources = crate::domain::InvoiceSources {
         projects: &projects,
-        tasks: &tasks,
         users: &users,
         entries: &entries,
         expenses: &expenses,
@@ -250,19 +245,24 @@ pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) ->
     let template = load_template(&app)?;
     // Payment terms (#116): customer -> org template -> legacy net-14 from
     // period_to (the fallback keeps its exact original arithmetic).
-    let due = resolve_due_date(&invoice, &customer, &template, app.clock.now());
+    // #190: capture the clock ONCE so the snapshot's issued_at and the value
+    // the store persists are identical (three separate now() calls could
+    // straddle a tick — visible at midnight boundaries and it breaks the
+    // "re-render yields identical bytes" determinism claim).
+    let now = app.clock.now();
+    let due = resolve_due_date(&invoice, &customer, &template, now);
     // Render against the to-be-issued snapshot: the PDF is the issue-time
     // document, and bytes are pure in this state (legacy re-renders match).
     let mut snapshot = invoice;
     snapshot.status = crate::domain::InvoiceStatus::Issued;
-    snapshot.issued_at = Some(app.clock.now());
+    snapshot.issued_at = Some(now);
     snapshot.due_date = Some(due);
     let mut doc =
         crate::pdf::doc_for_labeled(&snapshot, &customer, &org_for(&app)?, &template.labels);
     let content = content_for(&snapshot, &customer, &template);
     crate::template::apply_doc_content(&mut doc, &content);
     let pdf = crate::pdf::render_invoice_pdf(&doc);
-    let issued = app.store.issue_invoice(id, app.clock.now(), due, &pdf)?;
+    let issued = app.store.issue_invoice(id, now, due, &pdf)?;
     Ok(Json(issued).into_response())
 }
 
@@ -278,16 +278,18 @@ pub async fn invoice_pdf(State(app): State<AppState>, Path(id): Path<Uuid>) -> A
         ));
     }
     let (bytes, filename) = match app.store.invoice_pdf_bytes(id)? {
-        Some(b) => (b, format!("{}.pdf", sanitize_number(&invoice.number))),
+        Some(b) => (
+            b,
+            format!("{}.pdf", crate::domain::safe_filename(&invoice.number)),
+        ),
         None => {
             let b = render_pdf_now(&app, &invoice)?;
             // Persist the archive + hint; a failure here is a plain 500 and
             // costs nothing (the invoice JSON remains the record of truth).
             let attached = app.store.attach_invoice_pdf(id, &b, app.clock.now())?;
-            let name = attached
-                .pdf
-                .map(|h| h.filename)
-                .unwrap_or_else(|| format!("{}.pdf", sanitize_number(&invoice.number)));
+            let name = attached.pdf.map(|h| h.filename).unwrap_or_else(|| {
+                format!("{}.pdf", crate::domain::safe_filename(&invoice.number))
+            });
             (b, name)
         }
     };
@@ -315,18 +317,6 @@ pub async fn invoice_pdf(State(app): State<AppState>, Path(id): Path<Uuid>) -> A
 
 /// Download names come from `Invoice::number` (minted server-side), sanitised
 /// defensively — never from user input (#50).
-fn sanitize_number(number: &str) -> String {
-    number
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -467,7 +457,7 @@ pub(crate) fn invoice_pdf_for_delivery(
             .pdf
             .as_ref()
             .map(|h| h.filename.clone())
-            .unwrap_or_else(|| format!("{}.pdf", sanitize_number(&invoice.number)));
+            .unwrap_or_else(|| format!("{}.pdf", crate::domain::safe_filename(&invoice.number)));
         return Ok((name, bytes));
     }
     let bytes = render_pdf_now(app, invoice)?;
@@ -477,7 +467,7 @@ pub(crate) fn invoice_pdf_for_delivery(
     let name = attached
         .pdf
         .map(|h| h.filename)
-        .unwrap_or_else(|| format!("{}.pdf", sanitize_number(&invoice.number)));
+        .unwrap_or_else(|| format!("{}.pdf", crate::domain::safe_filename(&invoice.number)));
     Ok((name, bytes))
 }
 
@@ -828,6 +818,39 @@ pub struct SyncInput {
     pub provider: String,
 }
 
+/// Record one sync attempt from a provider push outcome, translating the
+/// Ok/Err into Synced/Failed with the shared `SyncAttempt` shape (#189).
+fn record_sync_from(
+    app: &AppState,
+    provider: &str,
+    kind: &str,
+    invoice: &Invoice,
+    detail: String,
+    outcome: Result<String, crate::accounting::SyncError>,
+) -> Result<crate::accounting::SyncRecord, ApiError> {
+    let (remote_id, status, error) = match outcome {
+        Ok(remote) => (remote, crate::accounting::SyncStatus::Synced, String::new()),
+        Err(e) => (
+            String::new(),
+            crate::accounting::SyncStatus::Failed,
+            e.to_string(),
+        ),
+    };
+    Ok(crate::accounting::record_sync(
+        &app.store,
+        crate::accounting::SyncAttempt {
+            provider,
+            kind,
+            invoice,
+            remote_id,
+            status,
+            error,
+            now: app.clock.now(),
+            detail,
+        },
+    )?)
+}
+
 /// Copies an issued invoice to the accounting provider (#33). Idempotent:
 /// a previously synced invoice is a no-op, and failures are recorded rather
 /// than thrown (sync must never block the invoice flow).
@@ -895,50 +918,27 @@ pub async fn sync_invoice(
             return Ok(Json(serde_json::json!({ "record": prev, "noop": true })).into_response());
         }
         let mut last: Option<crate::accounting::SyncRecord> = None;
-        for (detail, amount, reference, paid_at) in &pending {
-            last = Some(
-                match provider.push_payment(
-                    &prev.remote_id,
-                    *amount,
-                    &invoice.currency.0,
-                    reference,
-                    *paid_at,
-                ) {
-                    Ok(remote) => {
-                        app.audit.record(
-                            "accounting_payment_sync",
-                            &invoice.number,
-                            app.clock.now(),
-                        );
-                        crate::accounting::record_sync(
-                            &app.store,
-                            crate::accounting::SyncAttempt {
-                                provider: provider.name(),
-                                kind: "payment",
-                                invoice: &invoice,
-                                remote_id: remote,
-                                status: crate::accounting::SyncStatus::Synced,
-                                error: String::new(),
-                                now: app.clock.now(),
-                                detail: detail.clone(),
-                            },
-                        )?
-                    }
-                    Err(e) => crate::accounting::record_sync(
-                        &app.store,
-                        crate::accounting::SyncAttempt {
-                            provider: provider.name(),
-                            kind: "payment",
-                            invoice: &invoice,
-                            remote_id: String::new(),
-                            status: crate::accounting::SyncStatus::Failed,
-                            error: e.to_string(),
-                            now: app.clock.now(),
-                            detail: detail.clone(),
-                        },
-                    )?,
-                },
+        for pending in &pending {
+            let outcome = provider.push_payment(
+                &prev.remote_id,
+                pending.1,
+                &invoice.currency.0,
+                &pending.2,
+                pending.3,
             );
+            let rec = record_sync_from(
+                &app,
+                provider.name(),
+                "payment",
+                &invoice,
+                pending.0.clone(),
+                outcome,
+            )?;
+            if rec.status == crate::accounting::SyncStatus::Synced {
+                app.audit
+                    .record("accounting_payment_sync", &invoice.number, app.clock.now());
+            }
+            last = Some(rec);
         }
         return Ok(Json(
             serde_json::json!({ "record": last, "invoice_synced": prev.remote_id, "payments": pending.len() }),
@@ -953,74 +953,46 @@ pub async fn sync_invoice(
     match provider.push_invoice(&doc, &key) {
         Ok(remote) => {
             // Synced invoices also carry their ledger, in real amounts.
-            for (detail, amount, reference, paid_at) in &pending {
-                if let Err(e) = provider.push_payment(
+            for pending in &pending {
+                let outcome = provider.push_payment(
                     &remote,
-                    *amount,
+                    pending.1,
                     &invoice.currency.0,
-                    reference,
-                    *paid_at,
-                ) {
-                    crate::accounting::record_sync(
-                        &app.store,
-                        crate::accounting::SyncAttempt {
-                            provider: provider.name(),
-                            kind: "payment",
-                            invoice: &invoice,
-                            remote_id: String::new(),
-                            status: crate::accounting::SyncStatus::Failed,
-                            error: e.to_string(),
-                            now: app.clock.now(),
-                            detail: detail.clone(),
-                        },
-                    )?;
+                    &pending.2,
+                    pending.3,
+                );
+                if let Err(e) = &outcome {
                     tracing::warn!(error = %e, "payment sync failed (invoice synced anyway)");
-                } else {
-                    crate::accounting::record_sync(
-                        &app.store,
-                        crate::accounting::SyncAttempt {
-                            provider: provider.name(),
-                            kind: "payment",
-                            invoice: &invoice,
-                            remote_id: String::new(),
-                            status: crate::accounting::SyncStatus::Synced,
-                            error: String::new(),
-                            now: app.clock.now(),
-                            detail: detail.clone(),
-                        },
-                    )?;
                 }
+                record_sync_from(
+                    &app,
+                    provider.name(),
+                    "payment",
+                    &invoice,
+                    pending.0.clone(),
+                    outcome,
+                )?;
             }
-            let rec = crate::accounting::record_sync(
-                &app.store,
-                crate::accounting::SyncAttempt {
-                    provider: provider.name(),
-                    kind: "invoice",
-                    invoice: &invoice,
-                    remote_id: remote,
-                    status: crate::accounting::SyncStatus::Synced,
-                    error: String::new(),
-                    now: app.clock.now(),
-                    detail: String::new(),
-                },
+            let rec = record_sync_from(
+                &app,
+                provider.name(),
+                "invoice",
+                &invoice,
+                String::new(),
+                Ok(remote),
             )?;
             app.audit
                 .record("accounting_sync", &invoice.number, app.clock.now());
             Ok(Json(serde_json::json!({ "record": rec })).into_response())
         }
         Err(e) => {
-            let rec = crate::accounting::record_sync(
-                &app.store,
-                crate::accounting::SyncAttempt {
-                    provider: provider.name(),
-                    kind: "invoice",
-                    invoice: &invoice,
-                    remote_id: String::new(),
-                    status: crate::accounting::SyncStatus::Failed,
-                    error: e.to_string(),
-                    now: app.clock.now(),
-                    detail: String::new(),
-                },
+            let rec = record_sync_from(
+                &app,
+                provider.name(),
+                "invoice",
+                &invoice,
+                String::new(),
+                Err(e),
             )?;
             Ok(Json(serde_json::json!({ "record": rec, "failed": true })).into_response())
         }
