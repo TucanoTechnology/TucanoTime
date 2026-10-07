@@ -1063,6 +1063,49 @@ async fn concurrent_identical_webhook_records_exactly_one_payment() {
         "duplicate event must record exactly one payment"
     );
     assert_eq!(payments[0]["amount_minor"], 6000);
+
+    let make_event = |event_id: &str| {
+        format!(
+            "{{\"id\":\"{event_id}\",\"type\":\"checkout.session.completed\",\"payment_status\":\"paid\",\"amount_minor\":10000,\"currency\":\"EUR\",\"client_reference_id\":\"pay_ref_dup\",\"metadata\":{{\"invoice_number\":\"{number}\"}}}}"
+        )
+    };
+    let event_a = make_event("evt_distinct_a");
+    let event_b = make_event("evt_distinct_b");
+    let sig_a = format!(
+        "sha256={}",
+        tucano_time::payments::sign("whsec_dup", &event_a)
+    );
+    let sig_b = format!(
+        "sha256={}",
+        tucano_time::payments::sign("whsec_dup", &event_b)
+    );
+    let ((status_a, body_a), (status_b, body_b)) = tokio::join!(
+        webhook_post(&app.router, "stripe", &event_a, Some(&sig_a)),
+        webhook_post(&app.router, "stripe", &event_b, Some(&sig_b)),
+    );
+    assert_ne!(
+        status_a, status_b,
+        "only one distinct payment fits the remaining balance"
+    );
+    assert!(
+        [status_a, status_b].contains(&StatusCode::CONFLICT),
+        "the unrecorded competing event must remain retryable: {body_a} {body_b}"
+    );
+    let (_s, after_race) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let race_payments = after_race["payments"].as_array().unwrap();
+    assert_eq!(
+        race_payments.len(),
+        2,
+        "only one competing event may be recorded"
+    );
+    assert_eq!(
+        race_payments
+            .iter()
+            .map(|payment| payment["amount_minor"].as_u64().unwrap())
+            .sum::<u64>(),
+        16000,
+        "recorded total must not exceed the invoice balance"
+    );
 }
 
 // ------------------------------------------------------------------ tasks --
