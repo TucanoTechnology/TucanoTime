@@ -95,6 +95,7 @@
            page title instead of adding outline structure (Ubuntu guidance:
            one H1 per page, H2s for real sections). -->
       <div class="ts-head">
+        <button type="button" id="day-add" class="primary" data-icon="plus">Track time</button>
         <div class="seg" role="tablist" aria-label="Timesheet view" id="ts-seg">
           <button type="button" role="tab" id="ts-day" aria-controls="panel-day" aria-selected="true">Day</button>
           <button type="button" role="tab" id="ts-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
@@ -107,7 +108,6 @@
       <input type="date" id="day-date" hidden>
       <div class="day-bar p-card">
         <div class="day-actions">
-          <button type="button" id="day-add" class="primary" data-icon="plus">Track time</button>
           <button type="button" id="timer-open" data-icon="play" aria-controls="timerbar" aria-expanded="false">Start timer</button>
           <span id="timer-display" class="timer-display" role="timer" hidden>00:00:00</span>
           <button type="button" id="timer-stop" data-icon="stop" class="secondary" hidden>Stop</button>
@@ -201,9 +201,6 @@
     <section id="panel-week" role="tabpanel" aria-labelledby="ts-week" tabindex="0" hidden>
       <input type="date" id="week-date" hidden>
       <div class="day-bar">
-        <div class="day-actions">
-          <button type="button" id="week-track" class="primary" data-icon="plus">Track time</button>
-        </div>
         <nav class="day-nav" aria-label="Change week">
           <button type="button" id="week-prev" aria-label="Previous week" title="Previous week"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
           <span id="week-label" class="day-label"></span>

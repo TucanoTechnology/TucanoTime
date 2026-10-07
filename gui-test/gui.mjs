@@ -117,15 +117,16 @@ check('redundant Invoice and Timer shortcut buttons are absent',
   !window.document.getElementById('shortcut-invoices') && !window.document.getElementById('shortcut-timer'));
 const timerOpen = window.document.getElementById('timer-open');
 const timerSetup = window.document.getElementById('timerbar');
-// The heading-slot layout: Track time LEADS the left cluster (where the
-// section H2 used to be), timer follows, navigation centered, quiet links right.
-check('Track time leads the day bar left cluster before the timer',
-  window.document.getElementById('day-add').previousElementSibling === null
-  && window.document.getElementById('day-add').nextElementSibling.id === 'timer-open'
-  && window.document.getElementById('day-today').parentElement.className.includes('day-end'));
-check('week bar mirrors the placement',
-  window.document.getElementById('week-track').parentElement.className.includes('day-actions')
-  && window.document.getElementById('week-today').parentElement.className.includes('day-end'));
+// Heading-slot layout: Track time lives in .ts-head beside the Day|Week|
+// Calendar segments (one button for the whole section); the bars keep the
+// timer cluster, centered navigation and quiet links.
+check('Track time sits in the timesheet heading row beside the segments',
+  window.document.getElementById('day-add').parentElement.className.includes('ts-head')
+  && window.document.getElementById('day-add').nextElementSibling.id === 'ts-seg');
+check('bars hold timer/nav/links only',
+  window.document.getElementById('timer-open').parentElement.className.includes('day-actions')
+  && window.document.getElementById('week-today').parentElement.className.includes('day-end')
+  && !window.document.getElementById('week-track'));
 check('timer selections are hidden until requested', timerSetup.hidden);
 timerOpen.click();
 check('Start timer reveals setup and focuses customer',
