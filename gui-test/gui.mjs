@@ -758,6 +758,26 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('Today jumps to the current month (#140)',
     window.document.getElementById('cal-label').textContent.includes(
       ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(curMonth.slice(5,7)) - 1]));
+  // #231: with the Calendar segment active, leave Timesheets via the sidebar rail.
+  // The panel sat *outside* panel-timesheet once, so nothing hid it and the month
+  // grid stayed visible on every section. jsdom's `hidden` does not inherit, so
+  // assert both halves: the panel nests inside the section, and navigation hides
+  // the section.
+  window.document.getElementById('ts-cal').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  check('calendar segment panel nests inside the timesheet section (#231)',
+    window.document.getElementById('panel-calendar').closest('#panel-timesheet') !== null
+    && window.document.getElementById('panel-calendar').hidden === false);
+  window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(350);
+  check('navigating away hides the timesheet section that contains the calendar (#231)',
+    window.document.getElementById('panel-timesheet').hidden === true);
+  window.document.getElementById('tab-timesheet').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(400);
+  check('returning to Timesheets keeps the calendar segment selected and shown (#231)',
+    window.document.getElementById('panel-timesheet').hidden === false
+    && window.document.getElementById('panel-calendar').hidden === false
+    && window.document.getElementById('ts-cal').getAttribute('aria-selected') === 'true');
   window.document.getElementById('ts-week').dispatchEvent(new window.Event('click', { bubbles: true }));
 }
 

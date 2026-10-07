@@ -222,10 +222,11 @@
       </div>
     </section>
 
-    </section><!-- /panel-timesheet -->
-
     <!-- CALENDAR VIEW (#140): month overview of LOGGED time; distinct from
-         the imported-calendar events list further down. -->
+         the imported-calendar events list further down. Must stay *inside*
+         panel-timesheet: sidebar navigation only hides the panels named by
+         #tabs aria-controls, so a sibling here would remain visible on every
+         section once the Calendar segment is selected. -->
     <section id="panel-calendar" role="tabpanel" aria-labelledby="ts-cal" tabindex="0" hidden>
       <div class="cal-nav">
         <button type="button" id="cal-prev" aria-label="Previous month" title="Previous month"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
@@ -241,6 +242,8 @@
       </table>
       <p class="hint">Click a day with entries to open it in the Day view. This calendar shows your logged time; the Calendar events section below lists imported calendar items (#36).</p>
     </section>
+
+    </section><!-- /panel-timesheet -->
 
     <!-- CUSTOMERS (#182: the combined workspace split into three Setup
          sections; row "Projects" actions cross-navigate with filters). -->
