@@ -9,6 +9,11 @@ TUCANO_DATA_DIR=$(mktemp -d) TUCANO_PORT=8099 TUCANO_STRIPE_FAKE=1 ./target/rele
 cd gui-test && npm install && npm test
 ```
 
+`npm test` is the live-server smoke flow only. The full CI gate is
+`node contrast.mjs`, the offline jsdom unit suites (`npm run test:jsdom` —
+every `*.test.mjs` file) and finally `npm test`, in that order; run all three
+locally before opening a GUI PR.
+
 Checks cover: login, day view (#12) rows/week strip/copy-forward, inline add
 form, week grid (#13), customers/projects/tasks, reports, invoices, expenses,
 submissions, the inline `<dialog>` confirm/prompt flows (#102) and the config
