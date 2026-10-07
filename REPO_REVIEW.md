@@ -260,3 +260,52 @@ runtime recorded honestly in §1. Remaining risks recorded on the tickets:
 stage 2–3 component swaps need per-stage manual keyboard/AT passes, and the
 claims-as-lock-provider strengthening stays a documented follow-up in
 `src/lock.rs`.
+
+---
+
+## 8. Round 2 — 2026-10-07, post-programme baseline `07d72d3`
+
+Second full review after every round-1 PR merged (#193–#213 + the dependabot
+series). Same rules: verify before claiming; bugs separate from refactors; no
+invariant weakening.
+
+**Method.** Cross-boundary seams got the most attention — the places where
+independently-reviewed PRs meet (lock semantics vs GUI previews, docs vs code,
+dependabot crypto migrations, #182's new async code). Automated checks re-run:
+routes ↔ `openapi.json` (0 missing both directions), no `innerHTML`
+(3 mentions, all comments), constant-time compares survived the hmac 0.13
+migration (`verify_slice` ×3), vendored hashes + rebuild determinism,
+main CI 6/6 success, gitleaks/actionlint/cargo-deny green.
+
+**Positive (worth recording, not action):** the #185 fail-closed seam, the #187
+validation strictness, the #186 currency partitioning and the #190 leakage fixes
+all hold up at their seams; the template-preview `from_timestamp(0,0).unwrap()`
+sits on a provably-valid epoch constant; `finish_timer`'s *failure-retry* path
+is genuinely safe.
+
+### Findings → tickets
+
+| # | Finding | Severity | Ticket |
+| --- | --- | --- | --- |
+| R2-1 | `finish_timer` writes the entry before checking the timer exists; two concurrent `POST /timer/stop` calls double-log time (both `get_timer` reads succeed unlocked at `api/timer_calendar.rs:72`) | HIGH (data) | **#214** |
+| R2-2 | Committed `Cargo.lock` is not the resolver's output: `cargo build --locked` fails on main; a plain check rewrites 101 lines incl. a base64ct bump — release-image reproducibility is illusory. Cause: `-X theirs` lock resolutions during the dependabot merge queue | P1 | **#215** |
+| R2-3 | AGENTS.md (merged #192) says locking covers "issued, partly paid **or paid**"; `is_open()` = `Issued \| PartlyPaid` — paid is *excluded*. `lock.rs:80-82` header still says "issued". Docs claim an invariant the code deliberately doesn't have; the release-on-settle lifecycle needs stating as a decision | MED (docs/architecture) | **#216** |
+| R2-4 | `weekLockIds` (web/app.js:992) previews locks from `issued` only; server locks `issued \| partly_paid` → entries on partly-paid invoices look editable, save dies with 409. The correct predicate already exists three times in the dashboard code — one shared helper to rule them | MED (UX correctness) | **#217** |
+| R2-5 | Lock verify/write split across two lock acquisitions (entry update/delete, expense delete) lets an issue race through; `create_submission` re-scans invoices+submissions **per entry** (O(N×M) after #185 made every check a full read). Fix: verify inside the store transaction; one snapshot per request | MED (race + perf) | **#218** |
+| R2-6 | #182 follow-through: `saveProject` re-scopes the filter without resyncing `#proj-filter-customer` (control lies), the new `refreshProjectTable`/`refreshTaskTable` lack the #188 stale-response guards, and ~20 dead CSS selectors from the old workspace remain | LOW-MED | **#219** |
+| R2-7 | Deferred hygiene batch: five invariant `expect()`/`unwrap()` sites, `pay_invoice`'s `starts_with("payment of ")` status branch, duplicated `ensure_admin` inline checks, and round-1's open item C3 (`ProjectDoc` vs `Project::Deserialize`) | LOW | **#220** |
+
+Not everything is new: R2-3/R2-5/R2-7 are explicitly the "recorded
+follow-ups" from #190/#192's close comments, promoted to tickets with
+evidence; R2-1/2/4/6 are first-observations of the merged code.
+
+### Deliberate non-findings (checked, clean)
+
+- `UpdateError<E>` plumbing (#187): both callers map typed errors; no
+  substring parsing survives anywhere (`grep` for `.contains("` on error
+  strings: none in api/).
+- `revenue_by_currency` + per-currency profitability (#186): rows partition at
+  every level; status counts are unit counts — safe cross-currency.
+- Vault migration to `Nonce::generate()` (#205): OS CSPRNG via the
+  `getrandom` feature chain; on-disk blob layout unchanged.
+- jsdom 30 + contrast (CI gates) pass on the merged web/ tree.
