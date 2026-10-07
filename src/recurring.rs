@@ -83,12 +83,6 @@ impl RecurringJob {
                     .store
                     .list_projects(customer.id)
                     .map_err(|e| e.to_string())?;
-                let mut tasks = Vec::new();
-                for p in &projects {
-                    if let Ok(ts) = self.store.list_tasks(customer.id, &p.code.0) {
-                        tasks.extend(ts);
-                    }
-                }
                 let users = self.store.list_users().map_err(|e| e.to_string())?;
                 let entries = self.store.list_range(from, to).map_err(|e| e.to_string())?;
                 let expenses = self.store.list_expenses().map_err(|e| e.to_string())?;
@@ -109,7 +103,6 @@ impl RecurringJob {
                     .collect();
                 let sources = crate::domain::InvoiceSources {
                     projects: &projects,
-                    tasks: &tasks,
                     users: &users,
                     entries: &entries,
                     expenses: &expenses,

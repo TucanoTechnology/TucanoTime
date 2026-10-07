@@ -96,8 +96,13 @@ check('wizard starts on the welcome step', !window.document.getElementById('wz-s
 window.document.getElementById('wz-later').dispatchEvent(new window.Event('click', { bubbles: true }));
 check('"Set up later" dismisses the wizard cleanly', !wzOpen());
 // The setup wizard is a utility action after core and secondary navigation.
-const wzOrder = [...window.document.querySelectorAll('#tabs button')].map((b) => b.id);
-check('wizard entry is the last item in the sidebar (#125)', wzOrder[wzOrder.length - 1] === 'wizard-open');
+// #191 moved the utility action out of the tablist (ARIA required-owned-
+// children); #125's invariant is that the wizard stays the LAST sidebar
+// action, sitting between the tablist and the colour-mode switch.
+const navButtons = [...window.document.querySelectorAll('nav[aria-label="Sections"] button')].map((b) => b.id);
+const tablistButtons = [...window.document.querySelectorAll('#tabs button')].map((b) => b.id);
+check('wizard entry is the last sidebar action, outside the tablist (#125/#191)',
+  navButtons[navButtons.length - 1] === 'wizard-open' && !tablistButtons.includes('wizard-open'));
 
 // #142: grouped rail + shortcuts.
 check('core MVP navigation comes first: Timesheets, Customers, Invoices',
