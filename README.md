@@ -23,6 +23,7 @@ suite — file-based (no database), one container, browser GUI.
 - **API-level integrations** — hosted checkout links (#34) and accounting sync (#33) remain available on the API and background retry job, but are no longer surfaced as per-row invoice buttons (#129).
 - **Expenses** — record costs per project with categories, billable flags, and optional attached receipts; billable expenses roll into invoices (#25).
 - **Timesheet submissions** — submit a week for approval; submitted/approved weeks **lock** their entries (shared lock seam); rejecting releases them.
+- **Also shipped** — running **timer** and month calendar of logged time (#14/#140); imported **calendar events** with Google OAuth (#15/#36); **SSO sign-in** (OIDC/signed-token, JIT provisioning — Beta adapters, #32); per-user **notifications** (#22/#52); **recurring invoice schedules** (weekly/monthly/quarterly, drafts still need an explicit issue, #26); **expense reimbursement claims** (#24); **budgets** burn alerts + per-project budget vs actual (#30) and **profitability** reporting (revenue vs labour cost, admin-only, #29); **email delivery** of invoices with the archived PDF attached (#35/#130); role-based access — members see only their own time (#51); an **audit log** (#52) and an operator **backup/restore CLI** on the same image (#94).
 
 ## Quick start (Docker)
 
@@ -91,14 +92,30 @@ passwords, HMAC-signed HttpOnly cookies). No users exist initially:
 
 - On first visit the app shows a **create-administrator** form (the first account
   becomes an `admin`). After that, login is required for all data.
-- Set `TUCANO_SESSION_SECRET` (e.g. `openssl rand -hex 32`) so sessions survive
-  restarts; unset, a random per-process key is used (restart logs everyone out).
-- `TUCANO_ENV=production` marks session cookies `Secure` (serve over TLS).
+- Sessions survive restarts out of the box: the signing key is
+  `TUCANO_SESSION_SECRET` / `TUCANO_SESSION_SECRET_FILE` when set, else an
+  auto-created `<data>/session.key` on the volume (#94) — no operator setup
+  needed, and container updates keep everybody signed in.
+- Cookies carry `Secure` when `TUCANO_ENV=production` **and** are plain-HTTP-LAN
+  friendly via the independent `TUCANO_SECURE_COOKIES=0` axis (A5): the key
+  controls secret-strength policy, the flag controls only the cookie attribute.
+
+Environment variables (all optional; precedence env > `config.json` > default):
+
+| Variable | Effect |
+|---|---|
+| `TUCANO_DATA_DIR` | data folder (`/data` in the image) |
+| `TUCANO_PORT` | listen port, default `8080` |
+| `TUCANO_SESSION_SECRET[_FILE]` | session signing key; unset ⇒ auto-persisted `<data>/session.key` |
+| `TUCANO_SECRET_KEY[_FILE]` | 32-byte vault key; unset ⇒ vault disabled (fail-closed) |
+| `TUCANO_ENV=production` | strict secret policy + `Secure` cookies by default |
+| `TUCANO_SECURE_COOKIES=0` | drop the `Secure` flag for plain-HTTP serving on a trusted LAN |
+| `TUCANO_MAX_DOCS` | per-collection document cap (abuse guard) |
 
 ```sh
 docker run -d -p 8080:8080 \
   -e TUCANO_SESSION_SECRET="$(openssl rand -hex 32)" \
-  -v tucanotime-data:/data --name tucanotime tucano-time
+  -v tucanotime-data:/data --name tucanotime tucanotime
 ```
 
 Roles: `admin` (user management) and `member` (timesheet work).
@@ -118,13 +135,13 @@ cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 ```
 
-Storage layout under `TUCANO_DATA_DIR` (the API is the only writer):
-
-```
-customers/<id>.json                       # customer record
-customers/<id>/projects/<CODE>.json       # project codes live inside their customer
-entries/<YYYY-MM-DD>/<id>.json            # one folder per day, one file per entry
-```
+Storage is file-based JSON under `TUCANO_DATA_DIR` (the API is the only
+writer). The canonical layout — customers/projects/tasks, entries by day,
+invoices (+ archived PDFs and the `.seq.json` number ledger), users,
+categories, expenses, submissions, and the `config.json` / `session.key` /
+`secrets.bin` / `audit.log` / `revoked.json` / `scheduler.json` state files —
+is documented in [`AGENTS.md`](AGENTS.md) "Architecture invariants" so there
+is exactly one list to keep current.
 
 The REST surface is defined by [`openapi.json`](openapi.json) and served at
 `/openapi.json`; change both together. See [`AGENTS.md`](AGENTS.md) for the
