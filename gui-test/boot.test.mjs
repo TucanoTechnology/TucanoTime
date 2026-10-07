@@ -136,6 +136,32 @@ refreshInvoices = async () => {};
   dom.window.close();
 });
 
+test('partly-paid invoices lock entries in the preview, paid ones do not (#217)', async () => {
+  // The GUI's optimistic lock preview must agree with InvoiceLock's
+  // is_open() == issued | partly_paid, or saves fail with surprise 409s.
+  const { dom, context } = makeDom();
+  context.api.get = async (path) => {
+    if (path === '/submissions') return { submissions: [] };
+    if (path === '/invoices') {
+      return { invoices: [
+        { id: 'a', status: 'issued', lines: [{ entry_id: 'e-issued' }] },
+        { id: 'b', status: 'partly_paid', lines: [{ entry_id: 'e-partly' }] },
+        { id: 'c', status: 'paid', lines: [{ entry_id: 'e-paid' }] },
+        { id: 'd', status: 'written_off', lines: [{ entry_id: 'e-off' }] },
+        { id: 'e', status: 'draft', lines: [{ entry_id: 'e-draft' }] },
+      ] };
+    }
+    return {};
+  };
+  const ids = await context.weekLockIds();
+  assert.ok(ids.has('e-issued'), 'issued locks');
+  assert.ok(ids.has('e-partly'), 'partly_paid locks (was missing before #217)');
+  assert.ok(!ids.has('e-paid'), 'paid releases');
+  assert.ok(!ids.has('e-off'), 'written_off releases');
+  assert.ok(!ids.has('e-draft'), 'draft never locks');
+  dom.window.close();
+});
+
 test('rapid day navigation renders the newest response, not an older one (#188)', async () => {
   const { dom, context, document } = makeDom();
   context.api.get = (path) => {

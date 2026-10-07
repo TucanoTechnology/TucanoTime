@@ -190,6 +190,11 @@ impl EntryLock for LockOne {
             Ok(None)
         }
     }
+    fn locked_entries(
+        &self,
+    ) -> Result<std::collections::HashSet<uuid::Uuid>, tucano_time::lock::LockUnavailable> {
+        Ok(self.0.into_iter().collect())
+    }
 }
 
 async fn app() -> (Client, tempfile::TempDir) {
@@ -5931,6 +5936,71 @@ async fn second_retainer_close_is_409_not_500() {
     )
     .await;
     assert_eq!(s3, StatusCode::CONFLICT, "draw after close: {b3}");
+}
+
+#[tokio::test]
+async fn expense_on_partly_paid_invoice_stays_locked() {
+    // #218: the expense-delete scan said '== Issued' while the invoice locks
+    // (and the dashboard treats as open) issued | partly_paid — a partial
+    // payment silently unlocked the expense rows sitting on that invoice.
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({"rate_minor": 6000})).await;
+    let (_s, x) = json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(
+            json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1",
+                    "amount_minor":5000,"currency":"EUR","billable":true,"note":"parts"}),
+        ),
+    )
+    .await;
+    let xid = x["id"].as_str().unwrap().to_string();
+    let (_s2, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    assert_eq!(inv["total_minor"], 5000, "expense-only invoice: {inv}");
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    // Partial payment: issued -> partly_paid.
+    let (_sp, paid) = json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{iid}/pay"),
+        Some(json!({"amount_minor": 2000, "reference": "wire-1"})),
+    )
+    .await;
+    assert_eq!(paid["status"], "partly_paid", "{paid}");
+    let (s_del, b_del) = json_req(&app, "DELETE", &format!("/expenses/{xid}"), None).await;
+    assert_eq!(
+        s_del,
+        StatusCode::CONFLICT,
+        "partly_paid must lock its expenses: {b_del}"
+    );
+    assert!(
+        b_del["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("open invoice"),
+        "{b_del}"
+    );
+    // Settle it: only then may the (no longer part of any receivable) expense
+    // be removed — matching the entry-lock lifecycle documented in #216.
+    json_req(
+        &app,
+        "POST",
+        &format!("/invoices/{iid}/pay"),
+        Some(json!({"amount_minor": 3000, "reference": "wire-2"})),
+    )
+    .await;
+    let (s_after, b_after) = json_req(&app, "DELETE", &format!("/expenses/{xid}"), None).await;
+    assert_eq!(s_after, StatusCode::NO_CONTENT, "paid releases: {b_after}");
 }
 
 #[tokio::test]
