@@ -10,7 +10,7 @@ suite — file-based (no database), one container, browser GUI.
 - **First-run wizard** — new users land on a guided modal that creates the first customer and project and drops them straight into a ready entry form; the 🚀 sidebar entry reopens it any time (#111).
 - **Day view** — add, edit and delete line items for a single date.
 - **Week grid** — Mon–Sun overview per customer/project; click a cell to add or adjust.
-- **Customers & project codes** — first-class entities; a customer sets the default currency/rate and each project carries its own currency and rate.
+- **Customers, projects & tasks** — three Setup sections with hierarchy filters (#182): projects filterable by customer, tasks by customer and project; a customer sets the default currency/rate and each project carries its own currency and rate.
 - **Exact money** — rates in minor units and hours in hundredths; no floats on persisted values.
 - **Reports** — totals grouped by customer, project or ISO week; **CSV export** (formula-injection safe).
 - **Invoices** — generate a draft from a period's billable work, snapshotting each entry's rate; issuing **locks** its entries, **archives a PDF** for download, email attachment (#113) and audited PDF copies to third parties such as the accountant (#112); record **full or partial payments** (#114, a per-invoice ledger with a partly-paid state) or **write off** uncollectable balances, and an **outstanding/overdue** dashboard tracks the balance still owed.

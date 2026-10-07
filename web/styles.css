@@ -322,6 +322,10 @@ td.cell.locked .cell-input { opacity: .6; }
 #project-dialog h2, #task-dialog h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
 #project-dialog form, #task-dialog form { margin: 0; }
 .hierarchy-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+/* #182: hierarchy-section filter controls + scope label */
+.filter-field { display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
+.filter-field select { min-width: 11rem; }
+.scope-label { font-weight: 400; color: var(--muted); font-size: .95rem; }
 .hierarchy-selected { background: var(--accent-soft); }
 .hierarchy-selected > th { box-shadow: inset 3px 0 var(--accent); }
 .hierarchy-select { font-weight: 700; text-align: left; white-space: normal; overflow-wrap: anywhere; }

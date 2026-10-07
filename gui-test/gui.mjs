@@ -105,11 +105,11 @@ check('wizard entry is the last sidebar action, outside the tablist (#125/#191)'
   navButtons[navButtons.length - 1] === 'wizard-open' && !tablistButtons.includes('wizard-open'));
 
 // #142: grouped rail + shortcuts.
-check('core MVP navigation comes first: Timesheets, Customers, Invoices',
-  [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(0, 3).map((t) => t.id).join(',') ===
-    'tab-timesheet,tab-customers,tab-invoices');
+check('core MVP navigation comes first, Setup split into three (#142/#182)',
+  [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(0, 5).map((t) => t.id).join(',') ===
+    'tab-timesheet,tab-customers,tab-projects,tab-tasks,tab-invoices');
 check('implemented secondary tools are grouped after the MVP destinations',
-  [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(3).map((t) => t.id).join(',') ===
+  [...window.document.querySelectorAll('#tabs [role="tab"]')].slice(5).map((t) => t.id).join(',') === // after MVP + Setup tabs (#182)
     'tab-expenses,tab-submissions,tab-reports,tab-settings'
   && [...window.document.querySelectorAll('#tabs .nav-label')].map((n) => n.textContent).join(',') ===
     'Track time,Setup,Billing,More tools');
@@ -459,26 +459,27 @@ check('copy previous week is a button rather than a dropdown',
 const tabCust = window.document.getElementById('tab-customers');
 tabCust.dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(250);
-check('customer workspace explains how to begin project setup',
-  !window.document.getElementById('projects-empty-state').hidden
-  && !window.document.getElementById('tasks-empty-state').hidden);
-check('hierarchy creation buttons share one toolbar',
-  [...window.document.querySelectorAll('.hierarchy-actions button')].map((button) => button.id).join(',')
-  === 'customer-new,project-new,task-new');
-check('project and task creation require parent selections',
-  window.document.getElementById('project-new').disabled
-  && window.document.getElementById('task-new').disabled);
-// Click "Projects" on the ACME row to open the project form.
+// #182: three Setup sections replace the combined workspace.
+check('Setup nav exposes Customers, Projects and Tasks sections',
+  ['tab-customers', 'tab-projects', 'tab-tasks'].every((id) => window.document.getElementById(id)));
+check('projects section explains how to begin with an accessible empty state',
+  !window.document.getElementById('projects-empty-state').hidden);
+check('each section carries its own creation toolbar',
+  window.document.querySelectorAll('#panel-customers .hierarchy-actions button').length === 1
+  && window.document.querySelectorAll('#panel-projects .hierarchy-actions button').length === 1
+  && window.document.querySelectorAll('#panel-tasks .hierarchy-actions button').length === 1);
+// Click "Projects" on the ACME row: cross-navigation filters the Projects
+// section (#182) — no shared selection state anymore.
 const projBtn = [...window.document.querySelectorAll('#customer-table button')].find((b) => b.textContent === 'Projects');
 projBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
-await tick(150);
-check('selecting a customer replaces the project empty state with its project list',
+await tick(250);
+check('row action opens the Projects section scoped to that customer',
+  !window.document.getElementById('panel-projects').hidden
+  && window.document.getElementById('proj-filter-customer').value === acmeOpt.value
+  && /ACME/.test(window.document.getElementById('project-scope-label').textContent));
+check('scoped list renders that customer only (empty state replaced by rows)',
   window.document.getElementById('projects-empty-state').hidden
-  && !window.document.getElementById('tasks-empty-state').hidden);
-check('selected customer is highlighted and enables only project creation',
-  window.document.querySelector('#customer-table .hierarchy-selected .hierarchy-select').getAttribute('aria-pressed') === 'true'
-  && !window.document.getElementById('project-new').disabled
-  && window.document.getElementById('task-new').disabled);
+  && [...window.document.querySelectorAll('#project-table tbody tr')].every((r) => r.cells[1].textContent === 'ACME'));
 const projectDialog = window.document.getElementById('project-dialog');
 window.document.getElementById('project-new').click();
 check('+ Project opens its popup with selected customer context',
@@ -527,11 +528,31 @@ check('project Escape closes its popup', !projectDialog.open);
 const tasksBtn = [...mktRow.querySelectorAll('button')].find((b) => b.textContent === 'Tasks');
 tasksBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(150);
-check('selecting a project replaces the task empty state with its task list',
-  window.document.getElementById('tasks-empty-state').hidden);
-check('selected project is highlighted and enables task creation',
-  !!window.document.querySelector('#project-table .hierarchy-selected')
-  && !window.document.getElementById('task-new').disabled);
+check('project row Tasks action opens the Tasks section with both filters set',
+  !window.document.getElementById('panel-tasks').hidden
+  && window.document.getElementById('task-filter-customer').value === acmeOpt.value
+  && window.document.getElementById('task-filter-project').value === 'MKT-2'
+  && /ACME \/ MKT-2/.test(window.document.getElementById('task-scope-label').textContent));
+{ // Dependent reset (#182): clearing the customer clears the child pick.
+  const custSel = window.document.getElementById('task-filter-customer');
+  custSel.value = '';
+  custSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(200);
+  const projSel = window.document.getElementById('task-filter-project');
+  check('clearing the customer resets the dependent project filter',
+    projSel.value === '' && projSel.disabled === true
+    && !window.document.getElementById('tasks-empty-state').hidden);
+  custSel.value = acmeOpt.value;
+  custSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(200);
+  projSel.value = 'MKT-2';
+  projSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick(200);
+  check('re-selecting the scoped project restores its scoped state',
+    !window.document.getElementById('tasks-empty-state').hidden
+    && /No tasks on this project yet/.test(window.document.getElementById('tasks-empty-state').textContent)
+    && window.document.getElementById('task-scope-label').textContent.includes('MKT-2'));
+}
 const taskDialog = window.document.getElementById('task-dialog');
 window.document.getElementById('task-new').click();
 await tick(200);
