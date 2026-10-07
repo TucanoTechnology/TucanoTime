@@ -301,10 +301,10 @@ and prune on open); reminders do 2N per-user lock round-trips inside one tick.
   `notify.rs` seam removed), **C6 + remaining D3/D6 via #102** (`el()` /
   `fillSelect()` / `<dialog>` helpers, side indexes, audit rotation, CI jsdom
   job). All three verified shipped at the #183 review (commit `7f09701`).
-- **C3 remains OPEN**: `ProjectDoc` (`src/domain.rs:515`) *and* `Project`'s
-  `Deserialize` (`:493`) still coexist as two disk-read paths. Kept as a
-  historical record for a follow-up decision (retire one, or document the
-  split); do not close silently.
+- **C3 CLOSED via #220**: `Project`'s redundant `Deserialize` derive was
+  removed after verifying nothing deserializes it directly — `project_from_bytes`
+  (via `ProjectDoc`) is now the single legacy-aware disk path, and the struct
+  is still serialized on write. The two-drift-paths condition is gone.
 - **Follow-up round**: the #183 repository review (see `REPO_REVIEW.md`,
   PR #193) re-verified every item above still holds and opened the new
   findings as #185–#192.

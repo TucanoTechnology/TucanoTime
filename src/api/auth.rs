@@ -109,22 +109,24 @@ pub async fn login(
         ));
     }
     let user = app.store.get_user_by_email(&email)?;
-    let ok = user
-        .as_ref()
-        .is_some_and(|u| u.active && verify_password(&input.password, &u.password_hash));
-    if !ok {
+    // #220: destructure instead of gating on is_some_and + unwrapping later;
+    // the login path stays panic-free if this ordering is ever edited.
+    let user = match user {
+        Some(u) if u.active && verify_password(&input.password, &u.password_hash) => u,
         // Same response for unknown email and bad password (no user enumeration).
-        app.rate.record_failure(&key);
-        app.audit.record("login_failed", &email, app.clock.now());
-        return Err(ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "invalid_credentials",
-            "invalid email or password",
-        ));
-    }
+        _ => {
+            app.rate.record_failure(&key);
+            app.audit.record("login_failed", &email, app.clock.now());
+            return Err(ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "invalid_credentials",
+                "invalid email or password",
+            ));
+        }
+    };
     app.rate.reset(&key);
     app.audit.record("login_ok", &email, app.clock.now());
-    let (headers, pubuser) = set_cookie(&app, &user.unwrap());
+    let (headers, pubuser) = set_cookie(&app, &user);
     Ok((headers, Json(pubuser)).into_response())
 }
 
