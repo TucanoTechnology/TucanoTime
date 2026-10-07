@@ -3400,6 +3400,17 @@ async fn webhook_partial_settles_partly_and_mismatch_stays_refused() {
     let (sp2, bp2) = webhook_post(&app.router, "stripe", &rest, Some(&sig2)).await;
     assert_eq!(sp2, StatusCode::OK, "{bp2}");
     assert_eq!(bp2["status"], "paid");
+
+    // A distinct event cannot be acknowledged after another event has settled
+    // the invoice unless its own reference is present in the ledger.
+    let stale = make(13000, "EUR", "evt_stale");
+    let stale_sig = tucano_time::payments::sign("whsec_mismatch", &stale);
+    let (ss, _) = webhook_post(&app.router, "stripe", &stale, Some(&stale_sig)).await;
+    assert_eq!(
+        ss,
+        StatusCode::CONFLICT,
+        "unrecorded distinct event is not processed"
+    );
 }
 
 /// Stub transport for accounting tests: returns deterministic ids, optionally
