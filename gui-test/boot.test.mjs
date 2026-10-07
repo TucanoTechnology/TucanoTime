@@ -19,6 +19,7 @@ ${prelude}
 window.bootTest = {
   dashRenderOverview, refreshInvoices, refreshCustomerPickers,
   writeOffInvoice, navigateDay, weekLockIds, state,
+  refreshTimeCal, calState,
   peekLockCache: () => weekLockCache,
   liveText: () => document.getElementById('live-region').textContent,
   api,
@@ -169,5 +170,28 @@ test('rapid day navigation renders the newest response, not an older one (#188)'
     '5:00',
     'a stale day response must not overwrite the newest render',
   );
+  dom.window.close();
+});
+
+test('rapid calendar navigation renders the newest month response (#188)', async () => {
+  const { dom, context, document } = makeDom();
+  context.calState.month = '2026-06';
+  context.api.get = (path) => {
+    if (path.includes('from=2026-06-01')) {
+      return new Promise((done) => setTimeout(() => done({ entries: [{
+        id: 'june', date: '2026-06-03', hours: 1, project_code: 'OLD',
+      }] }), 30));
+    }
+    return Promise.resolve({ entries: [{
+      id: 'july', date: '2026-07-04', hours: 5, project_code: 'NEW',
+    }] });
+  };
+  const older = context.refreshTimeCal();
+  context.calState.month = '2026-07';
+  const newer = context.refreshTimeCal();
+  await Promise.all([older, newer]);
+  assert.equal(document.getElementById('cal-label').textContent, 'Jul 2026');
+  assert.match(document.getElementById('cal-total').textContent, /5:00 logged/);
+  assert.equal(document.querySelector('#cal-grid .cal-chip')?.textContent, 'NEW');
   dom.window.close();
 });
