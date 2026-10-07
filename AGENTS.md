@@ -48,7 +48,9 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   hints only) or logged. Fail-closed: unset key ⇒ vault disabled.
 - **Locking (#18 seam):** entry edits/deletes consult `CombinedLocks`, which
   composes `InvoiceLock` (entries on an issued invoice, #8) and `SubmissionLock`
-  (entries in a submitted/approved week, #16). Reads are never blocked.
+  (entries in a submitted/approved week, #16). Reads are never blocked. If the
+  lock state cannot be verified the write is refused fail-closed with 503
+  `lock_unavailable` (#185) — never allowed because the check was inconclusive.
 - Every payload is validated against the contract before any write
   (`deny_unknown_fields` + `domain::validate_*`); no partial persistence.
   Errors use the single JSON shape in `openapi.json`; responses never expose
