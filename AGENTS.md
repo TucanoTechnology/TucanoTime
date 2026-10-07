@@ -43,9 +43,9 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   `categories/<id>.json`, `expenses/<id>.json`, `submissions/<id>.json`,
   plus `audit.log` (#52), `revoked.json` (#45), `scheduler.json` (#61),
   `secrets.bin` (#77, AES-256-GCM encrypted), `config.json` + `session.key`
-  (#94), `.server.lock` (single-instance guard), `claims/<id>.json` (#24),
-  plus the `retainers/`, `claims/`, `schedules/`, `timers/`, `items/` and
-  `notifications/` doc folders, `sync/accounting.json` (#33), archived
+  (#94), `.server.lock` (single-instance guard), the `retainers/`, `claims/`,
+  `schedules/`, `timers/`, `items/` and `notifications/` doc folders,
+  `sync/accounting.json` (#33), archived
   `invoices/<id>.pdf` (#113), `invoices/.seq.json` (number ledger, B3) and
   `*.idx.*` side indexes (D3). Atomic writes (tmp + rename).
 - **Secret vault (#77):** admin-entered integration credentials are encrypted at
@@ -54,7 +54,9 @@ The GUI is a presentation layer and nothing more — it never reads storage.
 - **Locking (#18 seam):** entry edits/deletes consult `CombinedLocks`, which
   composes `InvoiceLock` (entries on an *open* invoice — issued, partly paid or
   paid, per #114/#8 — locking follows `status.is_open()`) and `SubmissionLock`
-  (entries in a submitted/approved week, #16). Reads are never blocked.
+  (entries in a submitted/approved week, #16). Reads are never blocked. If the
+  lock state cannot be verified the write is refused fail-closed with 503
+  `lock_unavailable` (#185) — never allowed because the check was inconclusive.
   Reimbursement claims (#24) lock their expenses via a direct scan in
   `api::expenses`, not through this seam (see the #190 follow-up note).
 - Every payload is validated against the contract before any write

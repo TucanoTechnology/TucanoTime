@@ -996,8 +996,10 @@ impl Store {
     pub fn delete_customer(&self, id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         // A customer owns its project folder; removing it would orphan those
-        // documents, so the caller must empty it first.
-        let projects = self.list_projects(id).unwrap_or_default();
+        // documents, so the caller must empty it first. An unreadable project
+        // set must NOT read as "empty" (#185): propagating here keeps the
+        // remove_dir_all below from deleting documents we failed to list.
+        let projects = self.list_projects(id)?;
         if !projects.is_empty() {
             return Err(StoreError::AlreadyExists(
                 "customer still has projects; delete them first".into(),
@@ -1423,6 +1425,31 @@ impl Store {
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
         self.record_payment_locked(id, amount, reference, method, now)
+    }
+
+    /// Webhook-safe payment record (#185): the reference-uniqueness check
+    /// runs **inside** the write lock, so two concurrent deliveries of the
+    /// same provider event serialize and exactly one posts. `Ok(None)` means
+    /// the reference was already recorded — callers treat that as success
+    /// (idempotent replay), not an error.
+    pub fn record_payment_once(
+        &self,
+        id: Uuid,
+        amount: Option<u64>,
+        reference: String,
+        method: String,
+        now: DateTime<Utc>,
+    ) -> Result<Option<Invoice>, StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.doc_path::<Invoice>(&id.to_string());
+        let Some(invoice) = read_json::<Invoice>(&path)? else {
+            return Err(StoreError::NotFound);
+        };
+        if invoice.payments.iter().any(|p| p.reference == reference) {
+            return Ok(None);
+        }
+        self.record_payment_locked(id, amount, reference, method, now)
+            .map(Some)
     }
 
     fn record_payment_locked(

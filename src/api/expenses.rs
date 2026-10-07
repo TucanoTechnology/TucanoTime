@@ -213,12 +213,18 @@ pub async fn create_submission(
         .ok_or_else(|| ApiError::bad_request("invalid week"))?;
     let all = app.store.list_range(week_start, week_end)?;
     // Entries already locked (submitted/approved) can't be resubmitted.
-    let entry_ids: Vec<Uuid> = all
-        .iter()
-        .filter(|e| e.user_id == Some(actor.0.id))
-        .map(|e| e.id)
-        .filter(|id| app.locks.entry_lock(*id).is_none())
-        .collect();
+    // #185: an entry whose lock state cannot be verified is not submitted.
+    let mut entry_ids: Vec<Uuid> = Vec::new();
+    for e in all.iter().filter(|e| e.user_id == Some(actor.0.id)) {
+        match app.locks.entry_lock(e.id) {
+            Ok(None) => entry_ids.push(e.id),
+            Ok(Some(_)) => {}
+            Err(err) => {
+                tracing::warn!(error = ?err.0, entry = %e.id, "lock state unavailable; refusing submit");
+                return Err(ApiError::lock_unavailable());
+            }
+        }
+    }
     if entry_ids.is_empty() {
         return Err(ApiError::conflict(
             "no unlocked entries to submit this week",

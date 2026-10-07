@@ -152,8 +152,14 @@ pub async fn update_entry(
         .get_entry(id)?
         .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
-    if let Some(reason) = app.locks.entry_lock(id) {
-        return Err(ApiError::conflict(reason.message()));
+    match app.locks.entry_lock(id) {
+        Ok(Some(reason)) => return Err(ApiError::conflict(reason.message())),
+        Ok(None) => {}
+        // #185: unverifiable lock state fails closed, it never lets the edit through.
+        Err(e) => {
+            tracing::warn!(error = ?e.0, entry = %id, "lock state unavailable; refusing entry edit");
+            return Err(ApiError::lock_unavailable());
+        }
     }
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
     ensure_entry_refs(&app.store, &draft)?;
@@ -187,8 +193,14 @@ pub async fn delete_entry(
         .get_entry(id)?
         .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
-    if let Some(reason) = app.locks.entry_lock(id) {
-        return Err(ApiError::conflict(reason.message()));
+    match app.locks.entry_lock(id) {
+        Ok(Some(reason)) => return Err(ApiError::conflict(reason.message())),
+        Ok(None) => {}
+        // #185: unverifiable lock state fails closed, it never lets the delete through.
+        Err(e) => {
+            tracing::warn!(error = ?e.0, entry = %id, "lock state unavailable; refusing entry delete");
+            return Err(ApiError::lock_unavailable());
+        }
     }
     app.store.delete_entry(&entry)?;
     Ok(StatusCode::NO_CONTENT.into_response())

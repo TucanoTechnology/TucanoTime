@@ -66,6 +66,10 @@ function el(tag, opts = {}, children = []) {
   if (opts.text !== undefined) node.textContent = opts.text;
   if (opts.type) node.type = opts.type;
   if (opts.value !== undefined) node.value = opts.value;
+  // #188: top-level `style` used to be dropped silently, which flattened the
+  // invoice bar chart (heights computed in JS never reached the DOM). Applied
+  // as a plain attribute — callers pass server-independent numbers only.
+  if (opts.style) node.setAttribute('style', opts.style);
   if (opts.attrs) {
     for (const [k, v] of Object.entries(opts.attrs)) node.setAttribute(k, v);
   }
@@ -274,6 +278,7 @@ function formatMoney(minor) {
 // ----------------------------------------------------------------- cache ---
 
 const state = {
+  isAdmin: false, // #188: set from /auth/me; gates admin-tier panel loads at boot
   invoices: [], // #133: last rendered invoice list
   customers: [],           // Customer[]
   projectsByCustomer: {},  // id -> Project[]
@@ -329,11 +334,17 @@ async function fillProjectSelect(select, customerId, selectedCode) {
 
 // Loads a project's tasks into the given select, with a leading "None".
 async function fillTaskSelect(select, customerId, projectCode, selectedCode) {
+  // #188: per-select sequence guard (same pattern as fillProjectSelect) — an
+  // older task list must never overwrite a newer one when the project picker
+  // changes quickly.
+  const sequence = (select.__taskSequence || 0) + 1;
+  select.__taskSequence = sequence;
   const opts = [{ value: '', text: projectCode ? 'None' : 'Choose a project first…' }];
   if (customerId && projectCode) {
     const data = await api.get(
       `/customers/${customerId}/projects/${encodeURIComponent(projectCode)}/tasks`,
     );
+    if (select.__taskSequence !== sequence) return;
     for (const t of data.tasks || []) {
       opts.push({
         value: t.code,
@@ -457,12 +468,14 @@ async function refreshTimeCal() {
   const today = isoDate(new Date());
   if (!calState.month) calState.month = (($('day-date').value || today).slice(0, 7));
   const month = calState.month;
+  const seq = ++calRenderSeq;
   const [yy, mm] = month.split('-').map(Number);
   const last = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
   const monthStart = `${month}-01`;
   const monthEnd = `${month}-${String(last).padStart(2, '0')}`;
   $('cal-label').textContent = monthName(month);
   const data = await api.get(`/entries?from=${monthStart}&to=${monthEnd}`);
+  if (seq !== calRenderSeq) return; // #188: a newer month change superseded this
   const entries = data.entries || [];
   const byDate = new Map();
   let totalHundredths = 0;
@@ -651,12 +664,15 @@ function navigateDay(delta) {
 async function refreshDay() {
   const date = dayDate();
   if (!date) return;
+  const seq = ++dayRenderSeq;
   setDayLabel();
   const data = await api.get(`/entries?date=${encodeURIComponent(date)}`);
+  if (seq !== dayRenderSeq) return; // #188: a newer navigation superseded this
   const rows = data.entries || [];
   // #108: rows carry a lock indicator when the entry sits on an issued
   // invoice or a submitted/approved week (same lookup the grid uses, cached).
   const locked = await weekLockIds();
+  if (seq !== dayRenderSeq) return; // #188: same, after the lock round-trip
   const tbody = $('day-table').querySelector('tbody');
   tbody.textContent = '';
   let total = 0;
@@ -1844,7 +1860,7 @@ async function refreshCustomerPickers() {
   // C7: every customer picker (day form, invoices, expenses, timer) refreshes
   // from one place — previously a newly added customer could not be invoiced
   // until a full page reload.
-  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer', 'ed-customer', 'iw-customer', 'ret-customer']) {
+  for (const id of ['entry-customer', 'invoice-customer', 'expense-customer', 'timer-customer', 'rec-customer', 'ed-customer', 'iw-customer', 'ret-customer', 'inv-f-customer']) {
     const picker = $(id);
     if (picker) {
       fillCustomerSelect(picker, picker.value, true);
@@ -1892,8 +1908,17 @@ async function runReport(evt) {
 // -------------------------------------------------------------- invoices ---
 
 let invoicesRenderSeq = 0; // last-call-wins (same guard the week grid uses)
+// #188: the day view, the logged-time calendar and the task select were fired
+// un-awaited by prev/next navigation with no guard, so an older response
+// could render over a newer one (wrong day/month/task list).
+let dayRenderSeq = 0;
+let calRenderSeq = 0;
 
 async function refreshInvoices() {
+  // #188: GET /invoices is admin-tier (src/lib.rs). Previously an un-caught
+  // 403 rejection aborted member boot (Promise.all in startApp), so members
+  // never got the page title, timer wiring or version label.
+  if (!state.isAdmin) return;
   const seq = ++invoicesRenderSeq;
   const data = await api.get('/invoices');
   if (seq !== invoicesRenderSeq) return; // a newer refresh superseded this one
@@ -2082,6 +2107,10 @@ async function writeOffInvoice(inv, balance) {
   if (!(await askConfirm(`Write off ${inv.number}? The balance stops counting as outstanding.`))) return;
   try {
     await api.post(`/invoices/${inv.id}/write-off`, { reason: r });
+    // #188: a write-off leaves `is_open()` (src/lock.rs locks only open
+    // invoices), so it RELEASES the entry locks — the same #108 cache rule
+    // that issue/pay/submit/decide follow applies here.
+    invalidateLockCache();
     announce(`${inv.number} written off.`);
     await refreshInvoices();
   } catch (err) {
@@ -3332,9 +3361,15 @@ async function refreshExpenses() {
             on: {
               click: async () => {
                 if (!(await askConfirm('Delete this expense?'))) return;
-                await api.del(`/expenses/${x.id}`);
-                await refreshExpenses();
-                announce('Expense deleted.');
+                // #188: announce failures like every other mutation; an
+                // un-caught rejection here meant a silent, unreported delete.
+                try {
+                  await api.del(`/expenses/${x.id}`);
+                  await refreshExpenses();
+                  announce('Expense deleted.');
+                } catch (err) {
+                  announce(`Expense delete failed: ${err.message}`);
+                }
               },
             },
           }),
@@ -4123,7 +4158,10 @@ function refreshPanel(tabId) {
     },
     'tab-settings': refreshSettings,
   }[tabId];
-  if (fn) fn();
+  // #188: panel refreshes were dispatched un-awaited and un-caught; any
+  // rejection bypassed the announce() convention and died as a console-only
+  // unhandled rejection. Surface failures through the live region instead.
+  if (fn) Promise.resolve(fn()).catch((err) => announce(`Refresh failed: ${err.message}`));
 }
 
 // Wires the app listeners and loads the first data. Called once authenticated.
@@ -4707,6 +4745,7 @@ function showAccount(me) {
   $('account').hidden = false;
   $('who').textContent = me.name || me.email;
   const admin = me.role === 'admin';
+  state.isAdmin = admin; // #188: boot must skip admin-tier panels for members
   document.querySelectorAll('#settings-tabs [role="tab"]').forEach((tab) => {
     tab.hidden = !admin && tab.id !== 'settings-tab-expenses';
   });
