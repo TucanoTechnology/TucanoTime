@@ -9,39 +9,59 @@ use super::*;
 fn validate_entry_refs(
     store: &Store,
     draft: &crate::domain::EntryDraft,
-) -> Result<(), Vec<FieldError>> {
+) -> Result<Vec<FieldError>, crate::store::StoreError> {
+    // #187: `.ok().flatten()` used to answer store failures (corrupt customer
+    // doc, IO fault, oversized collection) with a 422 "customer does not
+    // exist" — an infrastructure outage masquerading as client input. Only a
+    // provable miss is a field error now; a genuine store error propagates.
     let mut errors = Vec::new();
-    let customer = store.get_customer(draft.customer_id).ok().flatten();
-    if customer.is_none() {
+    let Some(customer) = store.get_customer(draft.customer_id)? else {
+        // The whole reference tree is unreachable without its customer:
+        // report every dangling reference at once (the documented 422 shape).
         errors.push(FieldError::new("customer_id", "customer does not exist"));
-    }
-    let project = store
-        .get_project(draft.customer_id, &draft.project_code)
-        .ok()
-        .flatten();
-    if project.is_none() {
+        errors.push(FieldError::new(
+            "project_code",
+            "project does not exist for this customer",
+        ));
+        if draft.task_code.is_some() {
+            errors.push(FieldError::new(
+                "task_code",
+                "task does not exist for this project",
+            ));
+        }
+        return Ok(errors);
+    };
+    if store
+        .get_project(customer.id, &draft.project_code)?
+        .is_none()
+    {
         errors.push(FieldError::new(
             "project_code",
             "project does not exist for this customer",
         ));
     }
     // A task, when present, must belong to the entry's project.
-    if let Some(task_code) = &draft.task_code {
-        let task = store
-            .get_task(draft.customer_id, &draft.project_code, task_code)
-            .ok()
-            .flatten();
-        if task.is_none() {
-            errors.push(FieldError::new(
-                "task_code",
-                "task does not exist for this project",
-            ));
-        }
+    if let Some(task_code) = &draft.task_code
+        && store
+            .get_task(customer.id, &draft.project_code, task_code)?
+            .is_none()
+    {
+        errors.push(FieldError::new(
+            "task_code",
+            "task does not exist for this project",
+        ));
     }
+    Ok(errors)
+}
+
+/// Map `validate_entry_refs`' two failure kinds: a store fault is the API
+/// error it is; collected field errors are the documented 422.
+fn ensure_entry_refs(store: &Store, draft: &crate::domain::EntryDraft) -> Result<(), ApiError> {
+    let errors = validate_entry_refs(store, draft)?;
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(errors)
+        Err(ApiError::validation(errors))
     }
 }
 
@@ -88,7 +108,7 @@ pub async fn create_entry(
     ValidJson(input): ValidJson<EntryInput>,
 ) -> ApiResult {
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
-    validate_entry_refs(&app.store, &draft).map_err(ApiError::validation)?;
+    ensure_entry_refs(&app.store, &draft)?;
     let now = app.clock.now();
     let entry = Entry {
         id: Uuid::new_v4(),
@@ -132,11 +152,17 @@ pub async fn update_entry(
         .get_entry(id)?
         .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
-    if let Some(reason) = app.locks.entry_lock(id) {
-        return Err(ApiError::conflict(reason.message()));
+    match app.locks.entry_lock(id) {
+        Ok(Some(reason)) => return Err(ApiError::conflict(reason.message())),
+        Ok(None) => {}
+        // #185: unverifiable lock state fails closed, it never lets the edit through.
+        Err(e) => {
+            tracing::warn!(error = ?e.0, entry = %id, "lock state unavailable; refusing entry edit");
+            return Err(ApiError::lock_unavailable());
+        }
     }
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
-    validate_entry_refs(&app.store, &draft).map_err(ApiError::validation)?;
+    ensure_entry_refs(&app.store, &draft)?;
     let updated = Entry {
         id,
         date: draft.date,
@@ -167,8 +193,14 @@ pub async fn delete_entry(
         .get_entry(id)?
         .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
-    if let Some(reason) = app.locks.entry_lock(id) {
-        return Err(ApiError::conflict(reason.message()));
+    match app.locks.entry_lock(id) {
+        Ok(Some(reason)) => return Err(ApiError::conflict(reason.message())),
+        Ok(None) => {}
+        // #185: unverifiable lock state fails closed, it never lets the delete through.
+        Err(e) => {
+            tracing::warn!(error = ?e.0, entry = %id, "lock state unavailable; refusing entry delete");
+            return Err(ApiError::lock_unavailable());
+        }
     }
     app.store.delete_entry(&entry)?;
     Ok(StatusCode::NO_CONTENT.into_response())

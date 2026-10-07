@@ -180,11 +180,14 @@ impl Client {
 /// A test lock provider that freezes a single entry id.
 struct LockOne(Option<uuid::Uuid>);
 impl EntryLock for LockOne {
-    fn entry_lock(&self, entry_id: uuid::Uuid) -> Option<LockReason> {
+    fn entry_lock(
+        &self,
+        entry_id: uuid::Uuid,
+    ) -> Result<Option<LockReason>, tucano_time::lock::LockUnavailable> {
         if self.0 == Some(entry_id) {
-            Some(LockReason::Invoiced { id: "INV-1".into() })
+            Ok(Some(LockReason::Invoiced { id: "INV-1".into() }))
         } else {
-            None
+            Ok(None)
         }
     }
 }
@@ -906,6 +909,203 @@ async fn locked_entry_rejects_edit_and_delete_but_not_read() {
     assert_eq!(s_del, StatusCode::CONFLICT);
     let (s_get, _) = json_req(&app2, "GET", &format!("/entries/{eid}"), None).await;
     assert_eq!(s_get, StatusCode::OK, "locked entries are still readable");
+}
+
+// ------------------------------------------------- fail-closed locking (185) --
+
+#[tokio::test]
+async fn unverifiable_lock_state_refuses_writes_but_never_reads() {
+    // #185: lock providers used to map a store error to "not locked". With an
+    // unreadable invoice document the locks must fail CLOSED: entry edit and
+    // delete get 503 (Retry-After), submission is refused, reads still work.
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({})).await;
+    let (_, e) = json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(entry_body(&cid, "P1", json!(1), "2026-10-02")),
+    )
+    .await;
+    let eid = e["id"].as_str().unwrap().to_string();
+
+    // Corrupt the invoices collection so InvoiceLock cannot verify its state.
+    let inv_dir = d.path().join("data").join("invoices");
+    std::fs::create_dir_all(&inv_dir).unwrap();
+    std::fs::write(inv_dir.join("corrupt.json"), b"{ this is not json").unwrap();
+
+    let body = json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2,"billable":true});
+    let (s_edit, _) = json_req(&app, "PUT", &format!("/entries/{eid}"), Some(body)).await;
+    assert_eq!(
+        s_edit,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "edit must fail closed"
+    );
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/entries/{eid}"), None).await;
+    assert_eq!(
+        s_del,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "delete must fail closed"
+    );
+    let (s_sub, _) = json_req(
+        &app,
+        "POST",
+        "/submissions",
+        Some(json!({"week_start": "2026-09-28"})),
+    )
+    .await;
+    assert_eq!(
+        s_sub,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "submit must fail closed"
+    );
+    let (s_get, _) = json_req(&app, "GET", &format!("/entries/{eid}"), None).await;
+    assert_eq!(s_get, StatusCode::OK, "reads are never blocked");
+}
+
+#[tokio::test]
+async fn delete_customer_refused_when_project_docs_are_unreadable() {
+    // #185: `delete_customer` swallowed a failed project listing as "empty"
+    // and then remove_dir_all'd the customer tree INCLUDING the unreadable
+    // project docs. An unlistable collection must refuse the deletion and
+    // leave every file intact.
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({})).await;
+    let project_path = d
+        .path()
+        .join(format!("data/customers/{cid}/projects/P1.json"));
+    std::fs::write(&project_path, b"{ this is not json").unwrap();
+
+    let (s, b) = json_req(&app, "DELETE", &format!("/customers/{cid}"), None).await;
+    assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{b}");
+    assert!(
+        d.path().join(format!("data/customers/{cid}.json")).exists(),
+        "customer document must survive a refused delete"
+    );
+    assert!(
+        project_path.exists(),
+        "project documents must not be deleted when they could not be listed"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_identical_webhook_records_exactly_one_payment() {
+    // #185: the webhook idempotency check ran on an unlocked snapshot, so two
+    // concurrent deliveries of the same event could both post a partial
+    // payment. The dedup now runs inside record_payment_once's write lock.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("data")).unwrap();
+    let stripe = tucano_time::payments::StripeProvider::with_secret("whsec_dup");
+    let app = Client::with_payments(
+        store,
+        tucano_time::payments::PaymentRegistry::new(vec![Arc::new(stripe)]),
+    )
+    .await;
+
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
+    )
+    .await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices",
+        Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    let number = inv["number"].as_str().unwrap().to_string();
+    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+
+    // A PARTIAL (6000 of 18000) with a fixed provider event id, delivered twice
+    // concurrently: a full settle would end at "already_paid" before the
+    // reference check, so only a partial exercises the locked dedup.
+    let payload = format!(
+        "{{\"id\":\"evt_dup_1\",\"type\":\"checkout.session.completed\",\"payment_status\":\"paid\",\"amount_minor\":6000,\"currency\":\"EUR\",\"client_reference_id\":\"pay_ref_dup\",\"metadata\":{{\"invoice_number\":\"{number}\"}}}}"
+    );
+    let sig = format!(
+        "sha256={}",
+        tucano_time::payments::sign("whsec_dup", &payload)
+    );
+    let ((s1, b1), (s2, b2)) = tokio::join!(
+        webhook_post(&app.router, "stripe", &payload, Some(&sig)),
+        webhook_post(&app.router, "stripe", &payload, Some(&sig)),
+    );
+    assert_eq!(s1, StatusCode::OK, "{b1}");
+    assert_eq!(s2, StatusCode::OK, "{b2}");
+    // One settles as a new payment, the other as an idempotent replay — never
+    // two ledger entries for the same event id.
+    let statuses: Vec<&str> = vec![
+        b1["status"].as_str().unwrap(),
+        b2["status"].as_str().unwrap(),
+    ];
+    assert!(
+        statuses.contains(&"already_processed"),
+        "second delivery must be reported as a replay: {statuses:?}"
+    );
+
+    let (_s, got) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    assert_eq!(got["status"], "partly_paid");
+    let payments = got["payments"].as_array().unwrap();
+    assert_eq!(
+        payments.len(),
+        1,
+        "duplicate event must record exactly one payment"
+    );
+    assert_eq!(payments[0]["amount_minor"], 6000);
+
+    let make_event = |event_id: &str| {
+        format!(
+            "{{\"id\":\"{event_id}\",\"type\":\"checkout.session.completed\",\"payment_status\":\"paid\",\"amount_minor\":10000,\"currency\":\"EUR\",\"client_reference_id\":\"pay_ref_dup\",\"metadata\":{{\"invoice_number\":\"{number}\"}}}}"
+        )
+    };
+    let event_a = make_event("evt_distinct_a");
+    let event_b = make_event("evt_distinct_b");
+    let sig_a = format!(
+        "sha256={}",
+        tucano_time::payments::sign("whsec_dup", &event_a)
+    );
+    let sig_b = format!(
+        "sha256={}",
+        tucano_time::payments::sign("whsec_dup", &event_b)
+    );
+    let ((status_a, body_a), (status_b, body_b)) = tokio::join!(
+        webhook_post(&app.router, "stripe", &event_a, Some(&sig_a)),
+        webhook_post(&app.router, "stripe", &event_b, Some(&sig_b)),
+    );
+    assert_ne!(
+        status_a, status_b,
+        "only one distinct payment fits the remaining balance"
+    );
+    assert!(
+        [status_a, status_b].contains(&StatusCode::CONFLICT),
+        "the unrecorded competing event must remain retryable: {body_a} {body_b}"
+    );
+    let (_s, after_race) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let race_payments = after_race["payments"].as_array().unwrap();
+    assert_eq!(
+        race_payments.len(),
+        2,
+        "only one competing event may be recorded"
+    );
+    assert_eq!(
+        race_payments
+            .iter()
+            .map(|payment| payment["amount_minor"].as_u64().unwrap())
+            .sum::<u64>(),
+        16000,
+        "recorded total must not exceed the invoice balance"
+    );
 }
 
 // ------------------------------------------------------------------ tasks --
@@ -3243,6 +3443,17 @@ async fn webhook_partial_settles_partly_and_mismatch_stays_refused() {
     let (sp2, bp2) = webhook_post(&app.router, "stripe", &rest, Some(&sig2)).await;
     assert_eq!(sp2, StatusCode::OK, "{bp2}");
     assert_eq!(bp2["status"], "paid");
+
+    // A distinct event cannot be acknowledged after another event has settled
+    // the invoice unless its own reference is present in the ledger.
+    let stale = make(13000, "EUR", "evt_stale");
+    let stale_sig = tucano_time::payments::sign("whsec_mismatch", &stale);
+    let (ss, _) = webhook_post(&app.router, "stripe", &stale, Some(&stale_sig)).await;
+    assert_eq!(
+        ss,
+        StatusCode::CONFLICT,
+        "unrecorded distinct event is not processed"
+    );
 }
 
 /// Stub transport for accounting tests: returns deterministic ids, optionally
@@ -5417,6 +5628,210 @@ async fn draft_editing_replaces_lines_and_issued_stays_immutable() {
         "manual line reached the document"
     );
     assert!(joined.contains("207.90"), "total with VAT printed");
+}
+
+// ------------------------------------------------- #187: validation gaps --
+
+#[tokio::test]
+async fn draft_line_input_rejects_unknown_fields_before_persisting() {
+    // #187: the stored InvoiceLine was used directly as the PUT body
+    // element without deny_unknown_fields — a typo'd or stale client field
+    // was silently dropped. The split input DTO is strict.
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "SHOP", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
+    let (_s, inv) = json_req(
+        &app,
+        "POST",
+        "/invoices/manual",
+        Some(json!({"customer_id":cid,
+          "lines":[{"description":"Seat","item_kind":"product","quantity_hundredths":100,"unit_price_minor":4000}]})),
+    )
+    .await;
+    let iid = inv["id"].as_str().unwrap().to_string();
+    let good = json!({"kind":"fixed","date":"2026-10-02","note":"Seat",
+                      "item_kind":"product","quantity_hundredths":100,"unit_price_minor":4000});
+    // Outer envelope was always strict; prove the LINE element now is too.
+    let mut stale = good.clone();
+    stale["amountTtc"] = json!(1); // legacy/typo key
+    let (s, b) = json_req(
+        &app,
+        "PUT",
+        &format!("/invoices/{iid}"),
+        Some(json!({"lines":[stale],"tax_hundredths":0,"discount_hundredths":0})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+    // Sanity: the same edit without the unknown field succeeds.
+    let (ok, _) = json_req(
+        &app,
+        "PUT",
+        &format!("/invoices/{iid}"),
+        Some(json!({"lines":[good],"tax_hundredths":0,"discount_hundredths":0})),
+    )
+    .await;
+    assert_eq!(ok, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn manual_line_bounds_reject_identically_on_both_endpoints() {
+    // #187: create (domain::validate_manual_lines) and edit previously kept
+    // two copies of the bounds. One shared checker now guards both.
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "SHOP", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    let (s1, b1) = json_req(
+        &app,
+        "POST",
+        "/invoices/manual",
+        Some(json!({"customer_id":cid,
+          "lines":[{"description":"Seat","item_kind":"product","quantity_hundredths":1_000_001,"unit_price_minor":4000}]})),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::UNPROCESSABLE_ENTITY, "{b1}");
+    let (_s, draft) = json_req(
+        &app,
+        "POST",
+        "/invoices/manual",
+        Some(json!({"customer_id":cid,
+          "lines":[{"description":"Seat","item_kind":"product","quantity_hundredths":100,"unit_price_minor":4000}]})),
+    )
+    .await;
+    let iid = draft["id"].as_str().unwrap().to_string();
+    let (s2, b2) = json_req(
+        &app,
+        "PUT",
+        &format!("/invoices/{iid}"),
+        Some(
+            json!({"lines":[{"kind":"fixed","date":"2026-10-02","note":"Seat",
+            "item_kind":"product","quantity_hundredths":1_000_001,"unit_price_minor":4000}],
+            "tax_hundredths":0,"discount_hundredths":0}),
+        ),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::UNPROCESSABLE_ENTITY, "{b2}");
+    let msg = b2["error"]["fields"][0]["message"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        msg == b1["error"]["fields"][0]["message"]
+            .as_str()
+            .unwrap_or_default(),
+        "both endpoints must report the same bound: {msg} vs {b1}"
+    );
+}
+
+#[tokio::test]
+async fn claim_rejects_duplicate_expense_ids() {
+    // #187: [id, id] summed the expense amount twice into the persisted
+    // claim total while referencing one expense.
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    let (_s, x) = json_req(
+        &app,
+        "POST",
+        "/expenses",
+        Some(
+            json!({"date":"2026-10-02","customer_id":cid,"amount_minor":2500,
+                    "currency":"EUR","note":"taxi"}),
+        ),
+    )
+    .await;
+    let (s, b) = json_req(
+        &app,
+        "POST",
+        "/claims",
+        Some(json!({"title":"dup","expense_ids":[x["id"], x["id"]]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+}
+
+#[tokio::test]
+async fn oversized_project_budgets_rejected_without_persisting() {
+    // #187: budget fields were the only money/hours inputs persisted with no
+    // bound (u64::MAX survived, breaking the burn-rate math downstream).
+    let (app, _d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap();
+    let p = new_project(&app, cid, "P1", json!({"budget_hours": 5000})).await;
+    assert_eq!(p["budget_hours"], 5000);
+    for (field, value) in [
+        ("budget_amount_minor", json!(u64::MAX)),
+        ("budget_hours", json!(100_000_001u64)),
+    ] {
+        let mut body = json!({"code":"P1","currency":"EUR","rate_minor":6000,
+                              "budget_hours": 5000});
+        body[field] = value;
+        let (s, b) = json_req(
+            &app,
+            "PUT",
+            &format!("/customers/{cid}/projects/P1"),
+            Some(body),
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{field}: {b}");
+        let (_sr, got) =
+            json_req(&app, "GET", &format!("/customers/{cid}/projects/P1"), None).await;
+        assert_eq!(
+            got["budget_hours"], 5000,
+            "{field} rejection persisted nothing"
+        );
+    }
+}
+
+#[tokio::test]
+async fn second_retainer_close_is_409_not_500() {
+    // #187: the store transaction erased RetainerError into Io(String) and
+    // close_retainer never applied the substring rescue — closing a closed
+    // retainer answered 500. Typed errors make every mutation 409.
+    let (app, _d) = app().await;
+    let rid = seed_retainer(&app, 10_000).await;
+    let (s1, b1) = json_req(&app, "POST", &format!("/retainers/{rid}"), None).await;
+    assert_eq!(s1, StatusCode::OK, "{b1}");
+    let (s2, b2) = json_req(&app, "POST", &format!("/retainers/{rid}"), None).await;
+    assert_eq!(s2, StatusCode::CONFLICT, "second close: {b2}");
+    // A draw on the closed retainer is the same 409 class, not a 500.
+    let (s3, b3) = json_req(
+        &app,
+        "POST",
+        &format!("/retainers/{rid}/draw"),
+        Some(json!({"amount_minor": 100, "reason": "late draw"})),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::CONFLICT, "draw after close: {b3}");
+}
+
+#[tokio::test]
+async fn store_fault_during_entry_validation_is_500_not_422() {
+    // #187: validate_entry_refs' `.ok().flatten()` turned any store failure
+    // into a bogus "customer does not exist" 422. A corrupt customer doc
+    // must surface as a 500 (generic, no internals leaked).
+    let (app, d) = app().await;
+    let c = new_customer(&app, "ACME", "EUR", 6000).await;
+    let cid = c["id"].as_str().unwrap().to_string();
+    new_project(&app, &cid, "P1", json!({})).await;
+    std::fs::write(
+        d.path().join(format!("data/customers/{cid}.json")),
+        b"{ not json",
+    )
+    .unwrap();
+    let (s, b) = json_req(
+        &app,
+        "POST",
+        "/entries",
+        Some(entry_body(&cid, "P1", json!(1), "2026-10-02")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{b}");
+    assert_eq!(b["error"]["code"], "internal");
+    let text = b.to_string();
+    assert!(
+        !text.contains("json") && !text.contains("data/"),
+        "no internals: {text}"
+    );
 }
 
 // ------------------------------------------------------------------ #134 ---

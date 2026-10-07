@@ -213,12 +213,18 @@ pub async fn create_submission(
         .ok_or_else(|| ApiError::bad_request("invalid week"))?;
     let all = app.store.list_range(week_start, week_end)?;
     // Entries already locked (submitted/approved) can't be resubmitted.
-    let entry_ids: Vec<Uuid> = all
-        .iter()
-        .filter(|e| e.user_id == Some(actor.0.id))
-        .map(|e| e.id)
-        .filter(|id| app.locks.entry_lock(*id).is_none())
-        .collect();
+    // #185: an entry whose lock state cannot be verified is not submitted.
+    let mut entry_ids: Vec<Uuid> = Vec::new();
+    for e in all.iter().filter(|e| e.user_id == Some(actor.0.id)) {
+        match app.locks.entry_lock(e.id) {
+            Ok(None) => entry_ids.push(e.id),
+            Ok(Some(_)) => {}
+            Err(err) => {
+                tracing::warn!(error = ?err.0, entry = %e.id, "lock state unavailable; refusing submit");
+                return Err(ApiError::lock_unavailable());
+            }
+        }
+    }
     if entry_ids.is_empty() {
         return Err(ApiError::conflict(
             "no unlocked entries to submit this week",
@@ -316,6 +322,18 @@ pub async fn create_claim(
     let mut errors = Vec::new();
     let mut total: u64 = 0;
     let mut currency: Option<Currency> = None;
+    // #187: a repeated expense id used to sum its amount twice into the
+    // persisted claim total shown to approvers (while referencing one
+    // expense). Reject duplicates before any work.
+    let mut seen = std::collections::HashSet::new();
+    for id in &input.expense_ids {
+        if !seen.insert(id) {
+            return Err(ApiError::validation(vec![FieldError::new(
+                "expense_ids",
+                format!("expense {id} is listed more than once"),
+            )]));
+        }
+    }
     for id in &input.expense_ids {
         let Some(x) = app.store.get_expense(*id)? else {
             errors.push(FieldError::new(
