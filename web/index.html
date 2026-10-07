@@ -102,7 +102,7 @@
     <!-- DAY -->
     <section id="panel-day" role="tabpanel" aria-labelledby="ts-day" tabindex="0">
       <input type="date" id="day-date" hidden>
-      <div class="day-bar">
+      <div class="day-bar p-card">
         <div class="day-actions">
           <button type="button" id="day-add" class="primary">+ Track time</button>
           <button type="button" id="timer-open" data-icon="play" aria-controls="timerbar" aria-expanded="false">Start timer</button>
@@ -117,7 +117,7 @@
         </nav>
         <button type="button" id="day-today" class="link">Return to today</button>
       </div>
-      <div class="timerbar" id="timerbar" hidden>
+      <div class="timerbar p-card p-card--muted" id="timerbar" hidden>
         <label for="timer-customer">Customer</label>
         <select id="timer-customer"></select>
         <label for="timer-project">Project</label>
@@ -126,7 +126,7 @@
         <button type="button" id="timer-cancel" class="link">Cancel</button>
       </div>
       <nav id="week-strip" class="week-strip" aria-label="Days of this week"></nav>
-      <div id="notif-section" hidden>
+      <div id="notif-section" class="day-notifications" hidden>
         <div class="notif-head"><span>Notifications</span><button type="button" id="notif-read" class="link">Mark all read</button></div>
         <ul id="notif-list" class="notifs"></ul>
       </div>
@@ -141,8 +141,8 @@
           <td colspan="2" class="day-total-cell">Total: <span id="day-total" class="num"></span></td>
         </tr></tfoot>
       </table>
-      <p id="day-empty" hidden>Nothing logged on this day yet. Use <strong>+ Track time</strong> to add an entry, or copy projects from an earlier day below.</p>
-      <div class="copy-bar">
+      <p id="day-empty" class="day-empty p-notification p-notification--information" hidden>Nothing logged on this day yet. Use <strong>+ Track time</strong> to add an entry, or copy projects from an earlier day below.</p>
+      <div class="copy-bar p-card p-card--muted">
         <button type="button" id="copy-previous" class="secondary">Copy from previous day</button>
         <ul id="copy-rows" class="copy-rows" aria-label="Projects copied from an earlier day"></ul>
       </div>

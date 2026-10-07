@@ -651,7 +651,7 @@ async function refreshWeekStrip() {
         'button',
         {
           type: 'button',
-          cls: 'ws-day' + (date === d ? ' selected' : ''),
+          cls: 'ws-day p-card' + (date === d ? ' selected' : ''),
           data: { date },
           attrs: date === d ? { 'aria-current': 'date' } : {},
           on: { click: () => selectDay(date) },
@@ -659,8 +659,9 @@ async function refreshWeekStrip() {
         [
           el('span', {
             cls: 'ws-name',
-            text: `${new Date(Date.UTC(y, m - 1, dd)).toUTCString().slice(0, 3)} ${dd}`,
+            text: new Date(Date.UTC(y, m - 1, dd)).toUTCString().slice(0, 3),
           }),
+          el('span', { cls: 'ws-date', text: String(dd) }),
           el('span', { cls: 'ws-total num', text: fmtHM(totals[date] || 0) }),
           el('span', { cls: 'ws-clock', attrs: { 'aria-hidden': 'true' } }, [ubuntuIcon('history')]),
         ],
@@ -4224,7 +4225,7 @@ async function refreshNotifications() {
     ul.textContent = '';
     for (const n of unread) {
       ul.appendChild(
-        el('li', { cls: 'notif' }, [
+        el('li', { cls: 'notif p-notification p-notification--information' }, [
           el('strong', { text: n.title }),
           el('span', { text: ` ${n.body}` }),
         ]),
