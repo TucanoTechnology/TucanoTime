@@ -713,6 +713,37 @@ pub struct ManualLineInput {
 
 pub const MANUAL_LINE_MAX: usize = 100;
 
+/// Shared manual-line bounds (#187): description, quantity and unit price
+/// rules live in exactly one place. Field names are passed in because the
+/// create payload calls the description `description` while a stored draft
+/// line calls it `note`.
+pub fn check_manual_line(
+    description: &str,
+    quantity_hundredths: u32,
+    unit_price_minor: u64,
+    desc_field: &str,
+    qty_field: &str,
+    price_field: &str,
+    errors: &mut Vec<FieldError>,
+) {
+    let desc = description.trim();
+    if desc.is_empty() || desc.chars().count() > 500 {
+        errors.push(FieldError::new(
+            desc_field,
+            "required, at most 500 characters",
+        ));
+    }
+    if quantity_hundredths == 0 || quantity_hundredths > 1_000_000 {
+        errors.push(FieldError::new(
+            qty_field,
+            "must be between 0.01 and 10000.00 units",
+        ));
+    }
+    if unit_price_minor > 100_000_000 {
+        errors.push(FieldError::new(price_field, "at most 100000000"));
+    }
+}
+
 /// Validate + convert manual line input; errors carry `lines[i].field` names.
 pub fn validate_manual_lines(
     lines: &[ManualLineInput],
@@ -730,25 +761,15 @@ pub fn validate_manual_lines(
         .iter()
         .enumerate()
         .map(|(i, l)| {
-            let desc = l.description.trim();
-            if desc.is_empty() || desc.chars().count() > 500 {
-                errors.push(FieldError::new(
-                    format!("lines[{i}].description"),
-                    "required, at most 500 characters",
-                ));
-            }
-            if l.quantity_hundredths == 0 || l.quantity_hundredths > 1_000_000 {
-                errors.push(FieldError::new(
-                    format!("lines[{i}].quantity_hundredths"),
-                    "must be between 0.01 and 10000.00 units",
-                ));
-            }
-            if l.unit_price_minor > 100_000_000 {
-                errors.push(FieldError::new(
-                    format!("lines[{i}].unit_price_minor"),
-                    "at most 100000000",
-                ));
-            }
+            check_manual_line(
+                &l.description,
+                l.quantity_hundredths,
+                l.unit_price_minor,
+                &format!("lines[{i}].description"),
+                &format!("lines[{i}].quantity_hundredths"),
+                &format!("lines[{i}].unit_price_minor"),
+                errors,
+            );
             InvoiceLine {
                 kind: LineKind::Fixed,
                 date: today,
@@ -759,7 +780,7 @@ pub fn validate_manual_lines(
                 hours: None,
                 rate_minor: None,
                 amount_minor: manual_amount_minor(l.quantity_hundredths, l.unit_price_minor),
-                note: desc.to_string(),
+                note: l.description.trim().to_string(),
                 quantity_hundredths: Some(l.quantity_hundredths),
                 unit_price_minor: Some(l.unit_price_minor),
                 item_kind: Some(l.item_kind),
@@ -1678,6 +1699,14 @@ pub fn validate_project_input(input: &ProjectInput) -> Result<ProjectDraft, Vec<
         String::new()
     };
     validate_rate_minor(input.rate_minor, "rate_minor", &mut errors);
+    // #187: budget fields were the only money/hours inputs persisted with no
+    // bound. Same ceilings as rates: 100_000_000 minor units; 1_000_000.00 h.
+    if input.budget_amount_minor.unwrap_or_default() > 100_000_000 {
+        errors.push(FieldError::new("budget_amount_minor", "at most 100000000"));
+    }
+    if input.budget_hours.unwrap_or_default() > 100_000_000 {
+        errors.push(FieldError::new("budget_hours", "at most 1000000.00 hours"));
+    }
     if errors.is_empty() {
         Ok(ProjectDraft {
             code: input.code.0.clone(),

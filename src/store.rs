@@ -61,6 +61,21 @@ pub enum StoreError {
     Io(String),
 }
 
+/// Outcome of a generic store transaction (#187): either a store failure or
+/// the caller's own typed domain error, so handlers map each arm correctly
+/// instead of re-parsing message strings.
+#[derive(Debug)]
+pub enum UpdateError<E> {
+    Store(StoreError),
+    Domain(E),
+}
+
+impl<E> From<StoreError> for UpdateError<E> {
+    fn from(e: StoreError) -> Self {
+        Self::Store(e)
+    }
+}
+
 // `Io` carries the operation context only; the underlying error is logged
 // server-side, never serialised to a client (see security rules).
 impl From<std::io::Error> for StoreError {
@@ -630,21 +645,23 @@ impl Store {
 
     /// Read-modify-write a retainer's ledger under the store lock (#144):
     /// two concurrent operations can never interleave a half-applied tx.
+    /// The closure's own error type survives intact (#187) — erasing it into
+    /// `StoreError::Io(String)` forced callers to re-parse messages by
+    /// substring, and any path that forgot to was answering 500 to a 409.
     pub fn update_retainer<F, E>(
         &self,
         id: Uuid,
         f: F,
-    ) -> Result<crate::retainer::Retainer, StoreError>
+    ) -> Result<crate::retainer::Retainer, UpdateError<E>>
     where
         F: FnOnce(&mut crate::retainer::Retainer) -> Result<(), E>,
-        E: std::fmt::Display,
     {
         let _guard = self.write_lock()?;
         let path = self.doc_path::<crate::retainer::Retainer>(&id.to_string());
         let Some(mut r) = read_json::<crate::retainer::Retainer>(&path)? else {
-            return Err(StoreError::NotFound);
+            return Err(StoreError::NotFound.into());
         };
-        f(&mut r).map_err(|e| StoreError::Io(e.to_string()))?;
+        f(&mut r).map_err(UpdateError::Domain)?;
         write_json(&path, &r)?;
         Ok(r)
     }
@@ -979,8 +996,10 @@ impl Store {
     pub fn delete_customer(&self, id: Uuid) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
         // A customer owns its project folder; removing it would orphan those
-        // documents, so the caller must empty it first.
-        let projects = self.list_projects(id).unwrap_or_default();
+        // documents, so the caller must empty it first. An unreadable project
+        // set must NOT read as "empty" (#185): propagating here keeps the
+        // remove_dir_all below from deleting documents we failed to list.
+        let projects = self.list_projects(id)?;
         if !projects.is_empty() {
             return Err(StoreError::AlreadyExists(
                 "customer still has projects; delete them first".into(),
@@ -1406,6 +1425,31 @@ impl Store {
     ) -> Result<Invoice, StoreError> {
         let _guard = self.write_lock()?;
         self.record_payment_locked(id, amount, reference, method, now)
+    }
+
+    /// Webhook-safe payment record (#185): the reference-uniqueness check
+    /// runs **inside** the write lock, so two concurrent deliveries of the
+    /// same provider event serialize and exactly one posts. `Ok(None)` means
+    /// the reference was already recorded — callers treat that as success
+    /// (idempotent replay), not an error.
+    pub fn record_payment_once(
+        &self,
+        id: Uuid,
+        amount: Option<u64>,
+        reference: String,
+        method: String,
+        now: DateTime<Utc>,
+    ) -> Result<Option<Invoice>, StoreError> {
+        let _guard = self.write_lock()?;
+        let path = self.doc_path::<Invoice>(&id.to_string());
+        let Some(invoice) = read_json::<Invoice>(&path)? else {
+            return Err(StoreError::NotFound);
+        };
+        if invoice.payments.iter().any(|p| p.reference == reference) {
+            return Ok(None);
+        }
+        self.record_payment_locked(id, amount, reference, method, now)
+            .map(Some)
     }
 
     fn record_payment_locked(
