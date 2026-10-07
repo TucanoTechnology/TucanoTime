@@ -309,3 +309,21 @@ evidence; R2-1/2/4/6 are first-observations of the merged code.
 - Vault migration to `Nonce::generate()` (#205): OS CSPRNG via the
   `getrandom` feature chain; on-disk blob layout unchanged.
 - jsdom 30 + contrast (CI gates) pass on the merged web/ tree.
+
+### Round 2 outcome (2026-10-07)
+
+All seven findings were implemented and merged, each with regression tests:
+
+| Finding | PR | Landed |
+| --- | --- | --- |
+| R2-1 timer double-log | #227 | ✔ `guarded` existence check inside `finish_timer`; loser 404s |
+| R2-2 Cargo.lock | #223 | ✔ canonical lock regenerated; `--locked` enforced in CI + Dockerfile |
+| R2-3 lock docs | #224 | ✔ AGENTS/lock.rs/adr-001 state `is_open()` exactly; release-on-settle recorded as a decision |
+| R2-4 GUI lock preview | #225 | ✔ one `isOpenInvoice()` across preview + dashboard; 5-status jsdom test |
+| R2-5 races + bulk | #227 | ✔ `guarded_write` + `locked_entries()`; partly_paid expense lock fixed en route |
+| R2-6 #182 polish | #226 | ✔ filter-select single owner, render seqs, dead CSS removed |
+| R2-7 hygiene | #228 | ✔ expect→typed errors, dead prefix arm gone, defense-in-depth annotated, C3 closed (Project `Deserialize` removed) |
+
+Residuals intentionally open (documented, not ticketed): claims-as-lock-provider
+folding (`src/lock.rs` note), Vanilla stages 2a–3 (`docs/ubuntu-design.md`),
+and the manual keyboard/AT passes required per stage there.
