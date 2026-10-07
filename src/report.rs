@@ -13,6 +13,35 @@ use uuid::Uuid;
 use crate::auth::User;
 use crate::domain::{Customer, Entry, Task, effective_rates};
 
+fn margin_minor(revenue: u64, cost: u64) -> i64 {
+    if revenue >= cost {
+        i64::try_from(revenue - cost).unwrap_or(i64::MAX)
+    } else {
+        let difference = cost - revenue;
+        if difference > i64::MAX as u64 {
+            i64::MIN
+        } else {
+            -(difference as i64)
+        }
+    }
+}
+
+#[cfg(test)]
+mod margin_tests {
+    use super::margin_minor;
+
+    #[test]
+    fn margin_conversion_handles_signed_boundaries_without_wrapping() {
+        assert_eq!(margin_minor(i64::MAX as u64, 0), i64::MAX);
+        assert_eq!(margin_minor((i64::MAX as u64) + 1, 0), i64::MAX);
+        assert_eq!(margin_minor(0, i64::MAX as u64), -i64::MAX);
+        assert_eq!(margin_minor(0, (i64::MAX as u64) + 1), i64::MIN);
+        assert_eq!(margin_minor(0, u64::MAX), i64::MIN);
+        assert_eq!(margin_minor(10, 9), 1);
+        assert_eq!(margin_minor(9, 10), -1);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
     Customer,
@@ -272,7 +301,7 @@ pub fn summarise_profit(
                 currency,
                 revenue_minor: revenue,
                 cost_minor: cost,
-                margin_minor: revenue as i64 - cost as i64,
+                margin_minor: margin_minor(revenue, cost),
             });
         }
     }
