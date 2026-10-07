@@ -374,7 +374,9 @@ pub fn record_sync(
         outcome = Some(rec);
         records
     })?;
-    Ok(outcome.expect("closure always sets"))
+    // #220: the closure assigns on every non-`?` path, but a panic here
+    // inside a background job would take the scheduler down — typed error.
+    outcome.ok_or_else(|| crate::store::StoreError::Io("sync record closure invariant".into()))
 }
 
 pub fn list_records(store: &Store) -> Result<Vec<SyncRecord>, crate::store::StoreError> {
