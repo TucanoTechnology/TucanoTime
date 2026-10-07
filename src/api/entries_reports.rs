@@ -326,7 +326,7 @@ pub async fn profitability(State(app): State<AppState>, Query(q): Query<RangeQue
     let expenses = app.store.list_expenses()?;
     let entries = app.store.list_range(from, to)?;
     let customers = app.store.list_customers()?;
-    let (projects, _tasks, users) = gather_hierarchy(&app, &customers)?;
+    let (projects, users) = gather_hierarchy(&app, &customers)?;
     let result = report::summarise_profit(
         &invoices,
         &expenses,
