@@ -5304,7 +5304,7 @@
         "summary": "Revenue by customer and currency + status counts (#31, #186)",
         "responses": {
           "200": {
-            "description": "Report.",
+            "description": "Report. Breaking change (#186): total_revenue_minor has been removed because summing minor units across currencies is invalid; use revenue_by_currency instead.",
             "content": {
               "application/json": {
                 "schema": {
