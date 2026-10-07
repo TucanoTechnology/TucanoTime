@@ -322,6 +322,18 @@ pub async fn create_claim(
     let mut errors = Vec::new();
     let mut total: u64 = 0;
     let mut currency: Option<Currency> = None;
+    // #187: a repeated expense id used to sum its amount twice into the
+    // persisted claim total shown to approvers (while referencing one
+    // expense). Reject duplicates before any work.
+    let mut seen = std::collections::HashSet::new();
+    for id in &input.expense_ids {
+        if !seen.insert(id) {
+            return Err(ApiError::validation(vec![FieldError::new(
+                "expense_ids",
+                format!("expense {id} is listed more than once"),
+            )]));
+        }
+    }
     for id in &input.expense_ids {
         let Some(x) = app.store.get_expense(*id)? else {
             errors.push(FieldError::new(
