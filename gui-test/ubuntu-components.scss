@@ -25,3 +25,19 @@ $increase-font-size-on-larger-screens: false;
 @include vf-p-icon-lock-locked;
 @include vf-p-icon-comments;
 @include vf-p-icon-success;
+
+// #191 stage 1: extend the pinned vendor build with the official component
+// patterns the GUI currently re-implements by hand (tables, cards, chips,
+// badges, notifications, modal dialogs, tabs). Deliberately NO global reset
+// and no base-element styles — the editable timesheet grid is app-owned.
+// App templates switch onto these classes gradually (stages 2-3, tracked on
+// #191); until then these rules are additive-only.
+@include vf-b-tables;
+@include vf-p-table-sortable;
+@include vf-p-table-mobile-card;
+@include vf-p-card;
+@include vf-p-chip;
+@include vf-p-badge;
+@include vf-p-notification;
+@include vf-p-modal;
+@include vf-p-tabs;

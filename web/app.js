@@ -93,21 +93,26 @@ function ubuntuIcon(name) {
 
 function decorateUbuntuButton(button) {
   if (button.getAttribute('role') === 'tab') return;
-  const positive = button.type === 'submit' || button.classList.contains('primary')
+  // #191: `data-positive`/`data-icon` are the stable contract (a label or id
+  // rename can no longer silently strip the icon/colour); the old submit,
+  // class, id-allowlist and label-matching rules remain fallbacks.
+  const positive = button.dataset.positive === '1'
+    || button.type === 'submit' || button.classList.contains('primary')
     || ['customer-new', 'expense-new', 'user-new', 'iw-save', 'ed-save'].includes(button.id);
   if (!button.classList.contains('link') && !button.classList.contains('danger')) {
     button.classList.add(positive ? 'p-button--positive' : 'p-button');
   }
   if (button.querySelector('[class*="p-icon--"]')) return;
   const text = button.textContent.trim();
-  const icon = text.startsWith('+') ? 'plus'
-    : text === 'Edit' ? 'edit'
-    : text === 'Delete' ? 'delete'
-    : text.startsWith('Copy') ? 'copy'
-    : text === 'Start timer' ? 'play'
-    : text === 'Stop' ? 'stop' : null;
+  const icon = button.dataset.icon
+    ?? (text.startsWith('+') ? 'plus'
+      : text === 'Edit' ? 'edit'
+      : text === 'Delete' ? 'delete'
+      : text.startsWith('Copy') ? 'copy'
+      : text === 'Start timer' ? 'play'
+      : text === 'Stop' ? 'stop' : null);
   if (icon) {
-    if (text.startsWith('+')) {
+    if (!button.dataset.icon && text.startsWith('+')) {
       const label = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().startsWith('+'));
       if (label) label.textContent = label.textContent.replace(/^\s*\+\s*/, '');
     }
@@ -1422,8 +1427,9 @@ function startCustomerEdit(c) {
 
 // ---- customer contacts editor (#139) — rows are plain inputs read on save.
 function contactRow(c = { name: '', role: '', email: '', billing: false }) {
+  // #191: each field gets a real accessible name (placeholder is unreliable).
   const mk = (ph, val, type = 'text') =>
-    el('input', { attrs: { placeholder: ph, value: val, type, maxlength: ph === 'Email' ? 200 : 120 } });
+    el('input', { attrs: { placeholder: ph, 'aria-label': ph, value: val, type, maxlength: ph === 'Email' ? 200 : 120 } });
   const name = mk('Name', c.name);
   const role = mk('Role', c.role);
   const email = mk('Email', c.email, 'email');
@@ -2359,7 +2365,9 @@ function dashRenderOverview(invoices) {
     bars.push(col);
     labels.push(`${names[m]}: open ${formatMoney(months.open[m])}, paid ${formatMoney(months.paid[m])}`);
   }
-  chart.appendChild(el('span', { cls: 'sr-only', text: labels.join('; ') }));
+  // #191: children of a role="img" node are presentational to AT, so the
+  // per-month summary must ride the accessible NAME, not the subtree.
+  chart.setAttribute('aria-label', `Monthly open versus paid amounts, ${dash.year}. ${labels.join('; ')}`);
   for (const b of bars) chart.appendChild(b);
 }
 
@@ -2494,21 +2502,21 @@ function edTotals(subtotal, taxH, discH) {
 }
 
 function edLineRow(line = null) {
-  const desc = el('input', { attrs: { type: 'text', maxlength: 500, placeholder: 'Description', value: line ? line.note : '' } });
+  const desc = el('input', { attrs: { type: 'text', maxlength: 500, placeholder: 'Description', 'aria-label': 'Line description', value: line ? line.note : '' } });
   const itemSel = el('select', { attrs: { 'aria-label': 'Catalog item type (prefills this line)' } });
-  const kind = el('select', {}, [
+  const kind = el('select', { attrs: { 'aria-label': 'Product or service' } }, [
     el('option', { attrs: { value: 'product', selected: !line || line.item_kind !== 'service' ? '' : null }, text: 'Product' }),
     el('option', { attrs: { value: 'service' }, text: 'Service' }),
   ]);
   if (line && line.item_kind === 'service') kind.value = 'service';
   const qty = el('input', {
     cls: 'num',
-    attrs: { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal', style: 'width:7ch',
+    attrs: { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal', style: 'width:7ch', 'aria-label': 'Quantity',
       value: line && line.quantity_hundredths ? (line.quantity_hundredths / 100).toFixed(2) : '1.00' },
   });
   const price = el('input', {
     cls: 'num',
-    attrs: { type: 'number', min: '0', step: '0.01', inputmode: 'decimal', style: 'width:9ch',
+    attrs: { type: 'number', min: '0', step: '0.01', inputmode: 'decimal', style: 'width:9ch', 'aria-label': 'Unit price',
       value: line && line.unit_price_minor != null ? (line.unit_price_minor / 100).toFixed(2) : '0.00' },
   });
   const amount = el('td', { cls: 'num' });
