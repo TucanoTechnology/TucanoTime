@@ -989,7 +989,7 @@ async function weekLockIds() {
   }
   if (invsRes.status === 'fulfilled') {
     for (const i of invsRes.value.invoices || []) {
-      if (i.status === 'issued') for (const l of i.lines || []) if (l.entry_id) locked.add(l.entry_id);
+      if (isOpenInvoice(i)) for (const l of i.lines || []) if (l.entry_id) locked.add(l.entry_id);
     }
   }
   weekLockCache = { at: Date.now(), ids: locked };
@@ -2034,7 +2034,7 @@ async function refreshInvoices() {
     // Balance semantics (#114): legacy paid docs without a ledger count as
     // fully settled; a written-off balance is forgiven, not outstanding.
     const balance = invBalance(inv); // #189: shared semantic
-    const open = inv.status === 'issued' || inv.status === 'partly_paid';
+    const open = isOpenInvoice(inv);
     if (inv.status === 'draft') {
       actions.push(
         action('link', 'Edit', () => api.get(`/invoices/${inv.id}`).then(edOpen, (e) => announce(e.message)),
@@ -2347,6 +2347,16 @@ const dash = {
   currency: '',
 };
 
+/// The server locks entry edits/deletes while an invoice is OPEN —
+/// InvoiceStatus::is_open() == issued | partly_paid (src/domain.rs); settled
+/// and written-off invoices release their entries (#114 lifecycle, #216).
+/// #217: one predicate, previously four ad-hoc copies that had drifted —
+/// weekLockIds checked only 'issued', so partly-paid invoices showed their
+/// entries as editable while the server answered every save with 409.
+function isOpenInvoice(inv) {
+  return inv.status === 'issued' || inv.status === 'partly_paid';
+}
+
 function invBalance(inv) {
   const paid = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
   if (inv.status === 'paid' || inv.status === 'written_off') return 0;
@@ -2355,7 +2365,7 @@ function invBalance(inv) {
 
 function dashFilter(invoices) {
   let rows = invoices;
-  if (dash.openOnly) rows = rows.filter((i) => i.status === 'issued' || i.status === 'partly_paid');
+  if (dash.openOnly) rows = rows.filter(isOpenInvoice);
   const q = dash.q.trim().toLowerCase();
   if (q) {
     rows = rows.filter(
@@ -2389,7 +2399,7 @@ function dashChartMonths(invoices) {
   const paid = Array(12).fill(0);
   for (const i of invoices) {
     const cy = i.period_to.slice(0, 4) === String(dash.year);
-    if (cy && (i.status === 'issued' || i.status === 'partly_paid')) {
+    if (cy && isOpenInvoice(i)) {
       open[Number(i.period_to.slice(5, 7)) - 1] += invBalance(i);
     }
     for (const p of i.payments || []) {
@@ -2415,7 +2425,7 @@ function dashRenderOverview(invoices) {
   const multi = new Set(invoices.filter((i) => i.status !== 'draft').map((i) => i.currency));
   const openByCur = {};
   for (const i of invoices) {
-    if (i.status === 'issued' || i.status === 'partly_paid') {
+    if (isOpenInvoice(i)) {
       openByCur[i.currency] = (openByCur[i.currency] || 0) + invBalance(i);
     }
   }
