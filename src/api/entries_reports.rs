@@ -56,6 +56,20 @@ fn validate_entry_refs(
 
 /// Map `validate_entry_refs`' two failure kinds: a store fault is the API
 /// error it is; collected field errors are the documented 422.
+/// #185 semantics + #218 placement: consulted from INSIDE the write-lock
+/// transaction of the guarded store calls, so no issue can race in between
+/// checking and writing. Unverifiable lock state fails closed (503).
+fn ensure_unlocked(app: &AppState, id: Uuid, action: &str) -> Result<(), ApiError> {
+    match app.locks.entry_lock(id) {
+        Ok(Some(reason)) => Err(ApiError::conflict(reason.message())),
+        Ok(None) => Ok(()),
+        Err(e) => {
+            tracing::warn!(error = ?e.0, entry = %id, "lock state unavailable; refusing entry {action}");
+            Err(ApiError::lock_unavailable())
+        }
+    }
+}
+
 fn ensure_entry_refs(store: &Store, draft: &crate::domain::EntryDraft) -> Result<(), ApiError> {
     let errors = validate_entry_refs(store, draft)?;
     if errors.is_empty() {
@@ -152,15 +166,6 @@ pub async fn update_entry(
         .get_entry(id)?
         .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
-    match app.locks.entry_lock(id) {
-        Ok(Some(reason)) => return Err(ApiError::conflict(reason.message())),
-        Ok(None) => {}
-        // #185: unverifiable lock state fails closed, it never lets the edit through.
-        Err(e) => {
-            tracing::warn!(error = ?e.0, entry = %id, "lock state unavailable; refusing entry edit");
-            return Err(ApiError::lock_unavailable());
-        }
-    }
     let draft = validate_entry_input(&input).map_err(ApiError::validation)?;
     ensure_entry_refs(&app.store, &draft)?;
     let updated = Entry {
@@ -178,8 +183,13 @@ pub async fn update_entry(
         updated_at: app.clock.now(),
     };
     // Relocation across day folders is one store transaction (review B4):
-    // half-applying it would double-count the entry in every report.
-    app.store.save_entry(Some(existing.date), &updated)?;
+    // half-applying it would double-count the entry in every report. #218:
+    // the lock check now runs INSIDE that transaction — previously an
+    // issue_invoice landing between check and save let the edit through.
+    app.store
+        .save_entry_guarded(Some(existing.date), &updated, || {
+            ensure_unlocked(&app, id, "edit")
+        })?;
     Ok(Json(entry_json(&updated)).into_response())
 }
 
@@ -193,16 +203,9 @@ pub async fn delete_entry(
         .get_entry(id)?
         .filter(|e| visible_to(&actor.0, e.user_id))
         .ok_or_else(|| ApiError::not_found("entry"))?;
-    match app.locks.entry_lock(id) {
-        Ok(Some(reason)) => return Err(ApiError::conflict(reason.message())),
-        Ok(None) => {}
-        // #185: unverifiable lock state fails closed, it never lets the delete through.
-        Err(e) => {
-            tracing::warn!(error = ?e.0, entry = %id, "lock state unavailable; refusing entry delete");
-            return Err(ApiError::lock_unavailable());
-        }
-    }
-    app.store.delete_entry(&entry)?;
+    // #218: verified inside the delete transaction (see update_entry).
+    app.store
+        .delete_entry_guarded(&entry, || ensure_unlocked(&app, id, "delete"))?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
