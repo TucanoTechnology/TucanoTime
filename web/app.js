@@ -2024,10 +2024,10 @@ async function refreshInvoices() {
       closeInvoicePreview();
     }
   }
-  await refreshInvoiceSummary();
+  await refreshInvoiceSummary(data.invoices || []); // #189: reuse the list we just fetched
 }
 
-async function refreshInvoiceSummary() {
+async function refreshInvoiceSummary(preloaded) {
   const s = await api.get('/invoices/summary');
   const outstanding = Object.entries(s.outstanding || {})
     .map(([cur, minor]) => `${cur} ${formatMoney(minor)}`)
@@ -2039,8 +2039,11 @@ async function refreshInvoiceSummary() {
     (s.written_off ? ` · Written off ${s.written_off}` : '') +
     (outstanding ? ` · Outstanding: ${outstanding}` : '');
   // #135 overview band: tiles + monthly chart (balances & ledger are the truth)
+  // #189: the invoice list is passed through from refreshInvoices (and from
+  // the chained call at its foot) instead of a third GET /invoices per
+  // filter change; standalone callers still fetch once.
   try {
-    const all = (await api.get('/invoices')).invoices || [];
+    const all = preloaded ?? (await api.get('/invoices')).invoices ?? [];
     if (all.length && !dash.currency) dash.currency = all.find((i) => i.status !== 'draft')?.currency || '';
     dashRenderOverview(all);
     // project filter options follow the customer filter
@@ -4173,20 +4176,9 @@ function refreshPanel(tabId) {
 }
 
 // Wires the app listeners and loads the first data. Called once authenticated.
-async function startApp() {
-  const today = isoDate(new Date());
-  $('day-date').value = today;
-  $('entry-date').value = today;
-  $('week-date').value = today;
-  $('report-from').value = mondayOf(today);
-  $('report-to').value = addDays(mondayOf(today), 6);
-
-  initTabs();
-  document.querySelectorAll('button').forEach(decorateUbuntuButton);
-  initSegTabs(); // Day | Week inside the Timesheets section (#107)
-  initSettingsTabs();
-  initWizard(); // first-run setup wizard (#111)
-
+// Day actions + logged-time calendar nav (#140). Extracted from
+// startApp (#189).
+function wireDayAndCalendar() {
   $('day-add').addEventListener('click', () => {
     resetEntryForm();
     showEntryForm(true);
@@ -4210,6 +4202,10 @@ async function startApp() {
     calState.month = isoDate(new Date()).slice(0, 7);
     refreshTimeCal().catch?.(() => {});
   });
+}
+
+// Invoice dashboard controls (#135/#189).
+function wireInvoiceDashboard() {
   // #135 dashboard controls
   $('inv-tab-open').addEventListener('click', () => {
     dash.openOnly = true;
@@ -4229,7 +4225,8 @@ async function startApp() {
   });
   $('inv-f-customer').addEventListener('change', () => {
     dash.customer = $('inv-f-customer').value;
-    refreshInvoiceSummary().catch?.(() => {});
+    // #189: refreshInvoices chains refreshInvoiceSummary with the shared
+    // payload — the old double call fired two renders and three GETs.
     refreshInvoices().catch?.(() => {});
   });
   $('inv-f-project').addEventListener('change', () => {
@@ -4265,6 +4262,10 @@ async function startApp() {
     dash.year += 1;
     refreshInvoiceSummary().catch?.(() => {});
   });
+}
+
+// Entry dialog form wiring (#141/#145/#189).
+function wireEntryForm() {
   $('entry-form').addEventListener('submit', saveEntry);
   $('entry-cancel').addEventListener('click', () => {
     resetEntryForm();
@@ -4298,6 +4299,10 @@ async function startApp() {
     await fillTaskSelect($('entry-task'), $('entry-customer').value, e.target.value, null);
   });
 
+}
+
+// Week grid: inline cell editing via delegated events (#13/#189).
+function wireWeekGrid() {
   // Week grid (#13): inline cell editing via delegated events.
   const wt = $('week-table');
   wt.addEventListener('focusout', (e) => {
@@ -4397,6 +4402,12 @@ async function startApp() {
     }
   });
   $('customer-cancel').addEventListener('click', cancelCustomerEdit);
+}
+
+// Customers/projects/tasks, billing settings, expenses, timer wiring (#189).
+// `today` is passed in: the submission-week seed belongs to the boot date
+// seeding, not the wiring block (see #189 extraction).
+function wireSetupPanels(today) {
   // #116: the day input only makes sense for `custom` terms.
   $('customer-terms').addEventListener('change', () => {
     $('customer-terms-days-field').hidden = $('customer-terms').value !== 'custom';
@@ -4522,6 +4533,30 @@ async function startApp() {
     if (c) $('expense-currency').value = c.currency;
   });
 
+}
+
+// Wires the app listeners and loads the first data. Called once authenticated.
+// #189: the listener blocks live in the focused wire*() functions above;
+// what remains here is seeding + the boot sequence itself.
+async function startApp() {
+  const today = isoDate(new Date());
+  $('day-date').value = today;
+  $('entry-date').value = today;
+  $('week-date').value = today;
+  $('report-from').value = mondayOf(today);
+  $('report-to').value = addDays(mondayOf(today), 6);
+
+  initTabs();
+  document.querySelectorAll('button').forEach(decorateUbuntuButton);
+  initSegTabs(); // Day | Week inside the Timesheets section (#107)
+  initSettingsTabs();
+  initWizard(); // first-run setup wizard (#111)
+
+  wireDayAndCalendar();
+  wireInvoiceDashboard();
+  wireEntryForm();
+  wireWeekGrid();
+  wireSetupPanels(today);
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
   refreshSchedules().catch?.(() => {});
@@ -4536,17 +4571,17 @@ async function startApp() {
   const firstPaint = refreshDay();
   $('expense-date').value = today;
   await Promise.all([
-    firstPaint,
-    refreshWeek(),
-    refreshCustomerTable(),
-    refreshInvoices(),
-    refreshTimer(),
-    refreshNotifications(),
-    refreshCategories(),
-    fillCategorySelect(),
-    refreshExpenses(),
-    refreshSubmissions(),
-    refreshSettings(),
+  firstPaint,
+  refreshWeek(),
+  refreshCustomerTable(),
+  refreshInvoices(),
+  refreshTimer(),
+  refreshNotifications(),
+  refreshCategories(),
+  fillCategorySelect(),
+  refreshExpenses(),
+  refreshSubmissions(),
+  refreshSettings(),
   ]);
   $('version').textContent = 'TucanoTime';
 }
