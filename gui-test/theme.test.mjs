@@ -20,8 +20,14 @@ function setup({ dark = false, saved, blocked = false } = {}) {
 test('switch is below wizard and outside navigation tablist', () => {
   const { dom } = setup();
   const control = dom.window.document.getElementById('theme-switch');
-  assert.equal(control.previousElementSibling.id, 'tabs');
-  assert.equal(dom.window.document.querySelector('#tabs > button:last-child').id, 'wizard-open');
+  // #191: the wizard button is a nav sibling of the tablist (a non-tab
+  // button inside role="tablist" violates ARIA required-owned-children and
+  // gets announced as a tab candidate).
+  assert.equal(control.previousElementSibling.id, 'wizard-open');
+  assert.equal(dom.window.document.getElementById('wizard-open').closest('[role="tablist"]'), null,
+    'wizard must not live inside the tablist');
+  assert.equal(dom.window.document.querySelector('#tabs button:not([role="tab"])'), null,
+    'every button inside the tablist is a tab');
   assert.equal(control.closest('[role="tablist"]'), null);
   dom.window.close();
 });

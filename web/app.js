@@ -93,21 +93,26 @@ function ubuntuIcon(name) {
 
 function decorateUbuntuButton(button) {
   if (button.getAttribute('role') === 'tab') return;
-  const positive = button.type === 'submit' || button.classList.contains('primary')
+  // #191: `data-positive`/`data-icon` are the stable contract (a label or id
+  // rename can no longer silently strip the icon/colour); the old submit,
+  // class, id-allowlist and label-matching rules remain fallbacks.
+  const positive = button.dataset.positive === '1'
+    || button.type === 'submit' || button.classList.contains('primary')
     || ['customer-new', 'expense-new', 'user-new', 'iw-save', 'ed-save'].includes(button.id);
   if (!button.classList.contains('link') && !button.classList.contains('danger')) {
     button.classList.add(positive ? 'p-button--positive' : 'p-button');
   }
   if (button.querySelector('[class*="p-icon--"]')) return;
   const text = button.textContent.trim();
-  const icon = text.startsWith('+') ? 'plus'
-    : text === 'Edit' ? 'edit'
-    : text === 'Delete' ? 'delete'
-    : text.startsWith('Copy') ? 'copy'
-    : text === 'Start timer' ? 'play'
-    : text === 'Stop' ? 'stop' : null;
+  const icon = button.dataset.icon
+    ?? (text.startsWith('+') ? 'plus'
+      : text === 'Edit' ? 'edit'
+      : text === 'Delete' ? 'delete'
+      : text.startsWith('Copy') ? 'copy'
+      : text === 'Start timer' ? 'play'
+      : text === 'Stop' ? 'stop' : null);
   if (icon) {
-    if (text.startsWith('+')) {
+    if (!button.dataset.icon && text.startsWith('+')) {
       const label = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().startsWith('+'));
       if (label) label.textContent = label.textContent.replace(/^\s*\+\s*/, '');
     }
@@ -119,6 +124,18 @@ function decorateUbuntuButton(button) {
 
 // The shared select-refill pattern: clear, then append options described as
 // `{ value, text, selected }`. Selection happens by property, as before.
+// One action-cell button builder for every table row (#189: previously a
+// byte-identical local const existed twice, and five renderers re-inlined it).
+function rowAction(cls, text, fn, title) {
+  return el('button', {
+    cls,
+    type: 'button',
+    text,
+    attrs: title ? { title } : {},
+    on: { click: fn },
+  });
+}
+
 function fillSelect(select, options) {
   select.textContent = '';
   for (const o of options) {
@@ -279,7 +296,6 @@ function formatMoney(minor) {
 
 const state = {
   isAdmin: false, // #188: set from /auth/me; gates admin-tier panel loads at boot
-  invoices: [], // #133: last rendered invoice list
   customers: [],           // Customer[]
   projectsByCustomer: {},  // id -> Project[]
 };
@@ -858,9 +874,8 @@ function startEdit(e) {
   $('entry-form-title').textContent = `Edit entry ${e.id.slice(0, 8)}`;
   $('entry-save').textContent = 'Update entry';
   $('entry-cancel').hidden = false;
-  $('entry-hours').focus(); // dialog is open — start where the edit happens
   clearFormError($('entry-error'));
-  $('entry-customer').focus();
+  $('entry-customer').focus(); // #189: the earlier entry-hours focus was immediately stolen
   $('entry-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -955,20 +970,23 @@ async function weekLockIds() {
   const nowMs = Date.now();
   if (weekLockCache.ids && nowMs - weekLockCache.at < 5000) return weekLockCache.ids;
   const locked = new Set();
-  try {
-    const subs = await api.get('/submissions');
-    for (const s of subs.submissions || []) {
+  // #189: the two reads are independent — overlap them (was sequential).
+  const [subsRes, invsRes] = await Promise.allSettled([
+    api.get('/submissions'),
+    api.get('/invoices'), // admin-only; a member rejection is the normal arm
+  ]);
+  if (subsRes.status === 'fulfilled') {
+    for (const s of subsRes.value.submissions || []) {
       if (s.state === 'submitted' || s.state === 'approved') {
         for (const id of s.entry_ids || []) locked.add(id);
       }
     }
-  } catch { /* ignore */ }
-  try {
-    const invs = await api.get('/invoices'); // admin-only; members skip silently
-    for (const i of invs.invoices || []) {
+  }
+  if (invsRes.status === 'fulfilled') {
+    for (const i of invsRes.value.invoices || []) {
       if (i.status === 'issued') for (const l of i.lines || []) if (l.entry_id) locked.add(l.entry_id);
     }
-  } catch { /* members cannot list invoices */ }
+  }
   weekLockCache = { at: Date.now(), ids: locked };
   return locked;
 }
@@ -983,7 +1001,7 @@ function invalidateLockCache() {
 function weekShort(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
-  return `${String(d).padStart(2, '0')} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]}`;
+  return `${String(d).padStart(2, '0')} ${MONTH_NAMES[m - 1]}`; // #189: one month table
 }
 
 async function refreshWeek() {
@@ -1422,8 +1440,9 @@ function startCustomerEdit(c) {
 
 // ---- customer contacts editor (#139) — rows are plain inputs read on save.
 function contactRow(c = { name: '', role: '', email: '', billing: false }) {
+  // #191: each field gets a real accessible name (placeholder is unreliable).
   const mk = (ph, val, type = 'text') =>
-    el('input', { attrs: { placeholder: ph, value: val, type, maxlength: ph === 'Email' ? 200 : 120 } });
+    el('input', { attrs: { placeholder: ph, 'aria-label': ph, value: val, type, maxlength: ph === 'Email' ? 200 : 120 } });
   const name = mk('Name', c.name);
   const role = mk('Role', c.role);
   const email = mk('Email', c.email, 'email');
@@ -1731,8 +1750,7 @@ async function removeProject(p) {
     await refreshProjectTable();
     announce('Project deleted.');
   } catch (err) {
-    announce(err.message);
-    await askAlert(err.message);
+    await askAlert(err.message); // #189: was double-reported (announce + dialog)
   }
 }
 
@@ -1851,8 +1869,7 @@ async function removeTask(t) {
     await refreshTaskTable();
     announce('Task deleted.');
   } catch (err) {
-    announce(err.message);
-    await askAlert(err.message);
+    await askAlert(err.message); // #189: was double-reported (announce + dialog)
   }
 }
 
@@ -1923,25 +1940,14 @@ async function refreshInvoices() {
   const data = await api.get('/invoices');
   if (seq !== invoicesRenderSeq) return; // a newer refresh superseded this one
   const invoices = dashFilter(data.invoices || []); // #135 filters + sort
-  state.invoices = data.invoices || []; // #133: the preview re-renders against fresh data
   const tbody = $('invoice-table').querySelector('tbody');
   tbody.textContent = '';
-  const action = (cls, text, fn, title) =>
-    el('button', {
-      cls,
-      type: 'button',
-      text,
-      attrs: title ? { title } : {},
-      on: { click: fn },
-    });
+  const action = rowAction; // #189: shared builder
   for (const inv of invoices) {
     const actions = [];
     // Balance semantics (#114): legacy paid docs without a ledger count as
     // fully settled; a written-off balance is forgiven, not outstanding.
-    const paidMinor = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
-    const balance = inv.status === 'paid' || inv.status === 'written_off'
-      ? 0
-      : Math.max(inv.total_minor - paidMinor, 0);
+    const balance = invBalance(inv); // #189: shared semantic
     const open = inv.status === 'issued' || inv.status === 'partly_paid';
     if (inv.status === 'draft') {
       actions.push(
@@ -2018,10 +2024,10 @@ async function refreshInvoices() {
       closeInvoicePreview();
     }
   }
-  await refreshInvoiceSummary();
+  await refreshInvoiceSummary(data.invoices || []); // #189: reuse the list we just fetched
 }
 
-async function refreshInvoiceSummary() {
+async function refreshInvoiceSummary(preloaded) {
   const s = await api.get('/invoices/summary');
   const outstanding = Object.entries(s.outstanding || {})
     .map(([cur, minor]) => `${cur} ${formatMoney(minor)}`)
@@ -2033,8 +2039,11 @@ async function refreshInvoiceSummary() {
     (s.written_off ? ` · Written off ${s.written_off}` : '') +
     (outstanding ? ` · Outstanding: ${outstanding}` : '');
   // #135 overview band: tiles + monthly chart (balances & ledger are the truth)
+  // #189: the invoice list is passed through from refreshInvoices (and from
+  // the chained call at its foot) instead of a third GET /invoices per
+  // filter change; standalone callers still fetch once.
   try {
-    const all = (await api.get('/invoices')).invoices || [];
+    const all = preloaded ?? (await api.get('/invoices')).invoices ?? [];
     if (all.length && !dash.currency) dash.currency = all.find((i) => i.status !== 'draft')?.currency || '';
     dashRenderOverview(all);
     // project filter options follow the customer filter
@@ -2081,10 +2090,7 @@ async function recordPayment(inv, balance) {
     if (paid.status === 'paid') {
       announce('Invoice marked paid.');
     } else {
-      const rest = Math.max(
-        paid.total_minor - (paid.payments || []).reduce((a, p) => a + p.amount_minor, 0),
-        0,
-      );
+      const rest = invBalance(paid); // #189: shared semantic
       announce(`Payment recorded. ${paid.currency} ${formatMoney(rest)} still outstanding.`);
     }
     await refreshInvoices();
@@ -2359,16 +2365,15 @@ function dashRenderOverview(invoices) {
     bars.push(col);
     labels.push(`${names[m]}: open ${formatMoney(months.open[m])}, paid ${formatMoney(months.paid[m])}`);
   }
-  chart.appendChild(el('span', { cls: 'sr-only', text: labels.join('; ') }));
+  // #191: children of a role="img" node are presentational to AT, so the
+  // per-month summary must ride the accessible NAME, not the subtree.
+  chart.setAttribute('aria-label', `Monthly open versus paid amounts, ${dash.year}. ${labels.join('; ')}`);
   for (const b of bars) chart.appendChild(b);
 }
 
 function dashApplyColumns() {
   const on = new Set([...document.querySelectorAll('.inv-col:checked')].map((c) => c.value));
   const table = $('invoice-table');
-  for (const th of table.querySelectorAll('thead th[data-hide], tbody th[data-hide], tbody td[data-hide]')) {
-    // headers get data-hide at build time below; fall back to index map
-  }
   const idx = { customer: 1, period: 2, total: 3, balance: 4, status: 5 };
   for (const [name, i] of Object.entries(idx)) {
     const hide = !on.has(name);
@@ -2390,9 +2395,10 @@ function dashApplyColumns() {
 let invoicePreview = null; // { id, inv, opener }
 
 function invoiceBalance(inv) {
-  const paid = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
-  if (inv.status === 'paid' || inv.status === 'written_off') return 0;
-  return Math.max((inv.total_minor || 0) - paid, 0);
+  // #189: one balance semantic (the four copies had already drifted on the
+  // `|| 0` default). invBalance owns the rule; this stays as the alias the
+  // preview path uses.
+  return invBalance(inv);
 }
 
 async function openInvoicePreview(inv, opener) {
@@ -2494,21 +2500,21 @@ function edTotals(subtotal, taxH, discH) {
 }
 
 function edLineRow(line = null) {
-  const desc = el('input', { attrs: { type: 'text', maxlength: 500, placeholder: 'Description', value: line ? line.note : '' } });
+  const desc = el('input', { attrs: { type: 'text', maxlength: 500, placeholder: 'Description', 'aria-label': 'Line description', value: line ? line.note : '' } });
   const itemSel = el('select', { attrs: { 'aria-label': 'Catalog item type (prefills this line)' } });
-  const kind = el('select', {}, [
+  const kind = el('select', { attrs: { 'aria-label': 'Product or service' } }, [
     el('option', { attrs: { value: 'product', selected: !line || line.item_kind !== 'service' ? '' : null }, text: 'Product' }),
     el('option', { attrs: { value: 'service' }, text: 'Service' }),
   ]);
   if (line && line.item_kind === 'service') kind.value = 'service';
   const qty = el('input', {
     cls: 'num',
-    attrs: { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal', style: 'width:7ch',
+    attrs: { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal', style: 'width:7ch', 'aria-label': 'Quantity',
       value: line && line.quantity_hundredths ? (line.quantity_hundredths / 100).toFixed(2) : '1.00' },
   });
   const price = el('input', {
     cls: 'num',
-    attrs: { type: 'number', min: '0', step: '0.01', inputmode: 'decimal', style: 'width:9ch',
+    attrs: { type: 'number', min: '0', step: '0.01', inputmode: 'decimal', style: 'width:9ch', 'aria-label': 'Unit price',
       value: line && line.unit_price_minor != null ? (line.unit_price_minor / 100).toFixed(2) : '0.00' },
   });
   const amount = el('td', { cls: 'num' });
@@ -2748,8 +2754,6 @@ async function iwLoadProjects() {
     );
   }
   if (!shown) box.appendChild(el('span', { cls: 'hint', text: 'No uninvoiced billable work in this period.' }));
-  const rate = customerName(cid) ? ` (customer rate ${formatMoney((cust.default_rate_minor ?? 0) / 100 * 100)} default)` : '';
-  void rate;
 }
 
 function iwShow() {
@@ -3144,8 +3148,7 @@ async function refreshSchedules() {
   }
   const tbody = $('rec-table').querySelector('tbody');
   tbody.textContent = '';
-  const action = (cls, text, fn, title) =>
-    el('button', { cls, type: 'button', text, attrs: title ? { title } : {}, on: { click: fn } });
+  const action = rowAction; // #189: shared builder
   for (const scd of schedules) {
     const active = scd.active !== false;
     tbody.appendChild(
@@ -3675,7 +3678,19 @@ async function deleteUser(user) {
 }
 
 async function refreshSettings() {
-  await refreshUsers();
+  // #189: independent admin surfaces load in parallel (was a sequential
+  // six-request waterfall behind the Settings tab).
+  await Promise.all([
+    refreshUsers(),
+    refreshSecrets(),
+    refreshConfig(),
+    refreshOrgProfile(),
+    refreshCatalog(),
+    refreshInvoiceTemplate(),
+  ]);
+}
+
+async function refreshSecrets() {
   try {
     const data = await api.get('/admin/secrets');
     $('vault-status').textContent = 'Credential vault: enabled (encrypted at rest).';
@@ -3709,10 +3724,6 @@ async function refreshSettings() {
       announce(err.message);
     }
   }
-  await refreshConfig();
-  await refreshOrgProfile();
-  await refreshCatalog();
-  await refreshInvoiceTemplate();
 }
 
 /// Effective runtime configuration card (#94). Admin surface; members get a
@@ -4165,20 +4176,9 @@ function refreshPanel(tabId) {
 }
 
 // Wires the app listeners and loads the first data. Called once authenticated.
-async function startApp() {
-  const today = isoDate(new Date());
-  $('day-date').value = today;
-  $('entry-date').value = today;
-  $('week-date').value = today;
-  $('report-from').value = mondayOf(today);
-  $('report-to').value = addDays(mondayOf(today), 6);
-
-  initTabs();
-  document.querySelectorAll('button').forEach(decorateUbuntuButton);
-  initSegTabs(); // Day | Week inside the Timesheets section (#107)
-  initSettingsTabs();
-  initWizard(); // first-run setup wizard (#111)
-
+// Day actions + logged-time calendar nav (#140). Extracted from
+// startApp (#189).
+function wireDayAndCalendar() {
   $('day-add').addEventListener('click', () => {
     resetEntryForm();
     showEntryForm(true);
@@ -4202,6 +4202,10 @@ async function startApp() {
     calState.month = isoDate(new Date()).slice(0, 7);
     refreshTimeCal().catch?.(() => {});
   });
+}
+
+// Invoice dashboard controls (#135/#189).
+function wireInvoiceDashboard() {
   // #135 dashboard controls
   $('inv-tab-open').addEventListener('click', () => {
     dash.openOnly = true;
@@ -4221,7 +4225,8 @@ async function startApp() {
   });
   $('inv-f-customer').addEventListener('change', () => {
     dash.customer = $('inv-f-customer').value;
-    refreshInvoiceSummary().catch?.(() => {});
+    // #189: refreshInvoices chains refreshInvoiceSummary with the shared
+    // payload — the old double call fired two renders and three GETs.
     refreshInvoices().catch?.(() => {});
   });
   $('inv-f-project').addEventListener('change', () => {
@@ -4257,6 +4262,10 @@ async function startApp() {
     dash.year += 1;
     refreshInvoiceSummary().catch?.(() => {});
   });
+}
+
+// Entry dialog form wiring (#141/#145/#189).
+function wireEntryForm() {
   $('entry-form').addEventListener('submit', saveEntry);
   $('entry-cancel').addEventListener('click', () => {
     resetEntryForm();
@@ -4290,6 +4299,10 @@ async function startApp() {
     await fillTaskSelect($('entry-task'), $('entry-customer').value, e.target.value, null);
   });
 
+}
+
+// Week grid: inline cell editing via delegated events (#13/#189).
+function wireWeekGrid() {
   // Week grid (#13): inline cell editing via delegated events.
   const wt = $('week-table');
   wt.addEventListener('focusout', (e) => {
@@ -4389,6 +4402,12 @@ async function startApp() {
     }
   });
   $('customer-cancel').addEventListener('click', cancelCustomerEdit);
+}
+
+// Customers/projects/tasks, billing settings, expenses, timer wiring (#189).
+// `today` is passed in: the submission-week seed belongs to the boot date
+// seeding, not the wiring block (see #189 extraction).
+function wireSetupPanels(today) {
   // #116: the day input only makes sense for `custom` terms.
   $('customer-terms').addEventListener('change', () => {
     $('customer-terms-days-field').hidden = $('customer-terms').value !== 'custom';
@@ -4514,6 +4533,30 @@ async function startApp() {
     if (c) $('expense-currency').value = c.currency;
   });
 
+}
+
+// Wires the app listeners and loads the first data. Called once authenticated.
+// #189: the listener blocks live in the focused wire*() functions above;
+// what remains here is seeding + the boot sequence itself.
+async function startApp() {
+  const today = isoDate(new Date());
+  $('day-date').value = today;
+  $('entry-date').value = today;
+  $('week-date').value = today;
+  $('report-from').value = mondayOf(today);
+  $('report-to').value = addDays(mondayOf(today), 6);
+
+  initTabs();
+  document.querySelectorAll('button').forEach(decorateUbuntuButton);
+  initSegTabs(); // Day | Week inside the Timesheets section (#107)
+  initSettingsTabs();
+  initWizard(); // first-run setup wizard (#111)
+
+  wireDayAndCalendar();
+  wireInvoiceDashboard();
+  wireEntryForm();
+  wireWeekGrid();
+  wireSetupPanels(today);
   await loadCustomers();
   await refreshCustomerPickers(); // fills all four pickers, no fetches
   refreshSchedules().catch?.(() => {});
@@ -4528,17 +4571,17 @@ async function startApp() {
   const firstPaint = refreshDay();
   $('expense-date').value = today;
   await Promise.all([
-    firstPaint,
-    refreshWeek(),
-    refreshCustomerTable(),
-    refreshInvoices(),
-    refreshTimer(),
-    refreshNotifications(),
-    refreshCategories(),
-    fillCategorySelect(),
-    refreshExpenses(),
-    refreshSubmissions(),
-    refreshSettings(),
+  firstPaint,
+  refreshWeek(),
+  refreshCustomerTable(),
+  refreshInvoices(),
+  refreshTimer(),
+  refreshNotifications(),
+  refreshCategories(),
+  fillCategorySelect(),
+  refreshExpenses(),
+  refreshSubmissions(),
+  refreshSettings(),
   ]);
   $('version').textContent = 'TucanoTime';
 }
@@ -4613,8 +4656,7 @@ function wizPrepareProject() {
     fillSelect(
       $('wz-project-customer'),
       state.customers.map((c) => ({ value: c.id, text: c.name })),
-      state.customers[0] ? state.customers[0].id : null,
-    );
+    ); // #189: third fillSelect argument was silently ignored
   }
   wizPrefillFromCustomer(); // #11 prefill rule: currency + rate from the customer
 }

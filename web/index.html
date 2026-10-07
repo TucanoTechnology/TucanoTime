@@ -60,10 +60,12 @@
               <button role="tab" id="tab-reports" aria-controls="panel-reports" aria-selected="false" tabindex="-1"><i class="p-icon--history" aria-hidden="true"></i>Reports</button>
               <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1"><i class="p-icon--settings" aria-hidden="true"></i>Settings <span class="beta" title="Integration credentials — providers not yet wired">Beta</span></button>
             </div>
-          <!-- Utility action, outside both tablists. -->
-          <div class="tab-sep" role="separator" aria-hidden="true"></div>
-          <button type="button" id="wizard-open" title="Setup wizard — add your first customer and project" aria-haspopup="dialog"><i class="p-icon--settings" aria-hidden="true"></i>Setup wizard</button>
         </div>
+        <!-- Utility action — #191: moved OUT of the tablist (its permitted
+             children are tabs only; a stray button is announced as a tab
+             candidate by screen readers despite the separator). -->
+        <div class="tab-sep" role="separator" aria-hidden="true"></div>
+        <button type="button" id="wizard-open" class="nav-action" title="Setup wizard — add your first customer and project" aria-haspopup="dialog"><i class="p-icon--settings" aria-hidden="true"></i>Setup wizard</button>
         <fieldset class="theme-switch" id="theme-switch">
           <legend>Colour mode</legend>
           <label><input type="radio" name="colour-mode" value="light"> Light</label>
@@ -101,9 +103,9 @@
       <div class="day-bar">
         <div class="day-actions">
           <button type="button" id="day-add" class="primary">+ Track time</button>
-          <button type="button" id="timer-open" aria-controls="timerbar" aria-expanded="false">Start timer</button>
+          <button type="button" id="timer-open" data-icon="play" aria-controls="timerbar" aria-expanded="false">Start timer</button>
           <span id="timer-display" class="timer-display" role="timer" hidden>00:00:00</span>
-          <button type="button" id="timer-stop" class="secondary" hidden>Stop</button>
+          <button type="button" id="timer-stop" data-icon="stop" class="secondary" hidden>Stop</button>
           <button type="button" id="timer-discard" class="link" hidden>Discard</button>
         </div>
         <nav class="day-nav" aria-label="Change day">
@@ -118,7 +120,7 @@
         <select id="timer-customer"></select>
         <label for="timer-project">Project</label>
         <select id="timer-project"></select>
-        <button type="button" id="timer-start">Start timer</button>
+        <button type="button" id="timer-start" data-icon="play">Start timer</button>
         <button type="button" id="timer-cancel" class="link">Cancel</button>
       </div>
       <nav id="week-strip" class="week-strip" aria-label="Days of this week"></nav>
@@ -234,7 +236,7 @@
       <div class="customer-heading">
         <h2 id="customer-section-title">Customers &amp; projects</h2>
         <div class="hierarchy-actions" role="group" aria-label="Create reference data">
-          <button type="button" id="customer-new">+ Customer</button>
+          <button type="button" id="customer-new" data-icon="plus" data-positive="1">Customer</button>
           <button type="button" id="project-new" disabled title="Select a customer first">+ Project</button>
           <button type="button" id="task-new" disabled title="Select a project first">+ Task</button>
         </div>
@@ -424,7 +426,7 @@
         <div class="buttons">
           <button type="button" id="iw-back" class="secondary" hidden>Back</button>
           <button type="button" id="iw-next" class="primary">Next</button>
-          <button type="button" id="iw-save" class="primary" hidden>Save draft</button>
+          <button type="button" id="iw-save" class="primary" data-positive="1" hidden>Save draft</button>
         </div>
       </div>
       <div class="invoice-secondary-actions">
@@ -447,7 +449,7 @@
         </div>
         <dl id="ed-totals" class="ip-facts"></dl>
         <p class="form-error" id="ed-error" role="alert" hidden></p>
-        <div class="buttons"><button type="button" id="ed-save" class="primary">Save draft</button></div>
+        <div class="buttons"><button type="button" id="ed-save" class="primary" data-positive="1">Save draft</button></div>
       </div>
       </section>
       <section class="invoice-register-column" aria-label="Invoice register">
@@ -565,7 +567,7 @@
     <section id="panel-expenses" role="tabpanel" aria-labelledby="tab-expenses" tabindex="0" hidden>
       <div class="panel-heading-row">
         <h2>Expenses</h2>
-        <button type="button" id="expense-new" class="primary">+ Expense</button>
+        <button type="button" id="expense-new" class="primary" data-icon="plus" data-positive="1">Expense</button>
       </div>
       <table id="expense-table">
         <caption class="sr-only">Expenses</caption>
@@ -631,7 +633,7 @@
 
       <section id="settings-panel-users" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-users" tabindex="0" hidden>
         <h2>User management</h2>
-        <button type="button" id="user-new">+ User</button>
+        <button type="button" id="user-new" data-icon="plus" data-positive="1">User</button>
         <div class="bar user-filters">
           <div><label for="user-search">Name or email</label><input id="user-search" type="search" autocomplete="off"></div>
           <div><label for="user-filter-role">Role</label><select id="user-filter-role"><option value="">All roles</option><option value="admin">Administrator</option><option value="member">Member</option></select></div>

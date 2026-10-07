@@ -1213,8 +1213,9 @@ impl Store {
     }
 
     /// Entries are addressable by id alone, but stored under their date, so
-    /// this walks the day folders (bounded by MAX_RANGE_DAYS in either
-    /// direction of today, which is where live data lives).
+    /// this walks every day folder. NOTE (#190): there is no `MAX_RANGE_DAYS`
+    /// bound here — the earlier comment claimed one but the body never
+    /// implemented it. Cost is O(days) directory probes, not O(entries).
     pub fn get_entry(&self, id: Uuid) -> Result<Option<Entry>, StoreError> {
         let dir = self.root.join("entries");
         if !dir.exists() {
@@ -1273,8 +1274,10 @@ impl Store {
     }
 
     /// Every entry document, across all day folders, without the
-    /// `MAX_RANGE_DAYS` window. For load-bearing background jobs (budget
-    /// burn, review B1) — not for HTTP handlers.
+    /// `MAX_RANGE_DAYS` window. Load-bearing scans (budget burn, review B1)
+    /// and the admin `budget_report` HTTP handler (#190 corrected the earlier
+    /// "not for HTTP handlers" claim — an admin request already calls this;
+    /// the full-tree scan is intended because budgets are lifetime totals).
     pub fn list_all_entries(&self) -> Result<Vec<Entry>, StoreError> {
         self.scan_all_entries()
     }
@@ -1698,25 +1701,13 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 /// Filename sanitiser for derived download names: invoice numbers are
 /// minted by `create_invoice` (`INV-%04d`), but the hint never carries
 /// anything that could steer a path (#50).
-fn sanitize_filename(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
 /// The `pdf` hint persisted with the invoice (#113).
 fn pdf_hint(number: &str, archived: &[u8], now: DateTime<Utc>) -> PdfHint {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(archived);
     PdfHint {
-        filename: format!("{}.pdf", sanitize_filename(number)),
+        filename: format!("{}.pdf", crate::domain::safe_filename(number)),
         bytes: archived.len() as u64,
         sha256: h.finalize().iter().map(|b| format!("{b:02x}")).collect(),
         archived_at: now,
