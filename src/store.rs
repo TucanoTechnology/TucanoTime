@@ -1574,6 +1574,76 @@ impl Store {
         updated: &Entry,
     ) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        self.save_entry_inner(existing_date, updated)
+    }
+
+    /// #218: run a handler-side guard (typically the `EntryLock` check)
+    /// INSIDE this store's write lock, before anything is written. Without
+    /// this shape the check and the write were two separate lock
+    /// acquisitions, so an `issue_invoice` landing between them let an edit
+    /// through on now-locked entries (round-2 finding R2-5 — the residual
+    /// B4-pattern race). `verify` returns the handler's own error type;
+    /// store errors fold in through `From`. `write` must use `*_locked`
+    /// internals — the process lock is not reentrant.
+    pub fn guarded_write<F, G, E>(&self, verify: F, write: G) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        G: FnOnce(&Self) -> Result<(), StoreError>,
+        E: From<StoreError>,
+    {
+        let _guard = self.write_lock().map_err(E::from)?;
+        verify()?;
+        write(self).map_err(E::from)
+    }
+
+    /// `save_entry` with the lock check executed in the same transaction.
+    pub fn save_entry_guarded<F, E>(
+        &self,
+        existing_date: Option<NaiveDate>,
+        updated: &Entry,
+        verify_unlocked: F,
+    ) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: From<StoreError>,
+    {
+        self.guarded_write(verify_unlocked, |s| {
+            s.save_entry_inner(existing_date, updated)
+        })
+    }
+
+    /// `delete_entry` with the lock check executed in the same transaction.
+    pub fn delete_entry_guarded<F, E>(&self, entry: &Entry, verify_unlocked: F) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: From<StoreError>,
+    {
+        self.guarded_write(verify_unlocked, |s| {
+            let path = s.entry_path(entry.date, entry.id);
+            if !path.exists() {
+                return Err(StoreError::NotFound);
+            }
+            std::fs::remove_file(&path).map_err(StoreError::from)
+        })
+    }
+
+    /// `delete_expense` with the invoice/claim lock scans executed in the
+    /// same transaction (#218).
+    pub fn delete_expense_guarded<F, E>(&self, id: Uuid, verify_unlocked: F) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: From<StoreError>,
+    {
+        self.guarded_write(verify_unlocked, |s| {
+            s.remove_doc_locked::<Expense>(&id.to_string())
+        })
+    }
+
+    fn save_entry_inner(
+        &self,
+        existing_date: Option<NaiveDate>,
+        updated: &Entry,
+    ) -> Result<(), StoreError> {
         std::fs::create_dir_all(self.day_dir(updated.date))?;
         write_json(&self.entry_path(updated.date, updated.id), updated)?;
         if let Some(old_date) = existing_date
@@ -1589,14 +1659,21 @@ impl Store {
 
     /// Log the timer's entry and clear the timer under one lock: a failure
     /// leaves the timer intact rather than double-logging on retry.
+    ///
+    /// #214: the timer's existence is verified INSIDE the same lock, before
+    /// the entry is written. Two concurrent `POST /timer/stop` calls both read
+    /// the timer earlier (that read is unlocked); the loser used to still write
+    /// its own entry and merely skip the timer delete, double-logging the
+    /// time. Now the loser finds no timer under the lock and 404s instead.
     pub fn finish_timer(&self, user_id: Uuid, entry: &Entry) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        let path = self.doc_path::<Timer>(&user_id.to_string());
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
         std::fs::create_dir_all(self.day_dir(entry.date))?;
         write_json(&self.entry_path(entry.date, entry.id), entry)?;
-        let path = self.doc_path::<Timer>(&user_id.to_string());
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
+        std::fs::remove_file(&path)?;
         Ok(())
     }
 
@@ -2209,5 +2286,57 @@ mod index_tests {
         let store = Store::open(dir.path().join("data")).unwrap();
         store.put_user_if_none(&user("admin@x.co")).unwrap();
         assert!(store.get_user_by_email("admin@x.co").unwrap().is_some());
+    }
+}
+
+#[cfg(test)]
+mod timer_finish_tests {
+    // #214: two concurrent POST /timer/stop calls must not both log time.
+    use super::*;
+    use crate::domain::{Entry, Hours, ProjectCode, Source};
+    use chrono::{TimeZone, Utc};
+
+    fn entry(id: Uuid, user: Uuid) -> Entry {
+        Entry {
+            id,
+            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            customer_id: Uuid::new_v4(),
+            user_id: Some(user),
+            project_code: ProjectCode("P1".into()),
+            task_code: None,
+            hours: Hours(200),
+            note: String::new(),
+            billable: true,
+            source: Source::Timer,
+            created_at: Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 10, 2, 11, 0, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn second_finish_timer_under_lock_is_refused_and_logs_one_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let user = Uuid::new_v4();
+        let timer = Timer {
+            user_id: user,
+            customer_id: Uuid::new_v4(),
+            project_code: ProjectCode("P1".into()),
+            task_code: None,
+            note: String::new(),
+            started_at: Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap(),
+        };
+        store.put_timer(&timer).unwrap();
+
+        // Two racing stops: both read the timer, both attempt to finish.
+        let first = store.finish_timer(user, &entry(Uuid::new_v4(), user));
+        let second = store.finish_timer(user, &entry(Uuid::new_v4(), user));
+        assert!(first.is_ok(), "first stop logs the entry: {first:?}");
+        assert!(
+            matches!(second, Err(StoreError::NotFound)),
+            "loser must be refused, never write a second entry: {second:?}"
+        );
+        assert_eq!(store.list_all_entries().unwrap().len(), 1);
+        assert!(store.get_timer(user).unwrap().is_none());
     }
 }
