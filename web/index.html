@@ -47,7 +47,9 @@
             </div>
             <div class="nav-group" role="presentation">
               <span class="nav-label">Setup</span>
-              <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1"><i class="p-icon--user" aria-hidden="true"></i>Customers &amp; projects</button>
+              <button role="tab" id="tab-customers" aria-controls="panel-customers" aria-selected="false" tabindex="-1"><i class="p-icon--user" aria-hidden="true"></i>Customers</button>
+              <button role="tab" id="tab-projects" aria-controls="panel-projects" aria-selected="false" tabindex="-1"><i class="p-icon--menu" aria-hidden="true"></i>Projects</button>
+              <button role="tab" id="tab-tasks" aria-controls="panel-tasks" aria-selected="false" tabindex="-1"><i class="p-icon--copy" aria-hidden="true"></i>Tasks</button>
             </div>
             <div class="nav-group" role="presentation">
               <span class="nav-label">Billing</span>
@@ -231,121 +233,59 @@
       <p class="hint">Click a day with entries to open it in the Day view. This calendar shows your logged time; the Calendar events section below lists imported calendar items (#36).</p>
     </section>
 
-    <!-- CUSTOMERS -->
+    <!-- CUSTOMERS (#182: the combined workspace split into three Setup
+         sections; row "Projects" actions cross-navigate with filters). -->
     <section id="panel-customers" role="tabpanel" aria-labelledby="tab-customers" tabindex="0" hidden>
       <div class="customer-heading">
-        <h2 id="customer-section-title">Customers &amp; projects</h2>
-        <div class="hierarchy-actions" role="group" aria-label="Create reference data">
+        <h2 id="customer-section-title">Customers</h2>
+        <div class="hierarchy-actions" role="group" aria-label="Customer actions">
           <button type="button" id="customer-new" data-icon="plus" data-positive="1">Customer</button>
-          <button type="button" id="project-new" disabled title="Select a customer first">+ Project</button>
-          <button type="button" id="task-new" disabled title="Select a project first">+ Task</button>
         </div>
       </div>
-      <div class="customer-workspace">
-      <section class="customer-list-column" aria-labelledby="customer-list-title">
-      <h3 id="customer-list-title">Customers</h3>
-      <dialog id="customer-dialog" aria-labelledby="customer-dialog-title">
-      <h2 id="customer-dialog-title">Add customer</h2>
-      <form id="customer-form">
-        <input type="hidden" id="customer-id">
-        <div class="field"><label for="customer-name">Name</label><input id="customer-name" maxlength="120" required></div>
-        <div class="field"><label for="customer-currency">Default currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
-        <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
-        <div class="field"><label for="customer-email">Billing email (optional, for invoice delivery)</label><input id="customer-email" type="email" maxlength="200" autocomplete="off"></div>
-        <details class="customer-extra-details">
-          <summary>Billing and invoice defaults</summary>
-        <fieldset class="field"><legend>Billing details (#139)</legend>
-          <div class="field"><label for="cust-street">Street</label><input id="cust-street" maxlength="120" autocomplete="off"></div>
-          <div class="field"><label for="cust-city">City</label><input id="cust-city" maxlength="80" autocomplete="off"></div>
-          <div class="field"><label for="cust-postal">Postal code</label><input id="cust-postal" maxlength="16" autocomplete="off"></div>
-          <div class="field"><label for="cust-country">Country</label><input id="cust-country" maxlength="56" autocomplete="off"></div>
-          <div class="field"><label for="cust-tax">Default VAT % (e.g. 21 or 20.5)</label><input id="cust-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
-          <div class="field"><label for="cust-discount">Default discount %</label><input id="cust-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
-          <div class="field"><span id="contacts-label">Contacts (one may be the billing recipient)</span>
-            <div id="contact-rows"></div>
-            <button type="button" id="contact-add" class="secondary">+ Add contact</button>
-          </div>
-        </fieldset>
-        <fieldset class="field"><legend>Invoice document (#116)</legend>
-          <div class="field"><label for="customer-terms">Payment terms (due date at issue)</label>
-            <select id="customer-terms">
-              <option value="">Org default / net-14</option>
-              <option value="upon_receipt">Upon Receipt</option>
-              <option value="net_15">NET 15</option>
-              <option value="net_20">NET 20</option>
-              <option value="net_30">NET 30</option>
-              <option value="net_45">NET 45</option>
-              <option value="custom">Custom (n days)</option>
-            </select></div>
-          <div class="field" id="customer-terms-days-field" hidden>
-            <label for="customer-terms-days">Days (1–365)</label>
-            <input id="customer-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
-          </div>
-          <div class="field"><label for="customer-subject">Invoice subject override (%variables% allowed)</label>
-            <input id="customer-subject" maxlength="120" autocomplete="off"></div>
-          <div class="field"><label for="customer-notes">Invoice notes (markdown subset, appended after the footer)</label>
-            <textarea id="customer-notes" maxlength="4000" rows="3"></textarea></div>
-        </fieldset>
-        </details>
-        <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
-        <p class="form-error" id="customer-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="customer-save">Add customer</button><button type="button" class="secondary" id="customer-cancel">Cancel</button></div>
-      </form>
-      </dialog>
+      <p class="hint">Projects and tasks have their own Setup sections; the <strong>Projects</strong> action on a row opens that customer&#39;s projects.</p>
       <div class="table-scroll"><table id="customer-table">
         <caption class="sr-only">All customers</caption>
         <thead><tr><th scope="col">Name</th><th scope="col">Default rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table></div>
+    </section>
 
-      </section>
-      <section class="customer-detail-column" aria-label="Selected customer details">
-      <h2>Projects for <span id="project-customer-label">— select a customer —</span></h2>
-      <p id="projects-empty-state" class="workspace-empty">Select a customer to create and manage projects.</p>
-      <dialog id="project-dialog" aria-labelledby="project-dialog-title" aria-describedby="project-dialog-parent">
-      <h2 id="project-dialog-title">Add project</h2>
-      <p id="project-dialog-parent" class="hint"></p>
-      <form id="project-form">
-        <input type="hidden" id="project-original-code">
-        <div class="field"><label for="project-parent-customer">Customer</label><select id="project-parent-customer" required></select></div>
-        <div class="field"><label for="project-code">Project code</label><input id="project-code" maxlength="24" required></div>
-        <div class="field"><label for="project-name">Name</label><input id="project-name" maxlength="120"></div>
-        <div class="field"><label for="project-currency">Currency (ISO-4217)</label><input id="project-currency" maxlength="3" placeholder="EUR" required></div>
-        <div class="field"><label for="project-rate">Hourly rate (e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
-        <div class="field checkbox"><label for="project-active"><input type="checkbox" id="project-active" checked> Active</label></div>
-        <p class="form-error" id="project-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="project-save">Add project</button><button type="button" class="secondary" id="project-cancel">Cancel</button></div>
-      </form>
-      </dialog>
+    <!-- PROJECTS -->
+    <section id="panel-projects" role="tabpanel" aria-labelledby="tab-projects" tabindex="0" hidden>
+      <div class="customer-heading">
+        <h2>Projects <span id="project-scope-label" class="scope-label"></span></h2>
+        <div class="hierarchy-actions" role="group" aria-label="Project actions">
+          <div class="filter-field"><label for="proj-filter-customer">Customer</label>
+            <select id="proj-filter-customer"><option value="">All customers</option></select></div>
+          <button type="button" id="project-new" data-icon="plus" data-positive="1">Project</button>
+        </div>
+      </div>
+      <p id="projects-empty-state" class="workspace-empty">No projects yet. Use <strong>+ Project</strong> to add one.</p>
       <div class="table-scroll"><table id="project-table" hidden>
-        <caption class="sr-only">Projects for the selected customer</caption>
-        <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
+        <caption class="sr-only">Projects</caption>
+        <thead><tr><th scope="col">Code</th><th scope="col">Customer</th><th scope="col">Name</th><th scope="col">Currency</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table></div>
+    </section>
 
-      <h2>Tasks for <span id="task-project-label">— select a project —</span></h2>
-      <p id="tasks-empty-state" class="workspace-empty">Select a project to manage its tasks.</p>
-      <dialog id="task-dialog" aria-labelledby="task-dialog-title" aria-describedby="task-dialog-parent">
-      <h2 id="task-dialog-title">Add task</h2>
-      <p id="task-dialog-parent" class="hint"></p>
-      <form id="task-form">
-        <input type="hidden" id="task-original-code">
-        <div class="field"><label for="task-parent-customer">Customer</label><select id="task-parent-customer" required></select></div>
-        <div class="field"><label for="task-parent-project">Project</label><select id="task-parent-project" required></select></div>
-        <div class="field"><label for="task-code">Task code</label><input id="task-code" maxlength="24" required></div>
-        <div class="field"><label for="task-name">Name</label><input id="task-name" maxlength="120"></div>
-        <div class="field checkbox"><label for="task-active"><input type="checkbox" id="task-active" checked> Active</label></div>
-        <p class="form-error" id="task-error" role="alert" hidden></p>
-        <div class="buttons"><button type="submit" id="task-save">Add task</button><button type="button" class="secondary" id="task-cancel">Cancel</button></div>
-      </form>
-      </dialog>
+    <!-- TASKS -->
+    <section id="panel-tasks" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0" hidden>
+      <div class="customer-heading">
+        <h2>Tasks <span id="task-scope-label" class="scope-label"></span></h2>
+        <div class="hierarchy-actions" role="group" aria-label="Task actions">
+          <div class="filter-field"><label for="task-filter-customer">Customer</label>
+            <select id="task-filter-customer"><option value="">Choose a customer&#8230;</option></select></div>
+          <div class="filter-field"><label for="task-filter-project">Project</label>
+            <select id="task-filter-project" disabled><option value="">Choose a customer first&#8230;</option></select></div>
+          <button type="button" id="task-new" data-icon="plus" data-positive="1">Task</button>
+        </div>
+      </div>
+      <p id="tasks-empty-state" class="workspace-empty">Choose a customer and a project to list their tasks.</p>
       <div class="table-scroll"><table id="task-table" hidden>
-        <caption class="sr-only">Tasks for the selected project</caption>
+        <caption class="sr-only">Tasks</caption>
         <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col" class="actions-col">Actions</th></tr></thead>
         <tbody></tbody>
       </table></div>
-      </section>
-      </div>
     </section>
 
     <!-- REPORTS -->
@@ -875,5 +815,91 @@
   </dialog>
 
   <script src="/app.js"></script>
+
+  <!-- #182: hierarchy dialogs live at body level so they can open
+       from any of the three Setup sections (their panels hide otherwise). -->
+
+
+
+
+  <!-- #182: the hierarchy dialogs sit at body level so they can be opened
+       from any Setup section without inheriting a hidden panel. -->
+<dialog id="customer-dialog" aria-labelledby="customer-dialog-title">
+      <h2 id="customer-dialog-title">Add customer</h2>
+      <form id="customer-form">
+        <input type="hidden" id="customer-id">
+        <div class="field"><label for="customer-name">Name</label><input id="customer-name" maxlength="120" required></div>
+        <div class="field"><label for="customer-currency">Default currency (ISO-4217)</label><input id="customer-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="field"><label for="customer-rate">Default hourly rate (e.g. 60.00)</label><input id="customer-rate" type="number" min="0" step="0.01" required inputmode="decimal"></div>
+        <div class="field"><label for="customer-email">Billing email (optional, for invoice delivery)</label><input id="customer-email" type="email" maxlength="200" autocomplete="off"></div>
+        <details class="customer-extra-details">
+          <summary>Billing and invoice defaults</summary>
+        <fieldset class="field"><legend>Billing details (#139)</legend>
+          <div class="field"><label for="cust-street">Street</label><input id="cust-street" maxlength="120" autocomplete="off"></div>
+          <div class="field"><label for="cust-city">City</label><input id="cust-city" maxlength="80" autocomplete="off"></div>
+          <div class="field"><label for="cust-postal">Postal code</label><input id="cust-postal" maxlength="16" autocomplete="off"></div>
+          <div class="field"><label for="cust-country">Country</label><input id="cust-country" maxlength="56" autocomplete="off"></div>
+          <div class="field"><label for="cust-tax">Default VAT % (e.g. 21 or 20.5)</label><input id="cust-tax" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          <div class="field"><label for="cust-discount">Default discount %</label><input id="cust-discount" type="number" min="0" max="100" step="0.01" value="0" inputmode="decimal"></div>
+          <div class="field"><span id="contacts-label">Contacts (one may be the billing recipient)</span>
+            <div id="contact-rows"></div>
+            <button type="button" id="contact-add" class="secondary">+ Add contact</button>
+          </div>
+        </fieldset>
+        <fieldset class="field"><legend>Invoice document (#116)</legend>
+          <div class="field"><label for="customer-terms">Payment terms (due date at issue)</label>
+            <select id="customer-terms">
+              <option value="">Org default / net-14</option>
+              <option value="upon_receipt">Upon Receipt</option>
+              <option value="net_15">NET 15</option>
+              <option value="net_20">NET 20</option>
+              <option value="net_30">NET 30</option>
+              <option value="net_45">NET 45</option>
+              <option value="custom">Custom (n days)</option>
+            </select></div>
+          <div class="field" id="customer-terms-days-field" hidden>
+            <label for="customer-terms-days">Days (1–365)</label>
+            <input id="customer-terms-days" type="number" min="1" max="365" step="1" inputmode="numeric">
+          </div>
+          <div class="field"><label for="customer-subject">Invoice subject override (%variables% allowed)</label>
+            <input id="customer-subject" maxlength="120" autocomplete="off"></div>
+          <div class="field"><label for="customer-notes">Invoice notes (markdown subset, appended after the footer)</label>
+            <textarea id="customer-notes" maxlength="4000" rows="3"></textarea></div>
+        </fieldset>
+        </details>
+        <div class="field checkbox"><label for="customer-active"><input type="checkbox" id="customer-active" checked> Active</label></div>
+        <p class="form-error" id="customer-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="customer-save">Add customer</button><button type="button" class="secondary" id="customer-cancel">Cancel</button></div>
+      </form>
+      </dialog>
+<dialog id="project-dialog" aria-labelledby="project-dialog-title" aria-describedby="project-dialog-parent">
+      <h2 id="project-dialog-title">Add project</h2>
+      <p id="project-dialog-parent" class="hint"></p>
+      <form id="project-form">
+        <input type="hidden" id="project-original-code">
+        <div class="field"><label for="project-parent-customer">Customer</label><select id="project-parent-customer" required></select></div>
+        <div class="field"><label for="project-code">Project code</label><input id="project-code" maxlength="24" required></div>
+        <div class="field"><label for="project-name">Name</label><input id="project-name" maxlength="120"></div>
+        <div class="field"><label for="project-currency">Currency (ISO-4217)</label><input id="project-currency" maxlength="3" placeholder="EUR" required></div>
+        <div class="field"><label for="project-rate">Hourly rate (e.g. 95.00)</label><input id="project-rate" type="number" min="0" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
+        <div class="field checkbox"><label for="project-active"><input type="checkbox" id="project-active" checked> Active</label></div>
+        <p class="form-error" id="project-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="project-save">Add project</button><button type="button" class="secondary" id="project-cancel">Cancel</button></div>
+      </form>
+      </dialog>
+<dialog id="task-dialog" aria-labelledby="task-dialog-title" aria-describedby="task-dialog-parent">
+      <h2 id="task-dialog-title">Add task</h2>
+      <p id="task-dialog-parent" class="hint"></p>
+      <form id="task-form">
+        <input type="hidden" id="task-original-code">
+        <div class="field"><label for="task-parent-customer">Customer</label><select id="task-parent-customer" required></select></div>
+        <div class="field"><label for="task-parent-project">Project</label><select id="task-parent-project" required></select></div>
+        <div class="field"><label for="task-code">Task code</label><input id="task-code" maxlength="24" required></div>
+        <div class="field"><label for="task-name">Name</label><input id="task-name" maxlength="120"></div>
+        <div class="field checkbox"><label for="task-active"><input type="checkbox" id="task-active" checked> Active</label></div>
+        <p class="form-error" id="task-error" role="alert" hidden></p>
+        <div class="buttons"><button type="submit" id="task-save">Add task</button><button type="button" class="secondary" id="task-cancel">Cancel</button></div>
+      </form>
+      </dialog>
 </body>
 </html>
