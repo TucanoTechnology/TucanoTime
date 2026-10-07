@@ -1589,14 +1589,21 @@ impl Store {
 
     /// Log the timer's entry and clear the timer under one lock: a failure
     /// leaves the timer intact rather than double-logging on retry.
+    ///
+    /// #214: the timer's existence is verified INSIDE the same lock, before
+    /// the entry is written. Two concurrent `POST /timer/stop` calls both read
+    /// the timer earlier (that read is unlocked); the loser used to still write
+    /// its own entry and merely skip the timer delete, double-logging the
+    /// time. Now the loser finds no timer under the lock and 404s instead.
     pub fn finish_timer(&self, user_id: Uuid, entry: &Entry) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        let path = self.doc_path::<Timer>(&user_id.to_string());
+        if !path.exists() {
+            return Err(StoreError::NotFound);
+        }
         std::fs::create_dir_all(self.day_dir(entry.date))?;
         write_json(&self.entry_path(entry.date, entry.id), entry)?;
-        let path = self.doc_path::<Timer>(&user_id.to_string());
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
+        std::fs::remove_file(&path)?;
         Ok(())
     }
 
@@ -2209,5 +2216,57 @@ mod index_tests {
         let store = Store::open(dir.path().join("data")).unwrap();
         store.put_user_if_none(&user("admin@x.co")).unwrap();
         assert!(store.get_user_by_email("admin@x.co").unwrap().is_some());
+    }
+}
+
+#[cfg(test)]
+mod timer_finish_tests {
+    // #214: two concurrent POST /timer/stop calls must not both log time.
+    use super::*;
+    use crate::domain::{Entry, Hours, ProjectCode, Source};
+    use chrono::{TimeZone, Utc};
+
+    fn entry(id: Uuid, user: Uuid) -> Entry {
+        Entry {
+            id,
+            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            customer_id: Uuid::new_v4(),
+            user_id: Some(user),
+            project_code: ProjectCode("P1".into()),
+            task_code: None,
+            hours: Hours(200),
+            note: String::new(),
+            billable: true,
+            source: Source::Timer,
+            created_at: Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 10, 2, 11, 0, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn second_finish_timer_under_lock_is_refused_and_logs_one_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("data")).unwrap();
+        let user = Uuid::new_v4();
+        let timer = Timer {
+            user_id: user,
+            customer_id: Uuid::new_v4(),
+            project_code: ProjectCode("P1".into()),
+            task_code: None,
+            note: String::new(),
+            started_at: Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap(),
+        };
+        store.put_timer(&timer).unwrap();
+
+        // Two racing stops: both read the timer, both attempt to finish.
+        let first = store.finish_timer(user, &entry(Uuid::new_v4(), user));
+        let second = store.finish_timer(user, &entry(Uuid::new_v4(), user));
+        assert!(first.is_ok(), "first stop logs the entry: {first:?}");
+        assert!(
+            matches!(second, Err(StoreError::NotFound)),
+            "loser must be refused, never write a second entry: {second:?}"
+        );
+        assert_eq!(store.list_all_entries().unwrap().len(), 1);
+        assert!(store.get_timer(user).unwrap().is_none());
     }
 }

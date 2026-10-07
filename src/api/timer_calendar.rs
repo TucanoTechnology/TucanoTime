@@ -91,7 +91,15 @@ pub async fn stop_timer(State(app): State<AppState>, actor: AuthUser) -> ApiResu
     };
     // Entry + timer-clear in one lock (review B4): a failure between the
     // two left the timer running, so a retry double-logged.
-    app.store.finish_timer(timer.user_id, &entry)?;
+    // #214: if a concurrent stop claimed the timer between our unlocked read
+    // and this transaction, finish_timer refuses — report the same honest 404
+    // as the pre-read above, never a phantom double-logged entry.
+    app.store
+        .finish_timer(timer.user_id, &entry)
+        .map_err(|e| match e {
+            crate::store::StoreError::NotFound => ApiError::not_found("timer"),
+            other => other.into(),
+        })?;
     Ok(Json(entry_json(&entry)).into_response())
 }
 
