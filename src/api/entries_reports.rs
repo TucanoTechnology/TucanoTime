@@ -253,12 +253,11 @@ pub async fn summary(
     // Private-per-user (#51): members report only on their own time.
     entries.retain(|e| visible_to(&actor.0, e.user_id));
     let customers: Vec<Customer> = app.store.list_customers()?.into_iter().collect();
-    let (projects, tasks, users) = gather_hierarchy(&app, &customers)?;
+    let (projects, users) = gather_hierarchy(&app, &customers)?;
     let rows = report::summarise(
         &entries,
         &customers,
         &projects,
-        &tasks,
         &users,
         kind,
         billable_filter,
@@ -266,21 +265,21 @@ pub async fn summary(
     Ok(Json(rows).into_response())
 }
 
-/// Every project, task and user for a set of customers, loaded once for reports.
-type Hierarchy = (Vec<(Uuid, Project)>, Vec<Task>, Vec<User>);
+/// Every project and user for a set of customers, loaded once for reports.
+/// #189: the task tier was collected here for years after #177 removed the
+/// last billing use of it — every report rate now resolves person → project →
+/// customer, so the per-project `list_tasks` fan-out was pure cost.
+type Hierarchy = (Vec<(Uuid, Project)>, Vec<User>);
 
-/// Load projects, tasks and users once, for report rate resolution.
 fn gather_hierarchy(app: &AppState, customers: &[Customer]) -> Result<Hierarchy, ApiError> {
     let mut projects: Vec<(Uuid, Project)> = Vec::new();
-    let mut tasks: Vec<Task> = Vec::new();
     for c in customers {
         for p in app.store.list_projects(c.id)? {
-            tasks.extend(app.store.list_tasks(c.id, &p.code.0)?);
             projects.push((c.id, p));
         }
     }
     let users = app.store.list_users()?;
-    Ok((projects, tasks, users))
+    Ok((projects, users))
 }
 
 /// `GET /reports/export.csv`: a range plus optional customer filter.
@@ -310,8 +309,8 @@ pub async fn export_csv(
     let mut entries = app.store.list_range(from, to)?;
     entries.retain(|e| visible_to(&actor.0, e.user_id));
     let customers = app.store.list_customers()?;
-    let (projects, tasks, users) = gather_hierarchy(&app, &customers)?;
-    let csv = report::export_csv(&entries, &customers, &projects, &tasks, &users, filter);
+    let (projects, users) = gather_hierarchy(&app, &customers)?;
+    let csv = report::export_csv(&entries, &customers, &projects, &users, filter);
     Ok((
         [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
         csv,
@@ -327,7 +326,7 @@ pub async fn profitability(State(app): State<AppState>, Query(q): Query<RangeQue
     let expenses = app.store.list_expenses()?;
     let entries = app.store.list_range(from, to)?;
     let customers = app.store.list_customers()?;
-    let (projects, _tasks, users) = gather_hierarchy(&app, &customers)?;
+    let (projects, users) = gather_hierarchy(&app, &customers)?;
     let result = report::summarise_profit(
         &invoices,
         &expenses,
@@ -348,8 +347,8 @@ pub async fn budget_report(State(app): State<AppState>) -> ApiResult {
     let customers = app.store.list_customers()?;
     // Reuse the shared hierarchy walk (review D3) and the lifetime entry scan:
     // budgets are lifetime totals, so a date-windowed query would undercount.
-    let (projects, tasks, users) = gather_hierarchy(&app, &customers)?;
+    let (projects, users) = gather_hierarchy(&app, &customers)?;
     let entries = app.store.list_all_entries()?;
-    let rows = crate::budgets::burn_report(&projects, &entries, &customers, &tasks, &users);
+    let rows = crate::budgets::burn_report(&projects, &entries, &customers, &users);
     Ok(Json(serde_json::json!({ "rows": rows })).into_response())
 }

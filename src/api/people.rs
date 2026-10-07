@@ -227,32 +227,10 @@ pub async fn delete_user(
             ));
         }
     }
-    if app
-        .store
-        .list_all_entries()?
-        .iter()
-        .any(|entry| entry.user_id == Some(id))
-        || app
-            .store
-            .list_expenses()?
-            .iter()
-            .any(|expense| expense.user_id == Some(id))
-        || app
-            .store
-            .list_submissions()?
-            .iter()
-            .any(|submission| submission.user_id == id)
-        || app
-            .store
-            .list_claims()?
-            .iter()
-            .any(|claim| claim.user_id == id)
-        || app.store.get_timer(id)?.is_some()
-    {
-        return Err(ApiError::conflict(
-            "user has recorded history and cannot be deleted; deactivate instead",
-        ));
-    }
+    // #189: the "user has history" scan was ALSO duplicated here, unlocked,
+    // with a near-identical message — it doubled five full-collection reads
+    // per delete and could race. `Store::delete_user` is the single enforcer
+    // (under the write lock) and its Conflict maps to 409 unchanged.
     app.store.delete_user(id)?;
     app.audit
         .record("user_deleted", &target.email, app.clock.now());
