@@ -79,8 +79,15 @@ Two hard requirements that must exist **before** Phase 6 so imported/derived dat
 is traceable and lockable:
 
 - Entries carry a **`source`** (`manual | timer | calendar-import`).
-- A single shared **lock check** (used by invoices #8, submissions #16,
-  reimbursements #24): an entry locked by any holder rejects edits/deletes with 409.
+- A single shared **lock check** composing invoice (#8) and submission (#16)
+  providers: an entry locked by any holder rejects edits/deletes with 409, and
+  an unverifiable lock state refuses the write fail-closed with 503 (#185).
+  An invoice locks while it is *open* (`issued | partly_paid`): settling or
+  writing one off **releases** its entries deliberately — the issued document
+  is already frozen by its rate snapshots, while the timesheet stays
+  correctable. Reimbursement claims (#24) lock expenses via a direct scan in
+  `api::expenses`, not through this seam (folding them in is a documented
+  follow-up).
 
 ## Consequences
 
