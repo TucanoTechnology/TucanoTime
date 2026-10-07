@@ -319,17 +319,27 @@ pub async fn export_csv(
         .into_response())
 }
 
-/// Profitability per customer: revenue (non-draft invoices) vs cost (billable
-/// expenses + labour at each person's cost rate) (#29).
+/// Profitability per customer AND currency: revenue (non-draft invoices) vs
+/// cost (billable expenses + labour at each person's cost rate) (#29, #186).
 pub async fn profitability(State(app): State<AppState>, Query(q): Query<RangeQuery>) -> ApiResult {
     let (from, to) = q.dates()?;
     let invoices = app.store.list_invoices()?;
     let expenses = app.store.list_expenses()?;
     let entries = app.store.list_range(from, to)?;
     let customers = app.store.list_customers()?;
-    let users = app.store.list_users()?;
-    let result =
-        report::summarise_profit(&invoices, &expenses, &entries, &customers, &users, from, to);
+    let (projects, _tasks, users) = gather_hierarchy(&app, &customers)?;
+    let result = report::summarise_profit(
+        &invoices,
+        &expenses,
+        &entries,
+        report::ProfitContext {
+            customers: &customers,
+            projects: &projects,
+            users: &users,
+        },
+        from,
+        to,
+    );
     Ok(Json(result).into_response())
 }
 

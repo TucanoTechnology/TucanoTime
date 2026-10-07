@@ -1,7 +1,11 @@
-# This file has been auto-generated. Do not edit manually.
-# If you would like to contribute new rules, please use
-# cmd/generate/config/main.go and follow the contributing guidelines
-# at https://github.com/gitleaks/gitleaks/blob/master/CONTRIBUTING.md
+# Base: upstream gitleaks default config (auto-generated from
+# cmd/generate/config/main.go). DO NOT regenerate over this file without
+# re-applying the repository-specific exemptions marked LOCAL below — CI
+# (.github/workflows/ci.yml, "Secret scanning") depends on them for the
+# reviewed synthetic fixtures already in git history (#334). Splitting into
+# an `extends` overlay was evaluated (#192) and rejected: `extends` path
+# resolution in the pinned container could not be proven rule-loading-safe,
+# and a silently-empty rule set would neutralise this security control.
 #
 # How the hell does secret scanning work? Read this:
 #   https://lookingatcomputer.substack.com/p/regex-is-almost-all-you-need
@@ -49,8 +53,9 @@ paths = [
     '''(?:^|/)\.git$''',
 ]
 regexes = [
-    # Reviewed synthetic fixtures already in this repository's history (#334);
-    # matched by exact value, so no other secret can be allowed by them.
+    # LOCAL (#334): reviewed synthetic fixtures already in this repository's
+    # history; matched by exact value, so no other secret can be allowed by
+    # them. Re-apply this block after any upstream regeneration.
     '''a-test-secret-long-enough-for-hs256''',
     '''a-plain-secret-long-enough-for-hs256''',
     '''MIIEowIBAAKCAQEA1234567890abcdefghijklmnopqrstuvwxyz''',

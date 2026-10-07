@@ -1,7 +1,10 @@
 //! Entry-lock port. A single seam answers "is this entry frozen, and why?".
-//! Invoices (#8), timesheet submissions (#16) and expense reimbursements (#24)
-//! each become lock providers; the entry edit/delete handlers consult this one
-//! check so an entry cannot be changed through any route once locked.
+//! Invoices (#8) and timesheet submissions (#16) are lock providers here;
+//! the entry edit/delete handlers consult this one check so an entry cannot
+//! be changed through any route once locked. NOTE (#190): expense
+//! reimbursement claims (#24) enforce their lock with a direct scan in
+//! `api::expenses` rather than through this seam — folding them in as a
+//! third provider is a follow-up, the module no longer claims otherwise.
 //!
 //! `NoLocks` is the default: with no invoice/submission feature shipped yet,
 //! nothing is locked. Real providers implement `EntryLock` and are composed by

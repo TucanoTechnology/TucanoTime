@@ -39,3 +39,18 @@ updates:
       prefix: "chore(deps)"
     labels:
       - dependencies
+
+  # GUI harness (#192): jsdom/sass/vanilla-framework gate CI's gui-test job;
+  # without this entry they never received update PRs. The vanilla-framework
+  # pin is deliberately locked — it must move with a reviewed vendor rebuild
+  # (gui-test/build-ubuntu-assets.mjs + manifest hashes), not an automated bump.
+  - package-ecosystem: npm
+    directory: /gui-test
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencies
+    ignore:
+      - dependency-name: "vanilla-framework"
