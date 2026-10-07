@@ -235,5 +235,28 @@ helpers (no `window.confirm/prompt` left), vendored swagger, `no-cache` on asset
 - File inventory/disposition: §3 ✔
 - Evidence-backed findings + priorities: §4 ✔
 - Language map decisions: §2 ✔
-- Vanilla/Ubuntu staged plan: R7 ✔ (implementation tracked separately)
-- Implementation of approved refactors: tracked as tickets #185–#192; results appended as PRs land.
+- Vanilla/Ubuntu staged plan: R7 ✔ (stage 1 + a11y fixes shipped; stages 2–3 backlog on #191)
+- Implementation of approved refactors: **all landed** — see §7.
+
+## 7. Outcome (2026-10-07)
+
+Every finding R1–R8 was implemented, reviewed and merged; all findings tickets
+(#185–#192) and the parent #183 closed with results recorded on each.
+
+| Finding | Ticket | PR(s) | Landed |
+| --- | --- | --- | --- |
+| R1 fail-open storage/locking | #185 | #194 | ✔ (503 `lock_unavailable`, delete-customer safety, webhook dedup under lock) |
+| R2 cross-currency report totals | #186 | #196 | ✔ (per-currency rows; `revenue_by_currency`; QBO string encoding) |
+| R3 request-validation gaps | #187 | #197 | ✔ (`InvoiceLineInput`, shared bounds, claim dedup, budget caps, typed retainer errors) |
+| R4 GUI boot/async bugs | #188 | #195 | ✔ (chart `style`, member boot, live filter, cache + sequence guards) |
+| R5 duplication/size refactor | #189 | #200 + #210 | ✔ (+ startApp `wire*()` split, invoice-summary payload reuse) |
+| R6 comment drift + leakage + sums | #190 | #198 | ✔ (path/error leakage, single-clock issue, saturating sums, doc drift) |
+| R7 Vanilla/Ubuntu adoption | #191 | #201, #209 | ✔ stage 1 + a11y + `data-icon` contract; stages 2–3 remain as the documented plan in `docs/ubuntu-design.md` |
+| R8 docs/config accuracy | #192 | #199 | ✔ (README/AGENTS/CODE_REVIEW/ADR truthed; CI `test:jsdom`; dependabot npm; gitleaks decision documented) |
+
+Post-merge state: `main` CI green (lint-test/build/actionlint/secret-scan/
+supply-chain + gui-test job: jsdom suites, contrast, live harness); the review
+runtime recorded honestly in §1. Remaining risks recorded on the tickets:
+stage 2–3 component swaps need per-stage manual keyboard/AT passes, and the
+claims-as-lock-provider strengthening stays a documented follow-up in
+`src/lock.rs`.
