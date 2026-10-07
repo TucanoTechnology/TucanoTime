@@ -117,8 +117,15 @@ check('redundant Invoice and Timer shortcut buttons are absent',
   !window.document.getElementById('shortcut-invoices') && !window.document.getElementById('shortcut-timer'));
 const timerOpen = window.document.getElementById('timer-open');
 const timerSetup = window.document.getElementById('timerbar');
-check('Day timer action sits alongside Track time',
-  timerOpen.previousElementSibling.id === 'day-add');
+// #145-alignment: Track time is the last item of the bar's right-hand end
+// cluster (like the + buttons of every other panel); the timer cluster is
+// left, navigation centered.
+check('Track time ends the day bar right cluster after Return to today',
+  window.document.getElementById('day-today').nextElementSibling.id === 'day-add'
+  && window.document.getElementById('day-add').parentElement.className.includes('day-end'));
+check('timer controls occupy the left cluster',
+  timerOpen.parentElement.className.includes('day-actions')
+  && window.document.getElementById('week-track').previousElementSibling.id === 'week-today');
 check('timer selections are hidden until requested', timerSetup.hidden);
 timerOpen.click();
 check('Start timer reveals setup and focuses customer',
@@ -309,9 +316,13 @@ await tick(250);
 
 // ---- DAY REDESIGN (#12): row structure, week strip, navigator, copy-forward ----
 const mainCell = rows[0].querySelector('.entry-main');
+// #145-columns: the note moved from the stacked main cell to its own
+// Notes column (asserted again with headers in the #141 section below).
 check(
-  'entry row shows project / customer / note lines',
-  mainCell.textContent.includes('P-9') && mainCell.textContent.includes('ACME') && mainCell.textContent.includes('gui-test entry'),
+  'entry row shows project / customer, note lives in its own column',
+  mainCell.textContent.includes('P-9') && mainCell.textContent.includes('ACME')
+    && !mainCell.textContent.includes('gui-test entry')
+    && rows[0].querySelector('.entry-note').textContent.includes('gui-test entry'),
 );
 const stripDays = window.document.querySelectorAll('#week-strip .ws-day');
 check('week strip renders seven days', stripDays.length === 7);
@@ -1638,6 +1649,13 @@ if (recBtn) {
     window.document.getElementById('day-total').textContent.trim() === '3:15'
     && [...window.document.querySelectorAll('#day-table tbody tr')].some((r) => r.textContent.includes('W1'))
     && wfDlg.open !== true && !wfDlg.hasAttribute('open'));
+  const dayNoteRow = [...window.document.querySelectorAll('#day-table tbody tr')]
+    .find((r) => r.textContent.includes('W1'));
+  check('notes are their own column with a header, main cell no longer stacks them',
+    [...window.document.querySelectorAll('#day-table thead th')].map((th) => th.textContent).join(',')
+      === 'Project / customer,Notes,Hours,Actions'
+    && /legal research/.test(dayNoteRow.cells[1].textContent)
+    && !/legal research/.test(dayNoteRow.cells[0].textContent));
 
   // ---- WEEK: the same entry as a task-level cell, totals reconciled ----
   const wfWeek = window.document.getElementById('week-date');

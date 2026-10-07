@@ -90,8 +90,11 @@
 
     <!-- TIMESHEETS (top-level section, #107): Day | Week as in-page segments -->
     <section id="panel-timesheet" role="tabpanel" aria-labelledby="tab-timesheet" tabindex="0">
+      <!-- No section H2 here: the masthead H1 already carries the tab name
+           ("Timesheets"), so a second "Timesheet" heading duplicated the
+           page title instead of adding outline structure (Ubuntu guidance:
+           one H1 per page, H2s for real sections). -->
       <div class="ts-head">
-        <h2 class="ts-title">Timesheet</h2>
         <div class="seg" role="tablist" aria-label="Timesheet view" id="ts-seg">
           <button type="button" role="tab" id="ts-day" aria-controls="panel-day" aria-selected="true">Day</button>
           <button type="button" role="tab" id="ts-week" aria-controls="panel-week" aria-selected="false" tabindex="-1">Week</button>
@@ -102,9 +105,8 @@
     <!-- DAY -->
     <section id="panel-day" role="tabpanel" aria-labelledby="ts-day" tabindex="0">
       <input type="date" id="day-date" hidden>
-      <div class="day-bar">
+      <div class="day-bar p-card">
         <div class="day-actions">
-          <button type="button" id="day-add" class="primary">+ Track time</button>
           <button type="button" id="timer-open" data-icon="play" aria-controls="timerbar" aria-expanded="false">Start timer</button>
           <span id="timer-display" class="timer-display" role="timer" hidden>00:00:00</span>
           <button type="button" id="timer-stop" data-icon="stop" class="secondary" hidden>Stop</button>
@@ -115,9 +117,12 @@
           <span id="day-label" class="day-label"></span>
           <button type="button" id="day-next" aria-label="Next day" title="Next day"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
         </nav>
-        <button type="button" id="day-today" class="link">Return to today</button>
+        <div class="day-end">
+          <button type="button" id="day-today" class="link">Return to today</button>
+          <button type="button" id="day-add" class="primary">Track time</button>
+        </div>
       </div>
-      <div class="timerbar" id="timerbar" hidden>
+      <div class="timerbar p-card p-card--muted" id="timerbar" hidden>
         <label for="timer-customer">Customer</label>
         <select id="timer-customer"></select>
         <label for="timer-project">Project</label>
@@ -126,23 +131,23 @@
         <button type="button" id="timer-cancel" class="link">Cancel</button>
       </div>
       <nav id="week-strip" class="week-strip" aria-label="Days of this week"></nav>
-      <div id="notif-section" hidden>
+      <div id="notif-section" class="day-notifications" hidden>
         <div class="notif-head"><span>Notifications</span><button type="button" id="notif-read" class="link">Mark all read</button></div>
         <ul id="notif-list" class="notifs"></ul>
       </div>
       <table id="day-table" aria-describedby="day-label">
         <caption class="sr-only">Time entries for the selected day</caption>
         <thead>
-          <tr><th scope="col">Project / customer / note</th><th scope="col" class="num">Hours</th><th scope="col" class="actions-col">Actions</th></tr>
+          <tr><th scope="col">Project / customer</th><th scope="col">Notes</th><th scope="col" class="num">Hours</th><th scope="col" class="actions-col">Actions</th></tr>
         </thead>
         <tbody></tbody>
         <tfoot><tr>
           <th scope="row"><button type="button" id="day-add-bottom" class="link">+ Track time</button></th>
-          <td colspan="2" class="day-total-cell">Total: <span id="day-total" class="num"></span></td>
+          <td colspan="3" class="day-total-cell">Total: <span id="day-total" class="num"></span></td>
         </tr></tfoot>
       </table>
-      <p id="day-empty" hidden>Nothing logged on this day yet. Use <strong>+ Track time</strong> to add an entry, or copy projects from an earlier day below.</p>
-      <div class="copy-bar">
+      <p id="day-empty" class="day-empty p-notification p-notification--information" hidden>Nothing logged on this day yet. Use <strong>Track time</strong> to add an entry, or copy projects from an earlier day below.</p>
+      <div class="copy-bar p-card p-card--muted">
         <button type="button" id="copy-previous" class="secondary">Copy from previous day</button>
         <ul id="copy-rows" class="copy-rows" aria-label="Projects copied from an earlier day"></ul>
       </div>
@@ -196,13 +201,15 @@
     <section id="panel-week" role="tabpanel" aria-labelledby="ts-week" tabindex="0" hidden>
       <input type="date" id="week-date" hidden>
       <div class="day-bar">
-        <button type="button" id="week-track" class="primary">+ Track time</button>
         <nav class="day-nav" aria-label="Change week">
           <button type="button" id="week-prev" aria-label="Previous week" title="Previous week"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
           <span id="week-label" class="day-label"></span>
           <button type="button" id="week-next" aria-label="Next week" title="Next week"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
         </nav>
-        <button type="button" id="week-today" class="link">Return to this week</button>
+        <div class="day-end">
+          <button type="button" id="week-today" class="link">Return to this week</button>
+          <button type="button" id="week-track" class="primary">Track time</button>
+        </div>
       </div>
       <p class="hint">Type hours into a cell and press Enter or click away to save. Clearing a cell deletes that entry.</p>
       <div class="table-scroll">
@@ -219,9 +226,9 @@
          the imported-calendar events list further down. -->
     <section id="panel-calendar" role="tabpanel" aria-labelledby="ts-cal" tabindex="0" hidden>
       <div class="cal-nav">
-        <button type="button" id="cal-prev" aria-label="Previous month">&larr;</button>
+        <button type="button" id="cal-prev" aria-label="Previous month" title="Previous month"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
         <h2 id="cal-label">Calendar</h2>
-        <button type="button" id="cal-next" aria-label="Next month">&rarr;</button>
+        <button type="button" id="cal-next" aria-label="Next month" title="Next month"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
         <button type="button" id="cal-today" class="secondary">Today</button>
         <span id="cal-total" class="hint" role="status" aria-live="polite"></span>
       </div>
@@ -572,8 +579,12 @@
       </div>
 
       <section id="settings-panel-users" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-users" tabindex="0" hidden>
-        <h2>User management</h2>
-        <button type="button" id="user-new" data-icon="plus" data-positive="1">User</button>
+        <div class="panel-heading-row">
+          <h2>User management</h2>
+          <div class="hierarchy-actions" role="group" aria-label="User actions">
+            <button type="button" id="user-new" data-icon="plus" data-positive="1">User</button>
+          </div>
+        </div>
         <div class="bar user-filters">
           <div><label for="user-search">Name or email</label><input id="user-search" type="search" autocomplete="off"></div>
           <div><label for="user-filter-role">Role</label><select id="user-filter-role"><option value="">All roles</option><option value="admin">Administrator</option><option value="member">Member</option></select></div>
