@@ -1574,6 +1574,76 @@ impl Store {
         updated: &Entry,
     ) -> Result<(), StoreError> {
         let _guard = self.write_lock()?;
+        self.save_entry_inner(existing_date, updated)
+    }
+
+    /// #218: run a handler-side guard (typically the `EntryLock` check)
+    /// INSIDE this store's write lock, before anything is written. Without
+    /// this shape the check and the write were two separate lock
+    /// acquisitions, so an `issue_invoice` landing between them let an edit
+    /// through on now-locked entries (round-2 finding R2-5 — the residual
+    /// B4-pattern race). `verify` returns the handler's own error type;
+    /// store errors fold in through `From`. `write` must use `*_locked`
+    /// internals — the process lock is not reentrant.
+    pub fn guarded_write<F, G, E>(&self, verify: F, write: G) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        G: FnOnce(&Self) -> Result<(), StoreError>,
+        E: From<StoreError>,
+    {
+        let _guard = self.write_lock().map_err(E::from)?;
+        verify()?;
+        write(self).map_err(E::from)
+    }
+
+    /// `save_entry` with the lock check executed in the same transaction.
+    pub fn save_entry_guarded<F, E>(
+        &self,
+        existing_date: Option<NaiveDate>,
+        updated: &Entry,
+        verify_unlocked: F,
+    ) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: From<StoreError>,
+    {
+        self.guarded_write(verify_unlocked, |s| {
+            s.save_entry_inner(existing_date, updated)
+        })
+    }
+
+    /// `delete_entry` with the lock check executed in the same transaction.
+    pub fn delete_entry_guarded<F, E>(&self, entry: &Entry, verify_unlocked: F) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: From<StoreError>,
+    {
+        self.guarded_write(verify_unlocked, |s| {
+            let path = s.entry_path(entry.date, entry.id);
+            if !path.exists() {
+                return Err(StoreError::NotFound);
+            }
+            std::fs::remove_file(&path).map_err(StoreError::from)
+        })
+    }
+
+    /// `delete_expense` with the invoice/claim lock scans executed in the
+    /// same transaction (#218).
+    pub fn delete_expense_guarded<F, E>(&self, id: Uuid, verify_unlocked: F) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: From<StoreError>,
+    {
+        self.guarded_write(verify_unlocked, |s| {
+            s.remove_doc_locked::<Expense>(&id.to_string())
+        })
+    }
+
+    fn save_entry_inner(
+        &self,
+        existing_date: Option<NaiveDate>,
+        updated: &Entry,
+    ) -> Result<(), StoreError> {
         std::fs::create_dir_all(self.day_dir(updated.date))?;
         write_json(&self.entry_path(updated.date, updated.id), updated)?;
         if let Some(old_date) = existing_date
