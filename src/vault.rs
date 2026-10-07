@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use aes_gcm::Aes256Gcm;
-use aes_gcm::aead::{Aead, AeadCore, KeyInit, Nonce, OsRng};
+use aes_gcm::aead::{Aead, Generate, KeyInit, Nonce};
 
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
@@ -114,7 +114,7 @@ impl SecretVault {
     }
 
     fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, VaultError> {
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let nonce = Nonce::<Aes256Gcm>::generate();
         let ct = self
             .cipher()
             .encrypt(&nonce, plaintext)
@@ -130,8 +130,8 @@ impl SecretVault {
         }
         let (nonce_bytes, ct) = blob.split_at(NONCE_LEN);
         let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| VaultError::BadKey)?;
-        let nonce = Nonce::<Aes256Gcm>::from_slice(nonce_bytes);
-        cipher.decrypt(nonce, ct).map_err(|_| VaultError::Decrypt)
+        let nonce = Nonce::<Aes256Gcm>::try_from(nonce_bytes).map_err(|_| VaultError::Decrypt)?;
+        cipher.decrypt(&nonce, ct).map_err(|_| VaultError::Decrypt)
     }
 
     fn persist(&self, map: &BTreeMap<String, String>) -> Result<(), VaultError> {
