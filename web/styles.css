@@ -157,7 +157,6 @@ button.danger { background: none; border: none; color: var(--danger); padding: .
 .field.checkbox label { font-weight: 400; }
 .field.checkbox input, .theme-switch input { min-height: 0; width: 1rem; height: 1rem; }
 button [class*="p-icon--"] { flex: 0 0 1rem; vertical-align: -.15rem; margin-right: .5rem; }
-.day-nav button [class*="p-icon--"] { margin: 0; }
 .tabs [role="tab"] { min-height: 2.75rem; }
 .tabs [role="tab"] [class*="p-icon--"] { margin-right: .5rem; }
 .nav-label, .hint, .foot { font-size: .875rem; }
@@ -241,13 +240,8 @@ button.primary { width: 100%; }
 /* Day view redesign (#12) */
 .day-bar.p-card { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: .7rem 1rem; margin: 0 0 .75rem; padding: .65rem .8rem; }
 .day-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; min-width: 0; }
-.day-nav { display: flex; align-items: center; gap: .75rem; padding-inline: .25rem; }
-.day-nav > .day-label { text-align: center; }
-.day-bar > .day-nav { grid-column: 2; }
-.day-end { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: .75rem; }
-.day-nav button { display: inline-grid; place-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); width: 2.5rem; height: 2.5rem; padding: 0; font-size: 1rem; line-height: 1; cursor: pointer; }
-.day-nav button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--brand-deep); }
-.day-label { font-weight: 700; font-size: 1.1rem; min-width: 14ch; }
+.day-end { display: flex; align-items: center; gap: .75rem; }
+.date-navigation button [class*="p-icon--"] { margin: 0; }
 .week-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .5rem; margin-bottom: 1rem; }
 .ws-day.p-card { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-content: center; gap: .1rem .4rem; min-width: 0; min-height: 4.5rem; margin: 0; padding: .55rem .65rem; border-bottom: 3px solid transparent; color: var(--fg); cursor: pointer; text-align: left; transition: border-color .12s, background-color .12s, box-shadow .12s; }
 .ws-day:hover { border-color: var(--accent); background: var(--accent-soft); }
@@ -571,11 +565,12 @@ caption { padding-bottom: .35rem; }
 .advanced-billing-section h2:first-child { margin-top: .25rem; }
 .advanced-billing-section .card { max-width: none; }
 .advanced-billing-section table { display: block; overflow-x: auto; }
-.day-bar { display: grid; grid-template-columns: auto minmax(12rem, 1fr) auto; align-items: center; }
-.day-bar.p-card { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
-.day-actions { grid-column: 1; }
-.day-nav { justify-self: center; }
-#day-today { justify-self: end; }
+.day-bar { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+.day-bar.p-card { justify-content: space-between; }
+.day-end { display: flex; align-items: center; justify-content: flex-end; gap: .75rem; margin-left: auto; }
+.date-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; min-width: 0; }
+.date-picker { width: 11.5rem; min-height: 2.5rem; font-variant-numeric: tabular-nums; }
+.week-range { margin-left: .4rem; color: var(--muted); font-size: .875rem; }
 
 @media (max-width: 1000px) {
   .invoice-workspace { grid-template-columns: minmax(0, 1fr); }
@@ -587,10 +582,13 @@ caption { padding-bottom: .35rem; }
   .inv-overview { grid-template-columns: minmax(0, 1fr); }
   #iw-projects { grid-template-columns: minmax(0, 1fr); }
   .invoice-editor-adjustments { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .day-bar.p-card { grid-template-columns: minmax(0, 1fr) auto; gap: .55rem; margin: 0 0 .65rem; padding: .55rem; }
-  .day-nav { grid-column: 1 / -1; grid-row: 1; justify-self: stretch; justify-content: center; }
-  .day-actions { grid-column: 1 / -1; grid-row: 2; }
-  .day-end { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; display: flex; align-items: center; justify-content: space-between; gap: .55rem; }
+  .day-bar.p-card { gap: .55rem; margin: 0 0 .65rem; padding: .55rem; }
+  .date-toolbar { align-items: flex-start; }
+  .date-navigation { width: 100%; }
+  .date-picker { flex: 1 1 9rem; width: auto; min-width: 0; }
+  .week-range { flex: 1 0 100%; margin: 0; }
+  .day-end { width: 100%; justify-content: space-between; gap: .55rem; margin-left: 0; }
+  .day-actions { justify-content: flex-end; }
   .day-actions > .primary { flex: 1 1 auto; }
   #day-table { table-layout: fixed; }
   #day-table thead th:nth-child(3), #day-table tbody td:nth-child(3) { width: 4.5rem; }
