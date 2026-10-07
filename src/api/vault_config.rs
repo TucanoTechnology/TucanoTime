@@ -12,9 +12,11 @@ use super::*;
 pub async fn admin_config(State(app): State<AppState>) -> ApiResult {
     let env_fn = crate::appconfig::process_env;
     let effective = app.cfg().effective(&env_fn);
+    // #190: no `path` — the on-disk location of config.json must never be
+    // serialised to a client (AGENTS.md: responses never expose paths). The
+    // GUI's config table reads `config`/`source`/`email_transport` only.
     Ok(Json(serde_json::json!({
         "config": effective,
-        "path": app.store.root().join("config.json").display().to_string(),
         "vault_enabled": app.vault.is_some(),
         // #130: Settings shows whether email actually delivers ("smtp") or
         // is a logged no-op ("disabled" until smtp.host is configured).
