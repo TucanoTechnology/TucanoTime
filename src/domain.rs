@@ -813,6 +813,23 @@ pub struct Invoice {
     pub written_off_at: Option<DateTime<Utc>>,
 }
 
+/// Filesystem-safe display name for generated PDFs (#189: `store` and
+/// `api::invoicing` kept two sanitizers that disagreed on `.`, so
+/// `PdfHint.filename` could differ from the `Content-Disposition` name).
+/// Alphanumerics, `-` and `_` survive; everything else becomes `_`.
+#[must_use]
+pub fn safe_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// One recorded payment against an invoice (#114). Amounts are minor units;
 /// `method` distinguishes manual/webhook/provider settlements.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1254,7 +1271,6 @@ pub struct ExpenseDraft {
 /// Read-only context for invoice generation, bundled to keep the signature small.
 pub struct InvoiceSources<'a> {
     pub projects: &'a [Project],
-    pub tasks: &'a [Task],
     pub users: &'a [User],
     pub entries: &'a [Entry],
     pub expenses: &'a [Expense],
@@ -1284,7 +1300,6 @@ pub fn generate_invoice(
 ) -> Result<Invoice, InvoiceError> {
     let InvoiceSources {
         projects,
-        tasks,
         users,
         entries,
         expenses,
@@ -1301,10 +1316,6 @@ pub fn generate_invoice(
         excluded_expenses.iter().copied().collect();
     let project_by_code: std::collections::HashMap<&str, &Project> =
         projects.iter().map(|p| (p.code.0.as_str(), p)).collect();
-    let task_by_key: std::collections::HashMap<(&str, &str), &Task> = tasks
-        .iter()
-        .map(|t| ((t.project_code.0.as_str(), t.code.0.as_str()), t))
-        .collect();
     let user_by_id: std::collections::HashMap<Uuid, &User> =
         users.iter().map(|u| (u.id, u)).collect();
     let user_rate = |e: &Entry| -> Option<u64> {
@@ -1337,12 +1348,7 @@ pub fn generate_invoice(
         if *restrict_projects && project.is_none() {
             continue; // deselected project (#134)
         }
-        let task = e.task_code.as_ref().and_then(|tc| {
-            task_by_key
-                .get(&(e.project_code.0.as_str(), tc.0.as_str()))
-                .copied()
-        });
-        let (cur, rate) = effective_rates(e, customer, project, task, user_rate(e));
+        let (cur, rate) = effective_rates(customer, project, user_rate(e));
         set_currency(&cur)?;
         lines.push(InvoiceLine {
             kind: LineKind::Time,
@@ -1450,12 +1456,11 @@ pub struct Entry {
 /// **person → project → customer default**. Currency precedence:
 /// project → customer. `user_rate` is the logging person's default
 /// (Some only when > 0), kept as a plain number so `domain` stays independent
-/// of the `auth` module.
+/// of the `auth` module. Tasks stopped carrying billing overrides in #177;
+/// the entry/task parameters they once needed are gone (#189).
 pub fn effective_rates(
-    _entry: &Entry,
     customer: &Customer,
     project: Option<&Project>,
-    _task: Option<&Task>,
     user_rate: Option<u64>,
 ) -> (Currency, u64) {
     let currency = project
@@ -1935,17 +1940,17 @@ mod tests {
         };
         // Project value wins over customer default.
         assert_eq!(
-            effective_rates(&entry, &customer, Some(&project), None, None),
+            effective_rates(&customer, Some(&project), None),
             (Currency("USD".into()), 3000)
         );
         // Missing project falls to customer default.
         assert_eq!(
-            effective_rates(&entry, &customer, None, None, None),
+            effective_rates(&customer, None, None),
             (Currency("EUR".into()), 6000)
         );
         // Person rate beats the project rate, keeps the project currency.
         assert_eq!(
-            effective_rates(&entry, &customer, Some(&project), None, Some(4500)),
+            effective_rates(&customer, Some(&project), Some(4500)),
             (Currency("USD".into()), 4500)
         );
         let task: Task = serde_json::from_value(serde_json::json!({
@@ -1959,11 +1964,11 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(
-            effective_rates(&entry, &customer, Some(&project), Some(&task), Some(4500)),
+            effective_rates(&customer, Some(&project), Some(4500)),
             (Currency("USD".into()), 4500)
         );
         assert_eq!(
-            effective_rates(&entry, &customer, Some(&project), Some(&task), None),
+            effective_rates(&customer, Some(&project), None),
             (Currency("USD".into()), 3000)
         );
         let serialized = serde_json::to_value(task).unwrap();

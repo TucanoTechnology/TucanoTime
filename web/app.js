@@ -115,6 +115,18 @@ function decorateUbuntuButton(button) {
 
 // The shared select-refill pattern: clear, then append options described as
 // `{ value, text, selected }`. Selection happens by property, as before.
+// One action-cell button builder for every table row (#189: previously a
+// byte-identical local const existed twice, and five renderers re-inlined it).
+function rowAction(cls, text, fn, title) {
+  return el('button', {
+    cls,
+    type: 'button',
+    text,
+    attrs: title ? { title } : {},
+    on: { click: fn },
+  });
+}
+
 function fillSelect(select, options) {
   select.textContent = '';
   for (const o of options) {
@@ -274,7 +286,6 @@ function formatMoney(minor) {
 // ----------------------------------------------------------------- cache ---
 
 const state = {
-  invoices: [], // #133: last rendered invoice list
   customers: [],           // Customer[]
   projectsByCustomer: {},  // id -> Project[]
 };
@@ -842,9 +853,8 @@ function startEdit(e) {
   $('entry-form-title').textContent = `Edit entry ${e.id.slice(0, 8)}`;
   $('entry-save').textContent = 'Update entry';
   $('entry-cancel').hidden = false;
-  $('entry-hours').focus(); // dialog is open — start where the edit happens
   clearFormError($('entry-error'));
-  $('entry-customer').focus();
+  $('entry-customer').focus(); // #189: the earlier entry-hours focus was immediately stolen
   $('entry-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -939,20 +949,23 @@ async function weekLockIds() {
   const nowMs = Date.now();
   if (weekLockCache.ids && nowMs - weekLockCache.at < 5000) return weekLockCache.ids;
   const locked = new Set();
-  try {
-    const subs = await api.get('/submissions');
-    for (const s of subs.submissions || []) {
+  // #189: the two reads are independent — overlap them (was sequential).
+  const [subsRes, invsRes] = await Promise.allSettled([
+    api.get('/submissions'),
+    api.get('/invoices'), // admin-only; a member rejection is the normal arm
+  ]);
+  if (subsRes.status === 'fulfilled') {
+    for (const s of subsRes.value.submissions || []) {
       if (s.state === 'submitted' || s.state === 'approved') {
         for (const id of s.entry_ids || []) locked.add(id);
       }
     }
-  } catch { /* ignore */ }
-  try {
-    const invs = await api.get('/invoices'); // admin-only; members skip silently
-    for (const i of invs.invoices || []) {
+  }
+  if (invsRes.status === 'fulfilled') {
+    for (const i of invsRes.value.invoices || []) {
       if (i.status === 'issued') for (const l of i.lines || []) if (l.entry_id) locked.add(l.entry_id);
     }
-  } catch { /* members cannot list invoices */ }
+  }
   weekLockCache = { at: Date.now(), ids: locked };
   return locked;
 }
@@ -967,7 +980,7 @@ function invalidateLockCache() {
 function weekShort(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
-  return `${String(d).padStart(2, '0')} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]}`;
+  return `${String(d).padStart(2, '0')} ${MONTH_NAMES[m - 1]}`; // #189: one month table
 }
 
 async function refreshWeek() {
@@ -1715,8 +1728,7 @@ async function removeProject(p) {
     await refreshProjectTable();
     announce('Project deleted.');
   } catch (err) {
-    announce(err.message);
-    await askAlert(err.message);
+    await askAlert(err.message); // #189: was double-reported (announce + dialog)
   }
 }
 
@@ -1835,8 +1847,7 @@ async function removeTask(t) {
     await refreshTaskTable();
     announce('Task deleted.');
   } catch (err) {
-    announce(err.message);
-    await askAlert(err.message);
+    await askAlert(err.message); // #189: was double-reported (announce + dialog)
   }
 }
 
@@ -1898,25 +1909,14 @@ async function refreshInvoices() {
   const data = await api.get('/invoices');
   if (seq !== invoicesRenderSeq) return; // a newer refresh superseded this one
   const invoices = dashFilter(data.invoices || []); // #135 filters + sort
-  state.invoices = data.invoices || []; // #133: the preview re-renders against fresh data
   const tbody = $('invoice-table').querySelector('tbody');
   tbody.textContent = '';
-  const action = (cls, text, fn, title) =>
-    el('button', {
-      cls,
-      type: 'button',
-      text,
-      attrs: title ? { title } : {},
-      on: { click: fn },
-    });
+  const action = rowAction; // #189: shared builder
   for (const inv of invoices) {
     const actions = [];
     // Balance semantics (#114): legacy paid docs without a ledger count as
     // fully settled; a written-off balance is forgiven, not outstanding.
-    const paidMinor = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
-    const balance = inv.status === 'paid' || inv.status === 'written_off'
-      ? 0
-      : Math.max(inv.total_minor - paidMinor, 0);
+    const balance = invBalance(inv); // #189: shared semantic
     const open = inv.status === 'issued' || inv.status === 'partly_paid';
     if (inv.status === 'draft') {
       actions.push(
@@ -2056,10 +2056,7 @@ async function recordPayment(inv, balance) {
     if (paid.status === 'paid') {
       announce('Invoice marked paid.');
     } else {
-      const rest = Math.max(
-        paid.total_minor - (paid.payments || []).reduce((a, p) => a + p.amount_minor, 0),
-        0,
-      );
+      const rest = invBalance(paid); // #189: shared semantic
       announce(`Payment recorded. ${paid.currency} ${formatMoney(rest)} still outstanding.`);
     }
     await refreshInvoices();
@@ -2337,9 +2334,6 @@ function dashRenderOverview(invoices) {
 function dashApplyColumns() {
   const on = new Set([...document.querySelectorAll('.inv-col:checked')].map((c) => c.value));
   const table = $('invoice-table');
-  for (const th of table.querySelectorAll('thead th[data-hide], tbody th[data-hide], tbody td[data-hide]')) {
-    // headers get data-hide at build time below; fall back to index map
-  }
   const idx = { customer: 1, period: 2, total: 3, balance: 4, status: 5 };
   for (const [name, i] of Object.entries(idx)) {
     const hide = !on.has(name);
@@ -2361,9 +2355,10 @@ function dashApplyColumns() {
 let invoicePreview = null; // { id, inv, opener }
 
 function invoiceBalance(inv) {
-  const paid = (inv.payments || []).reduce((a, p) => a + p.amount_minor, 0);
-  if (inv.status === 'paid' || inv.status === 'written_off') return 0;
-  return Math.max((inv.total_minor || 0) - paid, 0);
+  // #189: one balance semantic (the four copies had already drifted on the
+  // `|| 0` default). invBalance owns the rule; this stays as the alias the
+  // preview path uses.
+  return invBalance(inv);
 }
 
 async function openInvoicePreview(inv, opener) {
@@ -2719,8 +2714,6 @@ async function iwLoadProjects() {
     );
   }
   if (!shown) box.appendChild(el('span', { cls: 'hint', text: 'No uninvoiced billable work in this period.' }));
-  const rate = customerName(cid) ? ` (customer rate ${formatMoney((cust.default_rate_minor ?? 0) / 100 * 100)} default)` : '';
-  void rate;
 }
 
 function iwShow() {
@@ -3115,8 +3108,7 @@ async function refreshSchedules() {
   }
   const tbody = $('rec-table').querySelector('tbody');
   tbody.textContent = '';
-  const action = (cls, text, fn, title) =>
-    el('button', { cls, type: 'button', text, attrs: title ? { title } : {}, on: { click: fn } });
+  const action = rowAction; // #189: shared builder
   for (const scd of schedules) {
     const active = scd.active !== false;
     tbody.appendChild(
@@ -3640,7 +3632,19 @@ async function deleteUser(user) {
 }
 
 async function refreshSettings() {
-  await refreshUsers();
+  // #189: independent admin surfaces load in parallel (was a sequential
+  // six-request waterfall behind the Settings tab).
+  await Promise.all([
+    refreshUsers(),
+    refreshSecrets(),
+    refreshConfig(),
+    refreshOrgProfile(),
+    refreshCatalog(),
+    refreshInvoiceTemplate(),
+  ]);
+}
+
+async function refreshSecrets() {
   try {
     const data = await api.get('/admin/secrets');
     $('vault-status').textContent = 'Credential vault: enabled (encrypted at rest).';
@@ -3674,10 +3678,6 @@ async function refreshSettings() {
       announce(err.message);
     }
   }
-  await refreshConfig();
-  await refreshOrgProfile();
-  await refreshCatalog();
-  await refreshInvoiceTemplate();
 }
 
 /// Effective runtime configuration card (#94). Admin surface; members get a
@@ -4575,8 +4575,7 @@ function wizPrepareProject() {
     fillSelect(
       $('wz-project-customer'),
       state.customers.map((c) => ({ value: c.id, text: c.name })),
-      state.customers[0] ? state.customers[0].id : null,
-    );
+    ); // #189: third fillSelect argument was silently ignored
   }
   wizPrefillFromCustomer(); // #11 prefill rule: currency + rate from the customer
 }

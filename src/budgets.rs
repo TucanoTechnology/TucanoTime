@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::auth::User;
-use crate::domain::{Customer, Entry, Project, Task, effective_rates};
+use crate::domain::{Customer, Entry, Project, effective_rates};
 use crate::scheduler::Job;
 use crate::store::Store;
 
@@ -35,16 +35,11 @@ pub fn burn_report(
     projects: &[(Uuid, Project)],
     entries: &[Entry],
     customers: &[Customer],
-    tasks: &[Task],
     users: &[User],
 ) -> Vec<BudgetRow> {
     // Review D4: index once, then per-entry lookups are O(1).
     let customer_by_id: std::collections::HashMap<uuid::Uuid, &Customer> =
         customers.iter().map(|c| (c.id, c)).collect();
-    let task_by_key: std::collections::HashMap<(&str, &str), &Task> = tasks
-        .iter()
-        .map(|t| ((t.project_code.0.as_str(), t.code.0.as_str()), t))
-        .collect();
     let user_by_id: std::collections::HashMap<uuid::Uuid, &User> =
         users.iter().map(|u| (u.id, u)).collect();
     let mut rows = Vec::new();
@@ -61,15 +56,10 @@ pub fn burn_report(
         {
             burn_h += u64::from(e.hours.0);
             if let Some(cust) = customer {
-                let task = e.task_code.as_ref().and_then(|tc| {
-                    task_by_key
-                        .get(&(e.project_code.0.as_str(), tc.0.as_str()))
-                        .copied()
-                });
                 let urate = e
                     .user_id
                     .and_then(|uid| user_by_id.get(&uid).map(|u| u.default_rate_minor));
-                let (_, rate) = effective_rates(e, cust, Some(p), task, urate);
+                let (_, rate) = effective_rates(cust, Some(p), urate);
                 burn_amt += e.hours.amount_minor(rate);
             }
         }
@@ -118,15 +108,9 @@ impl Job for BudgetAlertJob {
             Err(_) => return,
         };
         let mut projects: Vec<(uuid::Uuid, Project)> = Vec::new();
-        let mut tasks = Vec::new();
         for c in &customers {
             if let Ok(ps) = self.store.list_projects(c.id) {
-                for p in ps {
-                    if let Ok(ts) = self.store.list_tasks(c.id, &p.code.0) {
-                        tasks.extend(ts);
-                    }
-                    projects.push((c.id, p));
-                }
+                projects.extend(ps.into_iter().map(|p| (c.id, p)));
             }
         }
         // Full lifetime scan: budgets are lifetime totals, and list_range's
@@ -145,7 +129,7 @@ impl Job for BudgetAlertJob {
             .filter(|u| u.role == crate::auth::Role::Admin && u.active)
             .map(|u| u.id)
             .collect();
-        for row in burn_report(&projects, &entries, &customers, &tasks, &users) {
+        for row in burn_report(&projects, &entries, &customers, &users) {
             let p = row
                 .hours_pct
                 .unwrap_or(0.0)
@@ -292,7 +276,7 @@ mod tests {
             created_at: Utc.timestamp_opt(1, 0).unwrap(),
             updated_at: Utc.timestamp_opt(1, 0).unwrap(),
         }];
-        let rows = burn_report(&[(cid, p)], &entries, &[customer], &[], &[]);
+        let rows = burn_report(&[(cid, p)], &entries, &[customer], &[]);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].burn_hours, 6.0);
         assert_eq!(rows[0].hours_pct, Some(60.0));

@@ -1654,25 +1654,13 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 /// Filename sanitiser for derived download names: invoice numbers are
 /// minted by `create_invoice` (`INV-%04d`), but the hint never carries
 /// anything that could steer a path (#50).
-fn sanitize_filename(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
 /// The `pdf` hint persisted with the invoice (#113).
 fn pdf_hint(number: &str, archived: &[u8], now: DateTime<Utc>) -> PdfHint {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(archived);
     PdfHint {
-        filename: format!("{}.pdf", sanitize_filename(number)),
+        filename: format!("{}.pdf", crate::domain::safe_filename(number)),
         bytes: archived.len() as u64,
         sha256: h.finalize().iter().map(|b| format!("{b:02x}")).collect(),
         archived_at: now,

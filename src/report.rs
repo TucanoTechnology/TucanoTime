@@ -11,7 +11,7 @@ use chrono::{Datelike, NaiveDate};
 use uuid::Uuid;
 
 use crate::auth::User;
-use crate::domain::{Customer, Entry, Task, effective_rates};
+use crate::domain::{Customer, Entry, effective_rates};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
@@ -74,7 +74,6 @@ pub fn summarise(
     entries: &[Entry],
     customers: &[Customer],
     projects: &[(Uuid, crate::domain::Project)],
-    tasks: &[Task],
     users: &[User],
     kind: Group,
     billable_filter: Option<bool>,
@@ -102,12 +101,6 @@ pub fn summarise(
             .find(|(cid, p)| *cid == e.customer_id && p.code == e.project_code)
             .map(|(_, p)| p)
     };
-    let task_for = |e: &Entry| -> Option<&Task> {
-        let tc = e.task_code.as_ref()?;
-        tasks.iter().find(|t| {
-            t.customer_id == e.customer_id && t.project_code == e.project_code && t.code == *tc
-        })
-    };
     let user_rate = |e: &Entry| -> Option<u64> {
         e.user_id
             .and_then(|uid| users.iter().find(|u| u.id == uid))
@@ -129,7 +122,7 @@ pub fn summarise(
             continue; // dangling reference: excluded from totals, never fabricated.
         };
         let project = project_for(e);
-        let (currency, rate) = effective_rates(e, customer, project, task_for(e), user_rate(e));
+        let (currency, rate) = effective_rates(customer, project, user_rate(e));
         let label_customer = &customer.name;
         let (mut key, label) = group_key(e, kind, label_customer, &e.project_code.0, &user_name(e));
         if kind == Group::Week {
@@ -405,7 +398,6 @@ pub fn export_csv(
     entries: &[Entry],
     customers: &[Customer],
     projects: &[(Uuid, crate::domain::Project)],
-    tasks: &[Task],
     users: &[User],
     customer_filter: Option<Uuid>,
 ) -> String {
@@ -415,12 +407,6 @@ pub fn export_csv(
             .iter()
             .find(|(cid, p)| *cid == e.customer_id && p.code == e.project_code)
             .map(|(_, p)| p)
-    };
-    let task_for = |e: &Entry| -> Option<&Task> {
-        let tc = e.task_code.as_ref()?;
-        tasks.iter().find(|t| {
-            t.customer_id == e.customer_id && t.project_code == e.project_code && t.code == *tc
-        })
     };
     let user_rate = |e: &Entry| -> Option<u64> {
         e.user_id
@@ -442,7 +428,7 @@ pub fn export_csv(
             continue;
         };
         let project = project_for(e);
-        let (currency, rate) = effective_rates(e, customer, project, task_for(e), user_rate(e));
+        let (currency, rate) = effective_rates(customer, project, user_rate(e));
         let hours = e.hours.0 as f64 / 100.0;
         let amount = e.hours.amount_minor(rate);
         let fields = [
