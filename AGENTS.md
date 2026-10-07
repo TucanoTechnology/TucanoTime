@@ -41,16 +41,24 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   `customers/<id>/projects/<CODE>/tasks/<TASK>.json` (optional task tier, #38),
   `entries/<YYYY-MM-DD>/<id>.json`, `invoices/<id>.json`, `users/<id>.json`,
   `categories/<id>.json`, `expenses/<id>.json`, `submissions/<id>.json`,
-  plus `audit.log` (#52), `revoked.json` (#45), `scheduler.json` (#61) and
-  `secrets.bin` (#77, AES-256-GCM encrypted). Atomic writes (tmp + rename).
+  plus `audit.log` (#52), `revoked.json` (#45), `scheduler.json` (#61),
+  `secrets.bin` (#77, AES-256-GCM encrypted), `config.json` + `session.key`
+  (#94), `.server.lock` (single-instance guard), the `retainers/`, `claims/`,
+  `schedules/`, `timers/`, `items/` and `notifications/` doc folders,
+  `sync/accounting.json` (#33), archived
+  `invoices/<id>.pdf` (#113), `invoices/.seq.json` (number ledger, B3) and
+  `*.idx.*` side indexes (D3). Atomic writes (tmp + rename).
 - **Secret vault (#77):** admin-entered integration credentials are encrypted at
   rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
   hints only) or logged. Fail-closed: unset key ⇒ vault disabled.
 - **Locking (#18 seam):** entry edits/deletes consult `CombinedLocks`, which
-  composes `InvoiceLock` (entries on an issued invoice, #8) and `SubmissionLock`
+  composes `InvoiceLock` (entries on an *open* invoice — issued, partly paid or
+  paid, per #114/#8 — locking follows `status.is_open()`) and `SubmissionLock`
   (entries in a submitted/approved week, #16). Reads are never blocked. If the
   lock state cannot be verified the write is refused fail-closed with 503
   `lock_unavailable` (#185) — never allowed because the check was inconclusive.
+  Reimbursement claims (#24) lock their expenses via a direct scan in
+  `api::expenses`, not through this seam (see the #190 follow-up note).
 - Every payload is validated against the contract before any write
   (`deny_unknown_fields` + `domain::validate_*`); no partial persistence.
   Errors use the single JSON shape in `openapi.json`; responses never expose
@@ -63,9 +71,11 @@ The GUI is a presentation layer and nothing more — it never reads storage.
 - **Auth (#19):** users are file-based (`users/<id>.json`), passwords argon2id,
   sessions are HMAC-signed HttpOnly cookies (`tt_session`). Data routes require a
   valid session; `/users` requires `admin`. First-run `/auth/bootstrap` creates
-  the initial admin only while no users exist. Key from `TUCANO_SESSION_SECRET`
-  (ephemeral if unset); `TUCANO_ENV=production` sets the `Secure` cookie flag.
-  `password_hash` is never serialised to clients.
+  the initial admin only while no users exist. Key: `TUCANO_SESSION_SECRET[_FILE]`
+  else the auto-created `<data>/session.key`, so restarts keep sessions (#94);
+  the `Secure` cookie flag is the independent `TUCANO_SECURE_COOKIES` axis
+  (default on iff `TUCANO_ENV=production`; `=0` allows plain-HTTP LAN serving,
+  review A5). `password_hash` is never serialised to clients.
 - **RBAC / private-per-user (#51):** entries and expenses carry `user_id` (the
   author). A **member** sees/edits only their own records; an **admin** sees all
   and owns `/invoices` (admin tier) and submission approval. Enforce via
