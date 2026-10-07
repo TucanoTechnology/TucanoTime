@@ -97,7 +97,7 @@ body {
   padding: 1rem .75rem; display: flex; flex-direction: column; gap: 1rem;
 }
 .brand { font-size: 1.5rem; font-weight: 550; color: var(--brand-deep); padding: .25rem .5rem; letter-spacing: 0; }
-.sidebar nav { flex: 1; }
+.sidebar nav { flex: 1; display: flex; flex-direction: column; gap: .15rem; } /* #191: the utility separator + wizard button are nav siblings of the tablist now */
 .tabs { display: flex; flex-direction: column; gap: .15rem; }
 .tabs [role="tab"] {
   font: inherit; text-align: left; cursor: pointer; width: 100%;
@@ -276,7 +276,7 @@ td.cell.has { background: var(--accent-soft); }
 td.cell.locked { background: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(174, 167, 159, .18) 6px, rgba(174, 167, 159, .18) 12px); }
 td.cell.locked .cell-input { opacity: .6; }
 .note-flag { border: 0; background: none; color: var(--brand-deep); cursor: pointer; padding: 0 .35rem; font-weight: 700; }
-.note-flag.note-empty { color: var(--muted); opacity: 0.55; } /* faint add-note (#126) */
+.note-flag.note-empty { color: var(--muted); opacity: 0.7; } /* faint add-note (#126); #191 lifted 0.55→0.7 — it marks an interactive cell and 0.55 faded below a usable affordance */
 .row-total { font-weight: 700; padding: .4rem .6rem; white-space: nowrap; }
 #week-table tfoot th, #week-table tfoot td { padding: .45rem .6rem; font-weight: 700; border-top: 2px solid var(--line); font-variant-numeric: tabular-nums; }
 .week-controls { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; flex-wrap: wrap; }
@@ -288,7 +288,7 @@ td.cell.locked .cell-input { opacity: .6; }
   .tabs { flex-direction: row; flex-wrap: wrap; }
   .tabs [role="tab"] { width: auto; border-left: none; border-bottom: 3px solid transparent; border-radius: var(--radius); }
   .more-tools-group { margin-top: .15rem; padding-top: .4rem; }
-  #tabs #wizard-open { width: auto; border-left: none; border-bottom: 3px solid transparent; border-radius: var(--radius); }
+  #wizard-open { width: auto; border-left: none; border-bottom: 3px solid transparent; border-radius: var(--radius); }
   .tabs [role="tab"][aria-selected="true"] { border-bottom-color: var(--accent); }
 }
 
@@ -398,12 +398,12 @@ td.cell.locked .cell-input { opacity: .6; }
 /* The wizard entry sits among the tabs but is an action, not a tab (#111):
    same chrome as .tabs [role="tab"], minus the selected state; #125 pins it
    to the bottom of the rail behind a separator. */
-#tabs #wizard-open {
+#wizard-open {
   font: inherit; text-align: left; cursor: pointer; width: 100%;
   padding: .55rem .7rem; border: none; border-left: 3px solid transparent;
   background: transparent; color: var(--fg); border-radius: 0 var(--radius) var(--radius) 0;
 }
-#tabs #wizard-open:hover, #tabs #wizard-open:focus-visible { background: var(--row-alt); }
+#wizard-open:hover, #wizard-open:focus-visible { background: var(--row-alt); }
 
 /* ---- invoice document preview (#133) ---- */
 #invoice-preview { margin-top: .8rem; }
