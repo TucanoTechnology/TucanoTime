@@ -254,6 +254,8 @@ pub async fn decide_submission(
     Path(id): Path<Uuid>,
     ValidJson(input): ValidJson<DecisionInput>,
 ) -> ApiResult {
+    // Route is admin-tier (require_admin); the inline ensure_admin is
+    // deliberate defense-in-depth for mutation endpoints (#220).
     ensure_admin(&actor.0)?;
     let mut submission = app
         .store
@@ -370,7 +372,11 @@ pub async fn create_claim(
         title: title.to_owned(),
         expense_ids: input.expense_ids.clone(),
         total_minor: total,
-        currency: currency.expect("non-empty"),
+        // #220: typed fallback — empty/duplicate ids were rejected above,
+        // so currency is Some here; keep it an error, not a panic.
+        currency: currency.ok_or_else(|| {
+            ApiError::internal("claim currency unset despite non-empty ids".into())
+        })?,
         state: ClaimState::Draft,
         comment: String::new(),
         created_at: app.clock.now(),
@@ -407,6 +413,8 @@ pub async fn decide_claim(
     Path(id): Path<Uuid>,
     ValidJson(input): ValidJson<ClaimDecisionInput>,
 ) -> ApiResult {
+    // Route is admin-tier (require_admin); the inline ensure_admin is
+    // deliberate defense-in-depth for mutation endpoints (#220).
     ensure_admin(&actor.0)?;
     let mut claim = app
         .store
