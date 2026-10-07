@@ -175,20 +175,22 @@ pub(crate) fn load_org(app: &AppState) -> Result<crate::domain::OrgProfile, ApiE
 /// here so there is a single source of truth (#138): `org_profile.name` when
 /// set, else the boot-time `org_name` config key (#94), else its default.
 /// Legal id and address come from the profile only.
-pub(crate) fn org_for(app: &AppState) -> crate::pdf::Org {
-    let profile = load_org(app).unwrap_or_default();
+pub(crate) fn org_for(app: &AppState) -> Result<crate::pdf::Org, ApiError> {
+    // #187: a corrupt org_profile.json must surface (500), not silently
+    // render invoices with the fallback identity via `unwrap_or_default()`.
+    let profile = load_org(app)?;
     let name = if profile.name.trim().is_empty() {
         app.cfg()
             .get_str("org_name", &crate::appconfig::process_env)
     } else {
         profile.name.trim().to_string()
     };
-    crate::pdf::Org {
+    Ok(crate::pdf::Org {
         name,
         legal_id: profile.legal_id.clone(),
         address: profile.address.clone(),
         accent: profile.accent.clone(),
-    }
+    })
 }
 
 /// `GET /admin/org` — company identity (#138).
@@ -261,7 +263,7 @@ pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) ->
     snapshot.issued_at = Some(now);
     snapshot.due_date = Some(due);
     let mut doc =
-        crate::pdf::doc_for_labeled(&snapshot, &customer, &org_for(&app), &template.labels);
+        crate::pdf::doc_for_labeled(&snapshot, &customer, &org_for(&app)?, &template.labels);
     let content = content_for(&snapshot, &customer, &template);
     crate::template::apply_doc_content(&mut doc, &content);
     let pdf = crate::pdf::render_invoice_pdf(&doc);
@@ -506,7 +508,7 @@ pub async fn send_invoice_email(State(app): State<AppState>, Path(id): Path<Uuid
     let (filename, pdf) = invoice_pdf_for_delivery(&app, &invoice)?;
     let amount = money_for_email(invoice.total_minor, &invoice.currency.0);
     let due = invoice.due_date.map(|d| d.to_string());
-    let org = org_for(&app);
+    let org = org_for(&app)?;
     let template = load_template(&app)?;
     let content = content_for(&invoice, &customer, &template);
     let text = crate::email::render_invoice_email(
@@ -602,7 +604,7 @@ pub async fn send_invoice_email_copy(
     }
     let customer = get_customer(&app.store, invoice.customer_id)?;
     let (filename, pdf) = invoice_pdf_for_delivery(&app, &invoice)?;
-    let org = org_for(&app);
+    let org = org_for(&app)?;
     let subject = format!("Copy of invoice {} for {}", invoice.number, customer.name);
     let text = crate::email::render_copy_email(
         &invoice.number,
@@ -1095,7 +1097,7 @@ pub(crate) fn content_for(
 pub(crate) fn render_pdf_now(app: &AppState, invoice: &Invoice) -> Result<Vec<u8>, ApiError> {
     let customer = get_customer(&app.store, invoice.customer_id)?;
     let template = load_template(app)?;
-    let mut doc = crate::pdf::doc_for_labeled(invoice, &customer, &org_for(app), &template.labels);
+    let mut doc = crate::pdf::doc_for_labeled(invoice, &customer, &org_for(app)?, &template.labels);
     let content = content_for(invoice, &customer, &template);
     crate::template::apply_doc_content(&mut doc, &content);
     Ok(crate::pdf::render_invoice_pdf(&doc))
@@ -1233,7 +1235,7 @@ pub async fn invoice_document(State(app): State<AppState>, Path(id): Path<Uuid>)
     let customer = get_customer(&app.store, invoice.customer_id)?;
     let template = load_template(&app)?;
     let content = content_for(&invoice, &customer, &template);
-    let org = org_for(&app);
+    let org = org_for(&app)?;
     let subject = content
         .subject
         .clone()
@@ -1260,13 +1262,69 @@ pub struct ManualInvoiceInput {
     pub lines: Vec<crate::domain::ManualLineInput>,
 }
 
+/// A draft line as submitted (#187). Mirrors `domain::InvoiceLine` but is an
+/// INPUT type with `deny_unknown_fields`: the shared validation invariant
+/// ("every payload rejected before any write") could not apply to the stored
+/// type without also making every legacy invoice document strict at read
+/// time (a future added-then-removed field would brick `list_invoices`, and
+/// via #185's fail-closed locks, entry editing). Conversion is field-by-field;
+/// `amount_minor` is always recomputed server-side for manual lines.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvoiceLineInput {
+    pub kind: crate::domain::LineKind,
+    pub date: chrono::NaiveDate,
+    #[serde(default)]
+    pub entry_id: Option<Uuid>,
+    #[serde(default)]
+    pub expense_id: Option<Uuid>,
+    #[serde(default)]
+    pub project_code: Option<crate::domain::ProjectCode>,
+    #[serde(default)]
+    pub task_code: Option<crate::domain::ProjectCode>,
+    #[serde(default)]
+    pub hours: Option<crate::domain::Hours>,
+    #[serde(default)]
+    pub rate_minor: Option<u64>,
+    #[serde(default)]
+    pub amount_minor: u64,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default)]
+    pub quantity_hundredths: Option<u32>,
+    #[serde(default)]
+    pub unit_price_minor: Option<u64>,
+    #[serde(default)]
+    pub item_kind: Option<crate::domain::LineItemKind>,
+}
+
+impl From<&InvoiceLineInput> for crate::domain::InvoiceLine {
+    fn from(l: &InvoiceLineInput) -> Self {
+        crate::domain::InvoiceLine {
+            kind: l.kind,
+            date: l.date,
+            entry_id: l.entry_id,
+            expense_id: l.expense_id,
+            project_code: l.project_code.clone(),
+            task_code: l.task_code.clone(),
+            hours: l.hours,
+            rate_minor: l.rate_minor,
+            amount_minor: l.amount_minor,
+            note: l.note.clone(),
+            quantity_hundredths: l.quantity_hundredths,
+            unit_price_minor: l.unit_price_minor,
+            item_kind: l.item_kind,
+        }
+    }
+}
+
 /// Body for `PUT /invoices/{id}` (#143): draft-only full replacement of the
 /// line set + percentages. Tracked lines must come back exactly as stored
 /// (identity and amounts are enforced server-side); manual lines are free.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InvoiceEditInput {
-    pub lines: Vec<crate::domain::InvoiceLine>,
+    pub lines: Vec<InvoiceLineInput>,
     #[serde(default)]
     pub tax_hundredths: u16,
     #[serde(default)]
@@ -1297,7 +1355,7 @@ pub async fn create_manual_invoice(
         &mut errors,
     );
     let lines = crate::domain::validate_manual_lines(&input.lines, &mut errors);
-    validate_line_projects(&app, &customer.id, &lines, &mut errors);
+    validate_line_projects(&app, &customer.id, &lines, &mut errors)?;
     if !errors.is_empty() {
         return Err(ApiError::validation(errors));
     }
@@ -1339,14 +1397,17 @@ fn validate_line_projects(
     customer_id: &Uuid,
     lines: &[crate::domain::InvoiceLine],
     errors: &mut Vec<FieldError>,
-) {
+) -> Result<(), ApiError> {
+    // #187: one store read per call (was one per line), and a store failure
+    // surfaces as its own error instead of an `.unwrap_or(false)` that turned
+    // an IO fault into a bogus "unknown project" 422.
+    if lines.iter().all(|l| l.project_code.is_none()) {
+        return Ok(());
+    }
+    let projects = app.store.list_projects(*customer_id)?;
     for (i, l) in lines.iter().enumerate() {
         if let Some(code) = &l.project_code
-            && !app
-                .store
-                .list_projects(*customer_id)
-                .map(|ps| ps.iter().any(|p| &p.code == code))
-                .unwrap_or(false)
+            && !projects.iter().any(|p| &p.code == code)
         {
             errors.push(FieldError::new(
                 format!("lines[{i}].project_code"),
@@ -1354,6 +1415,7 @@ fn validate_line_projects(
             ));
         }
     }
+    Ok(())
 }
 
 /// Edit a draft invoice (#143): replace the line set and percentages under a
@@ -1402,7 +1464,8 @@ pub async fn update_invoice_draft(
                 ));
                 continue;
             };
-            if l != *orig {
+            let candidate: crate::domain::InvoiceLine = l.into();
+            if &candidate != *orig {
                 errors.push(FieldError::new(
                     format!("lines[{i}]"),
                     "tracked lines are immutable (rate snapshot #8)",
@@ -1411,7 +1474,9 @@ pub async fn update_invoice_draft(
             }
             out_lines.push((*orig).clone());
         } else {
-            // Manual line: validated + re-priced server-side.
+            // Manual line: re-priced server-side. Uses the SAME bounds as
+            // POST /invoices/manual (#187) — previously a divergent inline
+            // copy that could drift.
             let qty = l.quantity_hundredths.unwrap_or(0);
             let price = l.unit_price_minor.unwrap_or(0);
             if l.kind != crate::domain::LineKind::Fixed || l.item_kind.is_none() {
@@ -1421,35 +1486,22 @@ pub async fn update_invoice_draft(
                 ));
                 continue;
             }
-            if qty == 0 || qty > 1_000_000 {
-                errors.push(FieldError::new(
-                    format!("lines[{i}].quantity_hundredths"),
-                    "must be between 0.01 and 10000.00 units",
-                ));
-                continue;
-            }
-            if price > 100_000_000 {
-                errors.push(FieldError::new(
-                    format!("lines[{i}].unit_price_minor"),
-                    "at most 100000000",
-                ));
-                continue;
-            }
-            if l.note.trim().is_empty() || l.note.chars().count() > 500 {
-                errors.push(FieldError::new(
-                    format!("lines[{i}].note"),
-                    "required, at most 500 characters",
-                ));
-                continue;
-            }
-            out_lines.push(crate::domain::InvoiceLine {
-                amount_minor: crate::domain::manual_amount_minor(qty, price),
-                note: l.note.trim().to_string(),
-                ..l.clone()
-            });
+            crate::domain::check_manual_line(
+                &l.note,
+                qty,
+                price,
+                &format!("lines[{i}].note"),
+                &format!("lines[{i}].quantity_hundredths"),
+                &format!("lines[{i}].unit_price_minor"),
+                &mut errors,
+            );
+            let mut line: crate::domain::InvoiceLine = l.into();
+            line.amount_minor = crate::domain::manual_amount_minor(qty, price);
+            line.note = l.note.trim().to_string();
+            out_lines.push(line);
         }
     }
-    validate_line_projects(&app, &invoice.customer_id, &out_lines, &mut errors);
+    validate_line_projects(&app, &invoice.customer_id, &out_lines, &mut errors)?;
     if !errors.is_empty() {
         return Err(ApiError::validation(errors));
     }

@@ -120,6 +120,16 @@ fn retainer_error(e: crate::retainer::RetainerError) -> ApiError {
     }
 }
 
+/// #187: every retainer transaction maps its typed result the same way —
+/// store errors through `Into<ApiError>`, domain errors through
+/// `retainer_error` — replacing the per-caller substring matching.
+fn retainer_update_error(e: crate::store::UpdateError<crate::retainer::RetainerError>) -> ApiError {
+    match e {
+        crate::store::UpdateError::Store(s) => s.into(),
+        crate::store::UpdateError::Domain(r) => retainer_error(r),
+    }
+}
+
 async fn ledger_op(
     app: &AppState,
     actor: &AuthUser,
@@ -147,25 +157,7 @@ async fn ledger_op(
                 currency_claim: input.currency.as_deref(),
             })
         })
-        .map_err(|e| match e {
-            crate::store::StoreError::Io(msg) if msg.contains("closed") => ApiError::conflict(msg),
-            crate::store::StoreError::Io(msg) if msg.contains("overdraw") => {
-                ApiError::conflict(msg)
-            }
-            crate::store::StoreError::Io(msg) if msg.contains("duplicate") => {
-                ApiError::conflict(msg)
-            }
-            crate::store::StoreError::Io(msg) if msg.contains("positive") => {
-                ApiError::validation(vec![FieldError::new("amount_minor", msg)])
-            }
-            crate::store::StoreError::Io(msg) if msg.contains("reason") => {
-                ApiError::validation(vec![FieldError::new("reason", msg)])
-            }
-            crate::store::StoreError::Io(msg) if msg.contains("currency") => {
-                ApiError::validation(vec![FieldError::new("currency", msg)])
-            }
-            other => other.into(),
-        })?;
+        .map_err(retainer_update_error)?;
     app.audit.record(
         match kind {
             TxKind::Draw => "retainer_draw",
@@ -201,14 +193,19 @@ pub async fn close_retainer(
     actor: AuthUser,
     Path(id): Path<Uuid>,
 ) -> ApiResult {
-    let updated = app.store.update_retainer(id, |r| {
-        if r.status == RetainerStatus::Closed {
-            return Err(crate::retainer::RetainerError::Closed);
-        }
-        r.status = RetainerStatus::Closed;
-        r.closed_at = Some(app.clock.now());
-        Ok(())
-    })?;
+    let updated = app
+        .store
+        .update_retainer(id, |r| {
+            if r.status == RetainerStatus::Closed {
+                return Err(crate::retainer::RetainerError::Closed);
+            }
+            r.status = RetainerStatus::Closed;
+            r.closed_at = Some(app.clock.now());
+            Ok(())
+        })
+        .map_err(retainer_update_error)?;
+    // A second close now answers 409 RetainerError::Closed (it used to be
+    // erased to StoreError::Io and surfaced as a 500) (#187).
     app.audit.record(
         "retainer_closed",
         &format!("{}:{}", id, actor.0.id),
