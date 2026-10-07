@@ -107,6 +107,7 @@
       <input type="date" id="day-date" hidden>
       <div class="day-bar p-card">
         <div class="day-actions">
+          <button type="button" id="day-add" class="primary" data-icon="plus">Track time</button>
           <button type="button" id="timer-open" data-icon="play" aria-controls="timerbar" aria-expanded="false">Start timer</button>
           <span id="timer-display" class="timer-display" role="timer" hidden>00:00:00</span>
           <button type="button" id="timer-stop" data-icon="stop" class="secondary" hidden>Stop</button>
@@ -119,7 +120,6 @@
         </nav>
         <div class="day-end">
           <button type="button" id="day-today" class="link">Return to today</button>
-          <button type="button" id="day-add" class="primary">Track time</button>
         </div>
       </div>
       <div class="timerbar p-card p-card--muted" id="timerbar" hidden>
@@ -201,6 +201,9 @@
     <section id="panel-week" role="tabpanel" aria-labelledby="ts-week" tabindex="0" hidden>
       <input type="date" id="week-date" hidden>
       <div class="day-bar">
+        <div class="day-actions">
+          <button type="button" id="week-track" class="primary" data-icon="plus">Track time</button>
+        </div>
         <nav class="day-nav" aria-label="Change week">
           <button type="button" id="week-prev" aria-label="Previous week" title="Previous week"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
           <span id="week-label" class="day-label"></span>
@@ -208,7 +211,6 @@
         </nav>
         <div class="day-end">
           <button type="button" id="week-today" class="link">Return to this week</button>
-          <button type="button" id="week-track" class="primary">Track time</button>
         </div>
       </div>
       <p class="hint">Type hours into a cell and press Enter or click away to save. Clearing a cell deletes that entry.</p>
@@ -243,8 +245,9 @@
     <!-- CUSTOMERS (#182: the combined workspace split into three Setup
          sections; row "Projects" actions cross-navigate with filters). -->
     <section id="panel-customers" role="tabpanel" aria-labelledby="tab-customers" tabindex="0" hidden>
+      <!-- Heading slot = the creation action (the masthead H1 names the
+           page; the duplicate section H2 went in #191-style cleanup). -->
       <div class="customer-heading">
-        <h2 id="customer-section-title">Customers</h2>
         <div class="hierarchy-actions" role="group" aria-label="Customer actions">
           <button type="button" id="customer-new" data-icon="plus" data-positive="1">Customer</button>
         </div>
@@ -260,13 +263,13 @@
     <!-- PROJECTS -->
     <section id="panel-projects" role="tabpanel" aria-labelledby="tab-projects" tabindex="0" hidden>
       <div class="customer-heading">
-        <h2>Projects <span id="project-scope-label" class="scope-label"></span></h2>
         <div class="hierarchy-actions" role="group" aria-label="Project actions">
           <div class="filter-field"><label for="proj-filter-customer">Customer</label>
             <select id="proj-filter-customer"><option value="">All customers</option></select></div>
           <button type="button" id="project-new" data-icon="plus" data-positive="1">Project</button>
         </div>
       </div>
+      <p class="hint scope-hint">Projects <span id="project-scope-label" class="scope-label"></span></p>
       <p id="projects-empty-state" class="workspace-empty">No projects yet. Use <strong>+ Project</strong> to add one.</p>
       <div class="table-scroll"><table id="project-table" hidden>
         <caption class="sr-only">Projects</caption>
@@ -278,7 +281,6 @@
     <!-- TASKS -->
     <section id="panel-tasks" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0" hidden>
       <div class="customer-heading">
-        <h2>Tasks <span id="task-scope-label" class="scope-label"></span></h2>
         <div class="hierarchy-actions" role="group" aria-label="Task actions">
           <div class="filter-field"><label for="task-filter-customer">Customer</label>
             <select id="task-filter-customer"><option value="">Choose a customer&#8230;</option></select></div>
@@ -287,6 +289,7 @@
           <button type="button" id="task-new" data-icon="plus" data-positive="1">Task</button>
         </div>
       </div>
+      <p class="hint scope-hint">Tasks <span id="task-scope-label" class="scope-label"></span></p>
       <p id="tasks-empty-state" class="workspace-empty">Choose a customer and a project to list their tasks.</p>
       <div class="table-scroll"><table id="task-table" hidden>
         <caption class="sr-only">Tasks</caption>
@@ -297,7 +300,6 @@
 
     <!-- REPORTS -->
     <section id="panel-reports" role="tabpanel" aria-labelledby="tab-reports" tabindex="0" hidden>
-      <h2>Reports</h2>
       <form id="report-form" class="bar">
         <label for="report-from">From</label><input type="date" id="report-from" required>
         <label for="report-to">To</label><input type="date" id="report-to" required>
@@ -318,7 +320,6 @@
 
     <!-- INVOICES -->
     <section id="panel-invoices" role="tabpanel" aria-labelledby="tab-invoices" tabindex="0" hidden>
-      <h2>Create or review an invoice</h2>
       <div id="inv-overview" class="inv-overview">
         <div id="inv-tiles">
           <div class="inv-tile"><span class="inv-tile-label">Total open</span><span id="inv-tile-open" class="inv-tile-value">—</span></div>
@@ -513,7 +514,6 @@
     <!-- EXPENSES -->
     <section id="panel-expenses" role="tabpanel" aria-labelledby="tab-expenses" tabindex="0" hidden>
       <div class="panel-heading-row">
-        <h2>Expenses</h2>
         <button type="button" id="expense-new" class="primary" data-icon="plus" data-positive="1">Expense</button>
       </div>
       <table id="expense-table">
@@ -550,7 +550,6 @@
 
     <!-- SUBMISSIONS -->
     <section id="panel-submissions" role="tabpanel" aria-labelledby="tab-submissions" tabindex="0" hidden>
-      <h2>Timesheet submissions</h2>
       <form id="submission-form" class="bar">
         <label for="submission-week">Week starting</label>
         <input type="date" id="submission-week" required>
@@ -568,7 +567,6 @@
     <!-- SETTINGS (admin) -->
     <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
       <div class="settings-head">
-        <h2>Settings</h2>
         <div id="settings-tabs" class="seg settings-tabs" role="tablist" aria-label="Settings categories">
           <button type="button" role="tab" id="settings-tab-security" aria-controls="settings-panel-security" aria-selected="true">Security &amp; runtime</button>
           <button type="button" role="tab" id="settings-tab-users" aria-controls="settings-panel-users" aria-selected="false" tabindex="-1">Users</button>

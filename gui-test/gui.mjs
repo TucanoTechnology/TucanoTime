@@ -117,15 +117,15 @@ check('redundant Invoice and Timer shortcut buttons are absent',
   !window.document.getElementById('shortcut-invoices') && !window.document.getElementById('shortcut-timer'));
 const timerOpen = window.document.getElementById('timer-open');
 const timerSetup = window.document.getElementById('timerbar');
-// #145-alignment: Track time is the last item of the bar's right-hand end
-// cluster (like the + buttons of every other panel); the timer cluster is
-// left, navigation centered.
-check('Track time ends the day bar right cluster after Return to today',
-  window.document.getElementById('day-today').nextElementSibling.id === 'day-add'
-  && window.document.getElementById('day-add').parentElement.className.includes('day-end'));
-check('timer controls occupy the left cluster',
-  timerOpen.parentElement.className.includes('day-actions')
-  && window.document.getElementById('week-track').previousElementSibling.id === 'week-today');
+// The heading-slot layout: Track time LEADS the left cluster (where the
+// section H2 used to be), timer follows, navigation centered, quiet links right.
+check('Track time leads the day bar left cluster before the timer',
+  window.document.getElementById('day-add').previousElementSibling === null
+  && window.document.getElementById('day-add').nextElementSibling.id === 'timer-open'
+  && window.document.getElementById('day-today').parentElement.className.includes('day-end'));
+check('week bar mirrors the placement',
+  window.document.getElementById('week-track').parentElement.className.includes('day-actions')
+  && window.document.getElementById('week-today').parentElement.className.includes('day-end'));
 check('timer selections are hidden until requested', timerSetup.hidden);
 timerOpen.click();
 check('Start timer reveals setup and focuses customer',
@@ -479,6 +479,13 @@ check('each section carries its own creation toolbar',
   window.document.querySelectorAll('#panel-customers .hierarchy-actions button').length === 1
   && window.document.querySelectorAll('#panel-projects .hierarchy-actions button').length === 1
   && window.document.querySelectorAll('#panel-tasks .hierarchy-actions button').length === 1);
+// Heading-slot cleanup: no duplicate section H2 under the masthead H1, and
+// the create action is the panel's first interactive element.
+check('panels lead with their action, not a duplicate H2',
+  window.document.querySelector('#panel-customers h2') === null
+  && window.document.querySelector('#panel-reports h2') === null
+  && window.document.querySelector('#panel-expenses .panel-heading-row button').id === 'expense-new'
+  && window.document.querySelector('#panel-settings > .settings-head h2') === null);
 // Click "Projects" on the ACME row: cross-navigation filters the Projects
 // section (#182) — no shared selection state anymore.
 const projBtn = [...window.document.querySelectorAll('#customer-table button')].find((b) => b.textContent === 'Projects');

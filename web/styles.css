@@ -344,8 +344,11 @@ td.cell.locked .cell-input { opacity: .6; }
 .filter-field { display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
 .filter-field select { min-width: 11rem; }
 .scope-label { font-weight: 400; color: var(--muted); font-size: .95rem; }
-.customer-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem; margin-bottom: .75rem; }
-.customer-heading h2 { margin: 0; }
+/* Section H2s duplicate the masthead H1, so panels now lead with their
+   creation action / filters in the heading slot, top-left. */
+.customer-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: .5rem 1rem; margin-bottom: .35rem; }
+.scope-hint { margin: 0 0 .65rem; }
+.scope-hint .scope-label { font-size: .85rem; }
 .customer-heading h2 { margin: 0; }
 #expense-category-dialog { max-width: 28rem; }
 #expense-dialog form, #expense-category-dialog form { margin: 0; }
@@ -364,8 +367,7 @@ td.cell.locked .cell-input { opacity: .6; }
   display: flex; align-items: center; justify-content: flex-end;
   gap: 1rem; margin: 0 0 1.1rem; flex-wrap: wrap;
 }
-.settings-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: .9rem; }
-.settings-head h2 { margin: 0; }
+.settings-head { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: .9rem; }
 .settings-tabs { flex-wrap: wrap; }
 .settings-tabs [role="tab"] { min-width: 9rem; }
 .settings-panel { min-width: 0; }
@@ -516,7 +518,7 @@ caption { padding-bottom: .35rem; }
 .invoice-table-scroll { display: block; max-width: 100%; overflow-x: auto; }
 .customer-extra-details { margin: .25rem 0 .8rem; border-top: 1px solid var(--line); }
 .customer-extra-details fieldset.field { margin-top: .5rem; }
-.panel-heading-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .65rem; }
+.panel-heading-row { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; margin-bottom: .65rem; }
 .panel-heading-row h2 { margin: 0; }
 .category-settings-form { max-width: 34rem; }
 .chip { min-height: 2rem; }
@@ -586,9 +588,8 @@ caption { padding-bottom: .35rem; }
   .day-bar.p-card { grid-template-columns: minmax(0, 1fr) auto; gap: .55rem; margin: 0 0 .65rem; padding: .55rem; }
   .day-nav { grid-column: 1 / -1; grid-row: 1; justify-self: stretch; justify-content: center; }
   .day-actions { grid-column: 1 / -1; grid-row: 2; }
-  /* End cluster keeps Track time last everywhere, also when stacked. */
   .day-end { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; display: flex; align-items: center; justify-content: space-between; gap: .55rem; }
-  .day-end .primary { flex: 1 1 auto; }
+  .day-actions > .primary { flex: 1 1 auto; }
   #day-table { table-layout: fixed; }
   #day-table thead th:nth-child(3), #day-table tbody td:nth-child(3) { width: 4.5rem; }
   #day-table thead th:last-child, #day-table tbody td:last-child { width: 7.75rem; }
