@@ -9,7 +9,10 @@ COPY web ./web
 COPY openapi.json ./
 # The GUI and the contract are embedded at compile time (rust-embed and
 # include_str!), so the release binary is the entire application.
-RUN cargo build --release
+# --locked (#215): the release image is reproducibly pinned to the
+# committed Cargo.lock; resolver drift breaks the build loudly instead of
+# shipping a different dependency graph.
+RUN cargo build --locked --release
 
 # Runtime stage: no toolchain, no build files — only the binary and a
 # data mount point.
