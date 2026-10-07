@@ -490,7 +490,11 @@ pub struct InvoiceTemplate {
     pub labels: LabelOverrides,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Reads go exclusively through `project_from_bytes`/`ProjectDoc` (the single
+/// legacy-aware disk path, #11); the redundant `Deserialize` derive that
+/// let a second, drift-prone disk shape exist was removed (#183 → #220 /
+/// old review item C3). The struct is still serialized on write.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Project {
     pub customer_id: Uuid,
     pub code: ProjectCode,
@@ -1438,7 +1442,10 @@ pub fn generate_invoice(
         id: Uuid::new_v4(),
         number,
         customer_id: customer.id,
-        currency: currency.expect("non-empty lines set a currency"),
+        // #220: unreachable while `lines` is non-empty (every pushed line
+        // calls set_currency first, and empty lines errored above) — expressed
+        // as a typed error instead of an in-place panic.
+        currency: currency.ok_or(InvoiceError::NothingToInvoice)?,
         period_from: from,
         period_to: to,
         lines,

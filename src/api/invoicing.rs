@@ -367,13 +367,15 @@ pub async fn pay_invoice(
         app.clock.now(),
     ) {
         Ok(inv) => inv,
-        // Over-balance is arithmetic on stored state: 409, message safe.
-        Err(crate::store::StoreError::Conflict(m)) if m.starts_with("payment of ") => {
-            return Err(ApiError::conflict(m));
-        }
+        // #220: the old 'payment of ' string-prefix arm was dead weight —
+        // From<StoreError> already maps every Conflict to 409 with the same
+        // (message-safe) body. Match on structure, not prose.
         Err(e) => return Err(e.into()),
     };
-    let paid = invoice.payments.last().expect("just recorded");
+    let paid = invoice
+        .payments
+        .last()
+        .ok_or_else(|| ApiError::internal("payment ledger empty after record".into()))?;
     app.audit.record(
         "invoice_payment",
         &format!(
