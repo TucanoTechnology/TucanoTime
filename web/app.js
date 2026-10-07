@@ -4289,7 +4289,17 @@ function refreshPanel(tabId) {
 // Day actions + logged-time calendar nav (#140). Extracted from
 // startApp (#189).
 function wireDayAndCalendar() {
-  $('day-add').addEventListener('click', () => {
+  $('day-add').addEventListener('click', async () => {
+    // The heading-row button serves the whole Timesheets section: with the
+    // Week segment active it aims the entry at today within the displayed
+    // week and flips to the Day view first (the old #week-track behaviour).
+    if (segActiveId === 'ts-week') {
+      const today = isoDate(new Date());
+      const days = weekState.days.length === 7 ? weekState.days : [today];
+      $('day-date').value = days.includes(today) ? today : days[0];
+      showTimesheet('ts-day');
+      await refreshDay();
+    }
     resetEntryForm();
     showEntryForm(true);
     $('entry-customer').focus();
@@ -4432,14 +4442,6 @@ function wireWeekGrid() {
     refreshWeek();
   });
   $('week-copy-previous').addEventListener('click', () => copyLastWeek());
-  $('week-track').addEventListener('click', async () => {
-    const today = isoDate(new Date());
-    const days = weekState.days.length === 7 ? weekState.days : [today];
-    $('day-date').value = days.includes(today) ? today : days[0];
-    showTimesheet('ts-day');
-    await refreshDay();
-    $('day-add').click();
-  });
   $('ip-close').addEventListener('click', closeInvoicePreview);
   $('ip-download').addEventListener('click', () => {
     if (invoicePreview) downloadInvoicePdf(invoicePreview.inv.id, invoicePreview.inv.number);

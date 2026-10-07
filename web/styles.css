@@ -220,7 +220,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 button.primary { width: 100%; }
 /* #145-alignment: the page-level "+" buttons share one size and sit at the
    right end of their header row (min-width fits the longest label). */
-#day-add, #week-track, #customer-new, #project-new, #task-new, #expense-new, #user-new {
+#day-add, #customer-new, #project-new, #task-new, #expense-new, #user-new {
   display: inline-flex; align-items: center; justify-content: center;
   width: auto; min-width: 11.5rem;
 }
@@ -364,7 +364,9 @@ td.cell.locked .cell-input { opacity: .6; }
 
 /* --------------------------------- timesheet section + Day|Week segment -- #107 */
 .ts-head {
-  display: flex; align-items: center; justify-content: flex-end;
+  /* Heading slot: the section's create action sits left, the view segments
+     right — one Track time for Day/Week/Calendar alike. */
+  display: flex; align-items: center; justify-content: space-between;
   gap: 1rem; margin: 0 0 1.1rem; flex-wrap: wrap;
 }
 .settings-head { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: .9rem; }
