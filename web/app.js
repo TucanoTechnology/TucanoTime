@@ -720,37 +720,29 @@ async function refreshDay() {
       'tr',
       { data: { entryId: e.id } }, // C7: target the exact row on jump-to-entry
       [
+        el('td', { cls: 'entry-main' }, [
+          el('div', {
+            cls: 'entry-project',
+            text: projName ? `${e.project_code} — ${projName.name}` : e.project_code,
+          }),
+          el('div', { cls: 'entry-customer', text: custLine }),
+        ]),
+        // #145-era stacked note line becomes its own column: scannable
+        // against the header, badge stays with the note it qualifies.
         el(
           'td',
-          { cls: 'entry-main' },
-          [
-            el('div', {
-              cls: 'entry-project',
-              text: projName ? `${e.project_code} — ${projName.name}` : e.project_code,
-            }),
-            el('div', { cls: 'entry-customer', text: custLine }),
-            // The non-billable badge sits after the note text, as before.
-            el(
-              'div',
-              { cls: 'entry-note', text: e.note || '', attrs: { title: e.note || '' } },
-              e.billable ? [] : [el('span', { cls: 'badge', text: ' non-billable' })],
-            ),
-          ],
+          { cls: 'entry-note', text: e.note || '', attrs: { title: e.note || '' } },
+          e.billable ? [] : [el('span', { cls: 'badge', text: ' non-billable' })],
         ),
         hoursCell,
+        // Row actions use the shared link/danger pattern (the rest of the
+        // registers); the bespoke 'pill' treatment was the odd one out and
+        // read as a boxed button inside a boxed row (design policy: neutral
+        // text actions in tables, positive/negative reserved for primary
+        // and destructive page-level actions).
         el('td', { cls: 'actions-col' }, [
-          el('button', {
-            cls: 'pill',
-            type: 'button',
-            text: 'Edit',
-            on: { click: () => startEdit(e) },
-          }),
-          el('button', {
-            cls: 'pill danger',
-            type: 'button',
-            text: 'Delete',
-            on: { click: () => removeEntry(e) },
-          }),
+          rowAction('link', 'Edit', () => startEdit(e)),
+          rowAction('danger', 'Delete', () => removeEntry(e)),
         ]),
       ],
     );

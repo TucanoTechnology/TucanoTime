@@ -218,6 +218,12 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .auth-card { width: min(360px, 100%); }
 .auth-title { margin: 0 0 .25rem; font-size: 1.3rem; color: var(--brand); }
 button.primary { width: 100%; }
+/* #145-alignment: the page-level "+" buttons share one size and sit at the
+   right end of their header row (min-width fits the longest label). */
+#day-add, #week-track, #customer-new, #project-new, #task-new, #expense-new, #user-new {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: auto; min-width: 11.5rem;
+}
 
 .timerbar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; padding: .6rem .8rem; margin-bottom: 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 .timer-display { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.1rem; color: var(--brand-deep); }
@@ -235,8 +241,10 @@ button.primary { width: 100%; }
 /* Day view redesign (#12) */
 .day-bar.p-card { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: .7rem 1rem; margin: 0 0 .75rem; padding: .65rem .8rem; }
 .day-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; min-width: 0; }
-.day-actions > .primary { width: auto; }
-.day-nav { display: flex; align-items: center; gap: .4rem; }
+.day-nav { display: flex; align-items: center; gap: .75rem; padding-inline: .25rem; }
+.day-nav > .day-label { text-align: center; }
+.day-bar > .day-nav { grid-column: 2; }
+.day-end { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: .75rem; }
 .day-nav button { display: inline-grid; place-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); width: 2.5rem; height: 2.5rem; padding: 0; font-size: 1rem; line-height: 1; cursor: pointer; }
 .day-nav button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--brand-deep); }
 .day-label { font-weight: 700; font-size: 1.1rem; min-width: 14ch; }
@@ -255,12 +263,16 @@ button.primary { width: 100%; }
 .entry-main { padding: .65rem .75rem; }
 .entry-project { font-weight: 600; }
 .entry-customer { margin-top: .1rem; color: var(--muted); font-size: .875rem; }
-.entry-note { margin-top: .25rem; color: var(--fg); font-size: .875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60ch; }
+#day-table td.entry-note { padding: .65rem .75rem; color: var(--fg); font-size: .875rem;
+  min-width: 0; max-width: 46ch; }
+.entry-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#day-table td.entry-note span.badge { margin-left: .35rem; }
 .entry-hours { font-variant-numeric: tabular-nums; font-weight: 600; }
-button.pill { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: .3rem .55rem; font-size: .875rem; cursor: pointer; margin-left: .3rem; }
-button.pill:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--brand-deep); }
-button.pill.danger:hover { border-color: var(--danger, #772953); color: var(--danger, #772953); }
-.copy-bar.p-card { margin-top: .75rem; padding: .65rem .8rem; display: flex; flex-direction: column; gap: .55rem; align-items: flex-start; }
+/* Aligned with the day table: same vertical rhythm as the row gaps
+   (.45rem border-spacing) and the same content inset as .entry-main
+   (.75rem), so the box and its button sit on the grid, not beside it. */
+.copy-bar.p-card { margin-top: .45rem; padding: .65rem .75rem; display: flex; flex-direction: column; gap: .55rem; align-items: stretch; }
+.copy-bar .secondary { align-self: flex-start; }
 .copy-rows { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .35rem; width: 100%; }
 .copy-row { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .copy-label { font-weight: 600; min-width: 22ch; }
@@ -332,7 +344,8 @@ td.cell.locked .cell-input { opacity: .6; }
 .filter-field { display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
 .filter-field select { min-width: 11rem; }
 .scope-label { font-weight: 400; color: var(--muted); font-size: .95rem; }
-.customer-heading { display: flex; flex-direction: column; align-items: flex-start; gap: .75rem; margin-bottom: .75rem; }
+.customer-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem; margin-bottom: .75rem; }
+.customer-heading h2 { margin: 0; }
 .customer-heading h2 { margin: 0; }
 #expense-category-dialog { max-width: 28rem; }
 #expense-dialog form, #expense-category-dialog form { margin: 0; }
@@ -348,10 +361,9 @@ td.cell.locked .cell-input { opacity: .6; }
 
 /* --------------------------------- timesheet section + Day|Week segment -- #107 */
 .ts-head {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: flex-end;
   gap: 1rem; margin: 0 0 1.1rem; flex-wrap: wrap;
 }
-.ts-title { margin: 0; font-size: 1.2rem; }
 .settings-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: .9rem; }
 .settings-head h2 { margin: 0; }
 .settings-tabs { flex-wrap: wrap; }
@@ -366,7 +378,10 @@ td.cell.locked .cell-input { opacity: .6; }
 }
 .seg [role="tab"] {
   border: 0; background: transparent; color: var(--fg);
-  padding: .45rem 1.15rem; font: inherit; cursor: pointer;
+  padding: .45rem 1rem; font: inherit; cursor: pointer;
+  /* #145-style uniform segments: equal minimum width + height so Day/Week/
+     Calendar (and Open/All) don't render at three different sizes. */
+  min-width: 8.5ch; min-height: 2.5rem; text-align: center;
 }
 .seg [role="tab"] + [role="tab"] { border-left: 1px solid var(--line); }
 .seg [role="tab"][aria-selected="true"] {
@@ -443,8 +458,15 @@ td.cell.locked .cell-input { opacity: .6; }
   .nav-label { width: 100%; padding-left: 0; }
 }
 /* ---- calendar timesheet view (#140) ---- */
-.cal-nav { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
-.cal-nav h2 { margin: 0; font-size: 1.1rem; min-width: 9ch; text-align: center; }
+.cal-nav { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.cal-nav h2 { margin: 0; font-size: 1.1rem; min-width: 12ch; text-align: center; }
+/* #145-consistency: month arrows match the day/week chevrons (same square
+   icon button, real p-icon instead of HTML arrow entities). */
+#cal-prev, #cal-next {
+  display: inline-grid; place-items: center; width: 2.5rem; height: 2.5rem;
+  padding: 0; font-size: 1rem; line-height: 1;
+}
+#cal-prev [class*="p-icon--"], #cal-next [class*="p-icon--"] { margin: 0; }
 #cal-grid { width: 100%; table-layout: fixed; border-collapse: collapse; }
 #cal-grid th { font-size: .75rem; color: var(--muted); padding: .3rem 0; text-align: left; }
 #cal-grid td.cal-cell { border: 1px solid var(--line); vertical-align: top; height: 5.2rem;
@@ -564,17 +586,17 @@ caption { padding-bottom: .35rem; }
   .day-bar.p-card { grid-template-columns: minmax(0, 1fr) auto; gap: .55rem; margin: 0 0 .65rem; padding: .55rem; }
   .day-nav { grid-column: 1 / -1; grid-row: 1; justify-self: stretch; justify-content: center; }
   .day-actions { grid-column: 1 / -1; grid-row: 2; }
-  .day-actions #day-add { flex: 1 1 auto; }
-  #panel-day #day-today { grid-column: 1 / -1; grid-row: 3; }
-  #day-add, #week-track { grid-row: 2; }
-  #day-today, #week-today { grid-row: 2; justify-self: end; }
+  /* End cluster keeps Track time last everywhere, also when stacked. */
+  .day-end { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; display: flex; align-items: center; justify-content: space-between; gap: .55rem; }
+  .day-end .primary { flex: 1 1 auto; }
   #day-table { table-layout: fixed; }
-  #day-table thead th:nth-child(2), #day-table tbody td:nth-child(2) { width: 4rem; }
+  #day-table thead th:nth-child(3), #day-table tbody td:nth-child(3) { width: 4.5rem; }
   #day-table thead th:last-child, #day-table tbody td:last-child { width: 7.75rem; }
   #day-table tbody td:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
-  #day-table tbody td:last-child .pill { margin: 0; }
+
   #day-table .entry-main { min-width: 0; overflow-wrap: anywhere; }
-  .entry-note { max-width: 34ch; white-space: normal; }
+  #day-table td.entry-note { max-width: none; }
+  .entry-note { white-space: normal; overflow-wrap: anywhere; }
   #day-table .actions-col { white-space: normal; }
   .invoice-register-column #invoice-table { min-width: 38rem; table-layout: auto; }
 }
