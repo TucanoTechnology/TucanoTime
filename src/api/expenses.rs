@@ -149,29 +149,37 @@ pub async fn delete_expense(
     if !owned {
         return Err(ApiError::not_found("expense"));
     }
-    // An expense on an issued invoice is locked (#25).
-    let invoiced = app
-        .store
-        .list_invoices()?
-        .iter()
-        .filter(|i| i.status == InvoiceStatus::Issued)
-        .any(|i| i.lines.iter().any(|l| l.expense_id == Some(id)));
-    if invoiced {
-        return Err(ApiError::conflict(
-            "expense is on an issued invoice; delete the invoice draft or void it first",
-        ));
-    }
-    // An expense in a submitted/approved claim is locked (#24).
-    let claimed = app.store.list_claims()?.iter().any(|c| {
-        (c.state == ClaimState::Submitted || c.state == ClaimState::Approved)
-            && c.expense_ids.contains(&id)
-    });
-    if claimed {
-        return Err(ApiError::conflict(
-            "expense is on a submitted/approved claim; reject it first",
-        ));
-    }
-    app.store.delete_expense(id)?;
+    // #218: the invoice/claim lock scans run INSIDE the delete transaction —
+    // previously an issue landing between scan and delete could strip a
+    // just-invoiced expense out from under the invoice. Also aligned with
+    // #114 semantics: the scan now uses is_open() (issued | partly_paid),
+    // matching InvoiceLock's rule for entries — the old '== Issued' check
+    // let a partly-paid invoice's expenses be deleted (round-2 finding,
+    // same class as #217). Message says "open invoice" accordingly.
+    let verify = || -> Result<(), ApiError> {
+        let invoiced = app
+            .store
+            .list_invoices()?
+            .iter()
+            .filter(|i| i.status.is_open())
+            .any(|i| i.lines.iter().any(|l| l.expense_id == Some(id)));
+        if invoiced {
+            return Err(ApiError::conflict(
+                "expense is on an open invoice; delete the invoice draft or void it first",
+            ));
+        }
+        let claimed = app.store.list_claims()?.iter().any(|c| {
+            (c.state == ClaimState::Submitted || c.state == ClaimState::Approved)
+                && c.expense_ids.contains(&id)
+        });
+        if claimed {
+            return Err(ApiError::conflict(
+                "expense is on a submitted/approved claim; reject it first",
+            ));
+        }
+        Ok(())
+    };
+    app.store.delete_expense_guarded(id, verify)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -212,19 +220,18 @@ pub async fn create_submission(
         .checked_add_days(chrono::Days::new(6))
         .ok_or_else(|| ApiError::bad_request("invalid week"))?;
     let all = app.store.list_range(week_start, week_end)?;
-    // Entries already locked (submitted/approved) can't be resubmitted.
-    // #185: an entry whose lock state cannot be verified is not submitted.
-    let mut entry_ids: Vec<Uuid> = Vec::new();
-    for e in all.iter().filter(|e| e.user_id == Some(actor.0.id)) {
-        match app.locks.entry_lock(e.id) {
-            Ok(None) => entry_ids.push(e.id),
-            Ok(Some(_)) => {}
-            Err(err) => {
-                tracing::warn!(error = ?err.0, entry = %e.id, "lock state unavailable; refusing submit");
-                return Err(ApiError::lock_unavailable());
-            }
-        }
-    }
+    // #218: one bulk snapshot instead of a full invoice+submission re-scan
+    // per entry (the per-entry entry_lock calls made a week submit
+    // O(entries x documents)); fail-closed semantics (#185) unchanged.
+    let locked = app.locks.locked_entries().map_err(|e| {
+        tracing::warn!(error = ?e.0, "lock state unavailable; refusing submit");
+        ApiError::lock_unavailable()
+    })?;
+    let entry_ids: Vec<Uuid> = all
+        .iter()
+        .filter(|e| e.user_id == Some(actor.0.id) && !locked.contains(&e.id))
+        .map(|e| e.id)
+        .collect();
     if entry_ids.is_empty() {
         return Err(ApiError::conflict(
             "no unlocked entries to submit this week",
