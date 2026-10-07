@@ -3845,7 +3845,7 @@
         "tags": [
           "reports"
         ],
-        "summary": "Revenue vs cost (expenses + labour at cost rates) per customer (#29)",
+        "summary": "Revenue vs cost (expenses + labour at cost rates) per customer and currency (#29, #186)",
         "responses": {
           "200": {
             "description": "Profitability rows.",
@@ -5307,10 +5307,10 @@
         "tags": [
           "invoices"
         ],
-        "summary": "Revenue by customer + status counts (#31)",
+        "summary": "Revenue by customer and currency + status counts (#31, #186)",
         "responses": {
           "200": {
-            "description": "Report.",
+            "description": "Report. Breaking change (#186): total_revenue_minor has been removed because summing minor units across currencies is invalid; use revenue_by_currency instead.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5321,7 +5321,7 @@
                     "issued",
                     "paid",
                     "overdue",
-                    "total_revenue_minor"
+                    "revenue_by_currency"
                   ],
                   "properties": {
                     "rows": {
@@ -5376,8 +5376,10 @@
                     "overdue": {
                       "type": "integer"
                     },
-                    "total_revenue_minor": {
-                      "type": "integer"
+                    "revenue_by_currency": {
+                      "type": "object",
+                      "additionalProperties": { "type": "integer" },
+                      "description": "Non-draft revenue keyed by ISO-4217 code (#186: a flat total across currencies would sum unrelated minor units)."
                     },
                     "partly_paid": {
                       "type": "integer"
