@@ -142,3 +142,18 @@ test('tasks list filters to the selected project and announces (#182)', async ()
   assert.match(document.getElementById('live-region').textContent, /ACME \/ MKT-2/);
   dom.window.close();
 });
+
+test('refreshProjectTable is the single owner of the filter select value (#219)', async () => {
+  // saveProject re-scopes state without touching the select; the render must
+  // still leave the control truthful (before #219 it showed a stale value).
+  const { dom, h, document } = setup();
+  await h.openProjectsFor('c1');
+  await tick();
+  h.state.projectsFilter = 'c2'; // what saveProject does after saving elsewhere
+  await h.refreshProjectTable();
+  await tick();
+  assert.equal(document.getElementById('proj-filter-customer').value, 'c2',
+    'select re-syncs from state on every render');
+  assert.equal(document.querySelectorAll('#project-table tbody tr').length, 1);
+  dom.window.close();
+});

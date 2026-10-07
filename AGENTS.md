@@ -52,10 +52,14 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   rest with `TUCANO_SECRET_KEY` (32 bytes) and never returned to clients (masked
   hints only) or logged. Fail-closed: unset key ⇒ vault disabled.
 - **Locking (#18 seam):** entry edits/deletes consult `CombinedLocks`, which
-  composes `InvoiceLock` (entries on an *open* invoice — issued, partly paid or
-  paid, per #114/#8 — locking follows `status.is_open()`) and `SubmissionLock`
-  (entries in a submitted/approved week, #16). Reads are never blocked. If the
-  lock state cannot be verified the write is refused fail-closed with 503
+  composes `InvoiceLock` (entries on an *open* invoice — `status.is_open()` is
+  exactly `issued | partly_paid`, #8/#114 — so settling or writing off an
+  invoice **releases** its entries: deliberate lifecycle, not an oversight.
+  A closed invoice can never change (rates/hours are snapshotted at issue),
+  while the timesheet stays correctable; a partly-paid invoice is still
+  collectable and keeps its entries frozen) and `SubmissionLock` (entries in a
+  submitted/approved week, #16). Reads are never blocked. If the lock state
+  cannot be verified the write is refused fail-closed with 503
   `lock_unavailable` (#185) — never allowed because the check was inconclusive.
   Reimbursement claims (#24) lock their expenses via a direct scan in
   `api::expenses`, not through this seam (see the #190 follow-up note).

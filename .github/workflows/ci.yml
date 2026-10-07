@@ -34,7 +34,9 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --all-targets
+        # --locked (215): the committed Cargo.lock must be the resolver's own
+        # output; drift fails CI instead of silently diverging from the image.
+        run: cargo test --locked --all-targets
 
   build-image:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
@@ -68,7 +70,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Build server binary
-        run: docker run --rm -v "$PWD:/repo" -w /repo rust:1.98.0-slim-trixie cargo build --release
+        run: docker run --rm -v "$PWD:/repo" -w /repo rust:1.98.0-slim-trixie cargo build --locked --release
 
       # Self-hosted runners can overlap PR jobs: a fixed :8099 plus a shared
       # container name let one job's `docker rm -f` kill another's server.
