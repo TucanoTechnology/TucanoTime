@@ -13,6 +13,35 @@ use uuid::Uuid;
 use crate::auth::User;
 use crate::domain::{Customer, Entry, effective_rates};
 
+fn margin_minor(revenue: u64, cost: u64) -> i64 {
+    if revenue >= cost {
+        i64::try_from(revenue - cost).unwrap_or(i64::MAX)
+    } else {
+        let difference = cost - revenue;
+        if difference > i64::MAX as u64 {
+            i64::MIN
+        } else {
+            -(difference as i64)
+        }
+    }
+}
+
+#[cfg(test)]
+mod margin_tests {
+    use super::margin_minor;
+
+    #[test]
+    fn margin_conversion_handles_signed_boundaries_without_wrapping() {
+        assert_eq!(margin_minor(i64::MAX as u64, 0), i64::MAX);
+        assert_eq!(margin_minor((i64::MAX as u64) + 1, 0), i64::MAX);
+        assert_eq!(margin_minor(0, i64::MAX as u64), -i64::MAX);
+        assert_eq!(margin_minor(0, (i64::MAX as u64) + 1), i64::MIN);
+        assert_eq!(margin_minor(0, u64::MAX), i64::MIN);
+        assert_eq!(margin_minor(10, 9), 1);
+        assert_eq!(margin_minor(9, 10), -1);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
     Customer,
@@ -107,11 +136,13 @@ pub fn summarise(
             .map(|u| u.default_rate_minor)
     };
 
-    // Rows keyed by the group key; a currency is fixed per row by grouping
-    // currency into the key when it can vary within one logical group (a
-    // single customer/project always carries one currency, so grouping by
-    // customer or project never mixes currencies; weeks can).
-    let mut acc: BTreeMap<(String, String), AccRow> = BTreeMap::new();
+    // Rows keyed by (group, currency): effective_rates resolves the PROJECT
+    // currency (#11), so ANY group can straddle currencies — a customer with
+    // EUR and USD projects must never see cents added across currencies
+    // (#186). The former comment claiming customer/project groups were
+    // single-currency was false; weeks now follow the same rule as everything
+    // else instead of a "|CURR" suffix hack on the visible key.
+    let mut acc: BTreeMap<(String, String, String), AccRow> = BTreeMap::new();
     for e in entries {
         if let Some(want) = billable_filter
             && e.billable != want
@@ -124,33 +155,31 @@ pub fn summarise(
         let project = project_for(e);
         let (currency, rate) = effective_rates(customer, project, user_rate(e));
         let label_customer = &customer.name;
-        let (mut key, label) = group_key(e, kind, label_customer, &e.project_code.0, &user_name(e));
-        if kind == Group::Week {
-            key = format!("{key}|{}", currency.0);
-        }
-        let row = acc.entry((key.clone(), label)).or_insert_with(|| AccRow {
-            currency: currency.0.clone(),
-            hours: 0.0,
-            amount: 0,
-            entries: 0,
-        });
+        let (key, label) = group_key(e, kind, label_customer, &e.project_code.0, &user_name(e));
+        let row = acc
+            .entry((key, currency.0.clone(), label))
+            .or_insert_with(|| AccRow {
+                hours: 0.0,
+                amount: 0,
+                entries: 0,
+            });
         row.hours += e.hours.0 as f64 / 100.0;
-        row.amount += e.hours.amount_minor(rate);
+        row.amount = row.amount.saturating_add(e.hours.amount_minor(rate));
         row.entries += 1;
     }
 
     let mut rows: Vec<SummaryRow> = acc
         .into_iter()
-        .map(|((key, label), r)| SummaryRow {
+        .map(|((key, cur, label), r)| SummaryRow {
             key,
             label,
-            currency: r.currency,
+            currency: cur,
             hours: round2(r.hours),
             amount_minor: r.amount,
             entries: r.entries,
         })
         .collect();
-    rows.sort_by(|a, b| a.key.cmp(&b.key));
+    rows.sort_by(|a, b| a.key.cmp(&b.key).then_with(|| a.currency.cmp(&b.currency)));
 
     Summary {
         group: group_name(kind).to_owned(),
@@ -163,7 +192,6 @@ pub fn summarise(
 
 #[derive(Debug)]
 struct AccRow {
-    currency: String,
     hours: f64,
     amount: u64,
     entries: usize,
@@ -187,55 +215,88 @@ pub struct Profitability {
 }
 
 /// Revenue (from non-draft invoices in the period) vs cost (billable-expense
-/// amounts + labour: billable hours × each person's cost rate), per customer.
-/// Money is per-currency; no FX is applied (#29).
+/// amounts + labour: billable hours × each person's cost rate), per customer
+/// AND currency (#186). Money is per-currency; no FX is applied (#29): an
+/// invoice's currency, an expense's currency and a time entry's resolved
+/// project currency (`#11`) each partition the ledger, so a customer working
+/// in EUR and USD gets two honest rows, never a merged cents figure.
+/// Reference data for profitability rows: who, in what currency, at what
+/// cost. Grouped because `summarise_profit` needs the full hierarchy to
+/// resolve entry currencies (#186).
+pub struct ProfitContext<'a> {
+    pub customers: &'a [Customer],
+    pub projects: &'a [(Uuid, crate::domain::Project)],
+    pub users: &'a [User],
+}
+
 pub fn summarise_profit(
     invoices: &[crate::domain::Invoice],
     expenses: &[crate::domain::Expense],
     entries: &[Entry],
-    customers: &[Customer],
-    users: &[User],
+    ctx: ProfitContext<'_>,
     from: NaiveDate,
     to: NaiveDate,
 ) -> Profitability {
+    let customers = ctx.customers;
+    let projects = ctx.projects;
+    let users = ctx.users;
     use crate::domain::InvoiceStatus;
     let mut rows: Vec<ProfitRow> = Vec::new();
     for c in customers {
-        let revenue: u64 = invoices
+        let project_for = |e: &Entry| -> Option<&crate::domain::Project> {
+            projects
+                .iter()
+                .find(|(cid, p)| *cid == e.customer_id && p.code == e.project_code)
+                .map(|(_, p)| p)
+        };
+        let entry_currency = |e: &Entry| -> String {
+            project_for(e)
+                .map(|p| p.currency.0.clone())
+                .unwrap_or_else(|| c.currency.0.clone())
+        };
+        // (revenue, cost) accumulators keyed by currency.
+        let mut ledger: std::collections::BTreeMap<String, (u64, u64)> =
+            std::collections::BTreeMap::new();
+        for i in invoices
             .iter()
             .filter(|i| i.customer_id == c.id && i.status != InvoiceStatus::Draft)
             .filter(|i| i.period_to >= from && i.period_from <= to)
-            .map(|i| i.total_minor)
-            .sum();
-        let expense_cost: u64 = expenses
+        {
+            let e = ledger.entry(i.currency.0.clone()).or_default();
+            e.0 = e.0.saturating_add(i.total_minor);
+        }
+        for x in expenses
             .iter()
             .filter(|x| x.customer_id == c.id && x.date >= from && x.date <= to)
-            .map(|x| x.amount_minor)
-            .sum();
-        let labour_cost: u64 = entries
+        {
+            let e = ledger.entry(x.currency.0.clone()).or_default();
+            e.1 = e.1.saturating_add(x.amount_minor);
+        }
+        for en in entries
             .iter()
             .filter(|e| e.customer_id == c.id && e.billable && e.date >= from && e.date <= to)
-            .map(|e| {
-                let rate = e
-                    .user_id
-                    .and_then(|uid| users.iter().find(|u| u.id == uid))
-                    .map(|u| u.cost_rate_minor)
-                    .unwrap_or(0);
-                e.hours.amount_minor(rate)
-            })
-            .sum();
-        let cost = expense_cost + labour_cost;
-        if revenue == 0 && cost == 0 {
-            continue;
+        {
+            let rate = en
+                .user_id
+                .and_then(|uid| users.iter().find(|u| u.id == uid))
+                .map(|u| u.cost_rate_minor)
+                .unwrap_or(0);
+            let e = ledger.entry(entry_currency(en)).or_default();
+            e.1 = e.1.saturating_add(en.hours.amount_minor(rate));
         }
-        rows.push(ProfitRow {
-            customer_id: c.id.to_string(),
-            label: c.name.clone(),
-            currency: c.currency.0.clone(),
-            revenue_minor: revenue,
-            cost_minor: cost,
-            margin_minor: revenue as i64 - cost as i64,
-        });
+        for (currency, (revenue, cost)) in ledger {
+            if revenue == 0 && cost == 0 {
+                continue;
+            }
+            rows.push(ProfitRow {
+                customer_id: c.id.to_string(),
+                label: c.name.clone(),
+                currency,
+                revenue_minor: revenue,
+                cost_minor: cost,
+                margin_minor: margin_minor(revenue, cost),
+            });
+        }
     }
     rows.sort_by_key(|r| std::cmp::Reverse(r.margin_minor));
     Profitability { rows }
@@ -264,7 +325,10 @@ pub struct InvoiceReport {
     pub issued: usize,
     pub paid: usize,
     pub overdue: usize,
-    pub total_revenue_minor: u64,
+    /// Revenue by currency over the full non-draft set (#186): a single
+    /// `total_revenue_minor` summed cents across currencies, which is not a
+    /// meaningful number — consumers must use this map.
+    pub revenue_by_currency: std::collections::BTreeMap<String, u64>,
     /// #114 additions: the two open/late lifecycle states.
     pub partly_paid: usize,
     pub written_off: usize,
@@ -289,15 +353,26 @@ pub fn invoice_report(
         if mine.is_empty() {
             continue;
         }
-        rows.push(InvoiceReportRow {
-            customer_id: c.id.to_string(),
-            label: c.name.clone(),
-            currency: c.currency.0.clone(),
-            revenue_minor: mine.iter().map(|i| i.total_minor).sum(),
-            invoices: mine.len(),
-            paid_minor: mine.iter().map(|i| i.paid_minor()).sum(),
-            balance_minor: mine.iter().map(|i| i.balance_minor()).sum(),
-        });
+        // #186: partition by INVOICE currency (projects carry independent
+        // currencies since #11, so one customer can hold EUR and USD
+        // invoices). Summing their cents into one row labeled with the
+        // customer's default currency produced silently wrong money.
+        let mut by_cur: std::collections::BTreeMap<String, Vec<&crate::domain::Invoice>> =
+            std::collections::BTreeMap::new();
+        for i in &mine {
+            by_cur.entry(i.currency.0.clone()).or_default().push(i);
+        }
+        for (cur, invs) in by_cur {
+            rows.push(InvoiceReportRow {
+                customer_id: c.id.to_string(),
+                label: c.name.clone(),
+                currency: cur,
+                revenue_minor: invs.iter().map(|i| i.total_minor).sum(),
+                invoices: invs.len(),
+                paid_minor: invs.iter().map(|i| i.paid_minor()).sum(),
+                balance_minor: invs.iter().map(|i| i.balance_minor()).sum(),
+            });
+        }
     }
     rows.sort_by_key(|r| std::cmp::Reverse(r.revenue_minor));
     InvoiceReport {
@@ -320,11 +395,14 @@ pub fn invoice_report(
                 i.status.is_open() && i.balance_minor() > 0 && i.due_date.is_some_and(|d| d < to)
             })
             .count(),
-        total_revenue_minor: invoices
-            .iter()
-            .filter(|i| i.status != InvoiceStatus::Draft)
-            .map(|i| i.total_minor)
-            .sum(),
+        revenue_by_currency: {
+            let mut m: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+            for i in invoices.iter().filter(|i| i.status != InvoiceStatus::Draft) {
+                let e = m.entry(i.currency.0.clone()).or_insert(0);
+                *e = e.saturating_add(i.total_minor);
+            }
+            m
+        },
         partly_paid: invoices
             .iter()
             .filter(|i| i.status == InvoiceStatus::PartlyPaid)

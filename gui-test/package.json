@@ -5,10 +5,11 @@
   "scripts": {
     "build:ubuntu": "node build-ubuntu-assets.mjs",
     "test": "node gui.mjs",
+    "test:jsdom": "node --test *.test.mjs",
     "test:contrast": "node contrast.mjs"
   },
   "dependencies": {
-    "jsdom": "^26"
+    "jsdom": "26.1.0"
   },
   "devDependencies": {
     "css-tree": "3.2.1",

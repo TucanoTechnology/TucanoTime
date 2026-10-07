@@ -1213,8 +1213,9 @@ impl Store {
     }
 
     /// Entries are addressable by id alone, but stored under their date, so
-    /// this walks the day folders (bounded by MAX_RANGE_DAYS in either
-    /// direction of today, which is where live data lives).
+    /// this walks every day folder. NOTE (#190): there is no `MAX_RANGE_DAYS`
+    /// bound here — the earlier comment claimed one but the body never
+    /// implemented it. Cost is O(days) directory probes, not O(entries).
     pub fn get_entry(&self, id: Uuid) -> Result<Option<Entry>, StoreError> {
         let dir = self.root.join("entries");
         if !dir.exists() {
@@ -1273,8 +1274,10 @@ impl Store {
     }
 
     /// Every entry document, across all day folders, without the
-    /// `MAX_RANGE_DAYS` window. For load-bearing background jobs (budget
-    /// burn, review B1) — not for HTTP handlers.
+    /// `MAX_RANGE_DAYS` window. Load-bearing scans (budget burn, review B1)
+    /// and the admin `budget_report` HTTP handler (#190 corrected the earlier
+    /// "not for HTTP handlers" claim — an admin request already calls this;
+    /// the full-tree scan is intended because budgets are lifetime totals).
     pub fn list_all_entries(&self) -> Result<Vec<Entry>, StoreError> {
         self.scan_all_entries()
     }
