@@ -250,19 +250,24 @@ pub async fn issue_invoice(State(app): State<AppState>, Path(id): Path<Uuid>) ->
     let template = load_template(&app)?;
     // Payment terms (#116): customer -> org template -> legacy net-14 from
     // period_to (the fallback keeps its exact original arithmetic).
-    let due = resolve_due_date(&invoice, &customer, &template, app.clock.now());
+    // #190: capture the clock ONCE so the snapshot's issued_at and the value
+    // the store persists are identical (three separate now() calls could
+    // straddle a tick — visible at midnight boundaries and it breaks the
+    // "re-render yields identical bytes" determinism claim).
+    let now = app.clock.now();
+    let due = resolve_due_date(&invoice, &customer, &template, now);
     // Render against the to-be-issued snapshot: the PDF is the issue-time
     // document, and bytes are pure in this state (legacy re-renders match).
     let mut snapshot = invoice;
     snapshot.status = crate::domain::InvoiceStatus::Issued;
-    snapshot.issued_at = Some(app.clock.now());
+    snapshot.issued_at = Some(now);
     snapshot.due_date = Some(due);
     let mut doc =
         crate::pdf::doc_for_labeled(&snapshot, &customer, &org_for(&app)?, &template.labels);
     let content = content_for(&snapshot, &customer, &template);
     crate::template::apply_doc_content(&mut doc, &content);
     let pdf = crate::pdf::render_invoice_pdf(&doc);
-    let issued = app.store.issue_invoice(id, app.clock.now(), due, &pdf)?;
+    let issued = app.store.issue_invoice(id, now, due, &pdf)?;
     Ok(Json(issued).into_response())
 }
 

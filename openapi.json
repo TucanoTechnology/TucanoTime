@@ -5241,7 +5241,8 @@
                             ]
                           },
                           "error": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Stable short marker on failure (\"sync failed (see server log)\"); raw provider/transport detail is logged server-side, never serialised (#190). Empty when synced."
                           },
                           "attempts": {
                             "type": "integer"
@@ -5732,7 +5733,6 @@
                   "type": "object",
                   "required": [
                     "config",
-                    "path",
                     "vault_enabled",
                     "email_transport"
                   ],
@@ -5768,9 +5768,6 @@
                         },
                         "additionalProperties": false
                       }
-                    },
-                    "path": {
-                      "type": "string"
                     },
                     "vault_enabled": {
                       "type": "boolean"
