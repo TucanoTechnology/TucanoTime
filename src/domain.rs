@@ -2205,6 +2205,23 @@ mod tests {
         assert_eq!((s.draft, s.issued, s.overdue, s.paid), (1, 2, 1, 1));
         assert_eq!(s.outstanding.get("EUR"), Some(&(800))); // both issued, unpaid
     }
+
+    #[test]
+    fn invoice_summaries_saturate_corrupt_money_totals() {
+        let today = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+        let mut first = inv(InvoiceStatus::Issued, u64::MAX, None);
+        let mut second = inv(InvoiceStatus::Issued, 10, None);
+        first.currency = Currency("EUR".into());
+        second.currency = Currency("EUR".into());
+        let summary = summarise_invoices(&[first, second], today);
+        assert_eq!(summary.outstanding.get("EUR"), Some(&u64::MAX));
+    }
+
+    #[test]
+    fn invoice_totals_saturate_corrupt_tax_addition() {
+        let totals = invoice_totals(u64::MAX, 10_000, 0);
+        assert_eq!(totals.total_minor, u64::MAX);
+    }
 }
 
 #[cfg(test)]
