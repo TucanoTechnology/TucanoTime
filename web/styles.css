@@ -326,9 +326,6 @@ td.cell.locked .cell-input { opacity: .6; }
 .filter-field { display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
 .filter-field select { min-width: 11rem; }
 .scope-label { font-weight: 400; color: var(--muted); font-size: .95rem; }
-.hierarchy-selected { background: var(--accent-soft); }
-.hierarchy-selected > th { box-shadow: inset 3px 0 var(--accent); }
-.hierarchy-select { font-weight: 700; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .customer-heading { display: flex; flex-direction: column; align-items: flex-start; gap: .75rem; margin-bottom: .75rem; }
 .customer-heading h2 { margin: 0; }
 #expense-category-dialog { max-width: 28rem; }
@@ -477,28 +474,11 @@ caption { padding-bottom: .35rem; }
   .contact-row > .link, .contact-row label { grid-column: auto; }
 }
 
-/* MVP workspaces: align customer setup, invoice creation, and invoice review. */
-.customer-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 1.25rem;
-  align-items: start;
-}
-.customer-list-column, .customer-detail-column,
+/* MVP workspaces: invoice creation + review (#219 removed the dead
+   customer-workspace rules — Setup became three plain sections in #182). */
 .invoice-create-column, .invoice-register-column { min-width: 0; }
-.customer-workspace h2:first-child { margin-top: 0; }
-.customer-workspace .card { max-width: none; }
-.customer-detail-column > h2 { margin-top: 0; }
-.customer-detail-column > h2:not(:first-child) { margin-top: 1rem; }
 .workspace-empty { margin: .35rem 0 .75rem; padding: .75rem .9rem; color: var(--muted);
   border: 1px dashed var(--line); border-radius: var(--radius); background: var(--surface); }
-.customer-workspace .table-scroll { max-width: 100%; overflow-x: auto; }
-.customer-workspace .table-scroll table { min-width: 0; font-size: .85rem; }
-.customer-workspace table th, .customer-workspace table td { padding: .5rem .4rem; overflow-wrap: anywhere; }
-.customer-workspace thead th, .customer-workspace .badge, .customer-workspace .num { white-space: nowrap; overflow-wrap: normal; }
-.customer-workspace .actions-col { min-width: 4.5rem; white-space: normal; }
-.customer-workspace .actions-col button { display: block; margin: .15rem 0; }
-#customer-list-title { margin: 0 0 .75rem; font-size: 1.05rem; }
 .invoice-table-scroll { display: block; max-width: 100%; overflow-x: auto; }
 .customer-extra-details { margin: .25rem 0 .8rem; border-top: 1px solid var(--line); }
 .customer-extra-details fieldset.field { margin-top: .5rem; }
@@ -557,12 +537,12 @@ caption { padding-bottom: .35rem; }
 .day-nav { justify-self: center; }
 
 @media (max-width: 1000px) {
-  .customer-workspace, .invoice-workspace { grid-template-columns: minmax(0, 1fr); }
+  .invoice-workspace { grid-template-columns: minmax(0, 1fr); }
   .advanced-billing-grid { grid-template-columns: minmax(0, 1fr); }
   .invoice-register-column { border-top: 1px solid var(--line); padding-top: .75rem; }
 }
 @media (max-width: 720px) {
-  .customer-workspace, .invoice-workspace { gap: .75rem; }
+  .invoice-workspace { gap: .75rem; }
   .inv-overview { grid-template-columns: minmax(0, 1fr); }
   #iw-projects { grid-template-columns: minmax(0, 1fr); }
   .invoice-editor-adjustments { grid-template-columns: minmax(0, 1fr); gap: 0; }

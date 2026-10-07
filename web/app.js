@@ -1598,18 +1598,23 @@ async function openProjectsFor(cid) {
   state.projectsFilter = cid || null;
   switchTab('tab-projects');
   await loadCustomers();
-  fillHierarchyFilter($('proj-filter-customer'), state.projectsFilter, 'All customers');
   await refreshProjectTable();
 }
 
 async function refreshProjectTable() {
   // #182: the section lists every customer's projects, or one customer's when
   // the filter is set. Row data carries its own customer id for the actions.
+  // #219: refreshProjectTable is the single owner of the filter select's
+  // value — saveProject re-scopes the table, and every caller (row action,
+  // save, filter change, tab re-show) renders in sync from here.
+  const projectsSeq = ++projectsRenderSeq;
+  fillHierarchyFilter($('proj-filter-customer'), state.projectsFilter, 'All customers');
   const cids = state.projectsFilter ? [state.projectsFilter] : state.customers.map((c) => c.id);
   const rows = [];
   for (const cid of cids) {
     for (const p of await loadProjects(cid)) rows.push({ cid, p });
   }
+  if (projectsSeq !== projectsRenderSeq) return; // #219: newer render won
   $('project-scope-label').textContent = state.projectsFilter
     ? `— ${customerName(state.projectsFilter)}` : '— all customers';
   const tbody = $('project-table').querySelector('tbody');
@@ -1800,6 +1805,7 @@ async function openTasksFor(cid, pcode) {
 async function refreshTaskTable() {
   // #182: the section is driven by its two dependent filter selects; tasks
   // need both parents, so any missing pick shows the empty state.
+  const tasksSeq = ++tasksRenderSeq;
   fillHierarchyFilter($('task-filter-customer'), state.tasksCustomer, 'Choose a customer…');
   const projSel = $('task-filter-project');
   projSel.disabled = !state.tasksCustomer;
@@ -1813,6 +1819,7 @@ async function refreshTaskTable() {
   } else {
     fillSelect(projSel, [{ value: '', text: 'Choose a customer first…' }]);
   }
+  if (tasksSeq !== tasksRenderSeq) return; // #219
   updateHierarchyActions();
   const empty = $('tasks-empty-state');
   const both = state.tasksCustomer && state.tasksProject;
@@ -1830,6 +1837,7 @@ async function refreshTaskTable() {
   const data = await api.get(
     `/customers/${state.tasksCustomer}/projects/${encodeURIComponent(state.tasksProject)}/tasks`,
   );
+  if (tasksSeq !== tasksRenderSeq) return; // #219: a newer filter won
   const tasks = data.tasks || [];
   const tbody = $('task-table').querySelector('tbody');
   tbody.textContent = '';
@@ -2016,6 +2024,10 @@ let invoicesRenderSeq = 0; // last-call-wins (same guard the week grid uses)
 // could render over a newer one (wrong day/month/task list).
 let dayRenderSeq = 0;
 let calRenderSeq = 0;
+// #219: the #182 sections were added after that lesson — rapid filter
+// changes fired overlapping renders with no last-write-wins guard.
+let projectsRenderSeq = 0;
+let tasksRenderSeq = 0;
 
 async function refreshInvoices() {
   // #188: GET /invoices is admin-tier (src/lib.rs). Previously an un-caught
@@ -4256,7 +4268,6 @@ function refreshPanel(tabId) {
     // #182: the hierarchy sections pull their own scoped data on show.
     'tab-projects': async () => {
       await loadCustomers();
-      fillHierarchyFilter($('proj-filter-customer'), state.projectsFilter, 'All customers');
       await refreshProjectTable();
     },
     'tab-tasks': async () => {
