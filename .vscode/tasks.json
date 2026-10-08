@@ -3,15 +3,17 @@
   "tasks": [
     {
       "label": "cargo build",
-      "type": "cargo",
-      "command": "build",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build"],
       "problemMatcher": ["$rustc"],
       "group": { "kind": "build", "isDefault": true }
     },
     {
       "label": "cargo run",
-      "type": "cargo",
-      "command": "run",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["run"],
       "problemMatcher": ["$rustc"],
       "options": {
         "env": {
@@ -22,31 +24,31 @@
     },
     {
       "label": "cargo test",
-      "type": "cargo",
-      "command": "test",
-      "args": ["--all-targets"],
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test", "--all-targets"],
       "problemMatcher": ["$rustc"],
       "group": { "kind": "test", "isDefault": true }
     },
     {
       "label": "cargo clippy",
-      "type": "cargo",
-      "command": "clippy",
-      "args": ["--all-targets", "--", "-D", "warnings"],
+      "type": "shell",
+      "command": "cargo",
+      "args": ["clippy", "--all-targets", "--", "-D", "warnings"],
       "problemMatcher": ["$rustc"]
     },
     {
       "label": "cargo fmt",
-      "type": "cargo",
-      "command": "fmt",
-      "args": ["--all"],
+      "type": "shell",
+      "command": "cargo",
+      "args": ["fmt", "--all"],
       "problemMatcher": []
     },
     {
       "label": "cargo fmt check",
-      "type": "cargo",
-      "command": "fmt",
-      "args": ["--all", "--", "--check"],
+      "type": "shell",
+      "command": "cargo",
+      "args": ["fmt", "--all", "--", "--check"],
       "problemMatcher": []
     }
   ]
