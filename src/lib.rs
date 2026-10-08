@@ -490,9 +490,7 @@ async fn static_assets(uri: axum::http::Uri) -> Response {
 /// Clients subscribe at `/_dev/reload`; the server polls the web dir every
 /// 300 ms and sends a `reload` event when any file's mtime advances.  The
 /// endpoint returns 404 in production so it is invisible outside dev mode.
-async fn dev_reload(
-    tx: Option<std::sync::Arc<tokio::sync::watch::Sender<u64>>>,
-) -> Response {
+async fn dev_reload(tx: Option<std::sync::Arc<tokio::sync::watch::Sender<u64>>>) -> Response {
     let Some(tx) = tx else {
         // Not in dev mode — treat as unknown route.
         return (
@@ -520,8 +518,7 @@ async fn dev_reload(
 
     axum::response::Sse::new(stream)
         .keep_alive(
-            axum::response::sse::KeepAlive::new()
-                .interval(std::time::Duration::from_secs(15)),
+            axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15)),
         )
         .into_response()
 }
@@ -529,8 +526,7 @@ async fn dev_reload(
 /// Spawn a background task that polls the web dir every 300 ms and sends a
 /// tick on `tx` whenever any file's mtime advances.  Returns `None` when
 /// `TUCANO_WEB_DIR` is not set (production — nothing to watch).
-pub fn spawn_web_watcher()
--> Option<std::sync::Arc<tokio::sync::watch::Sender<u64>>> {
+pub fn spawn_web_watcher() -> Option<std::sync::Arc<tokio::sync::watch::Sender<u64>>> {
     let web_dir = std::env::var("TUCANO_WEB_DIR").ok()?;
     let (tx, _rx) = tokio::sync::watch::channel(0u64);
     let tx = std::sync::Arc::new(tx);
