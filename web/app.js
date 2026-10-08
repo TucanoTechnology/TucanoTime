@@ -4306,7 +4306,6 @@ function wireDayAndCalendar() {
   });
   $('day-prev').addEventListener('click', () => navigateDay(-1));
   $('day-next').addEventListener('click', () => navigateDay(1));
-  $('day-date').addEventListener('change', () => selectDay($('day-date').value));
   $('day-today').addEventListener('click', () => selectDay(isoDate(new Date())));
   $('day-add-bottom').addEventListener('click', () => $('day-add').click());
   $('copy-previous').addEventListener('click', () => copyPreviousDay());

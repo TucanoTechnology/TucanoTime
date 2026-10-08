@@ -105,22 +105,21 @@
 
     <!-- DAY -->
     <section id="panel-day" role="tabpanel" aria-labelledby="ts-day" tabindex="0">
-      <div class="day-bar p-card date-toolbar">
-        <nav class="date-navigation" aria-label="Choose day">
-          <button type="button" id="day-prev" class="p-button has-icon" aria-label="Previous day" title="Previous day"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
-          <label class="sr-only" for="day-date">Choose day</label>
-          <input type="date" id="day-date" class="date-picker">
-          <button type="button" id="day-next" class="p-button has-icon" aria-label="Next day" title="Next day"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
-          <span id="day-label" class="sr-only" aria-live="polite"></span>
-        </nav>
-        <div class="day-end">
-          <button type="button" id="day-today" class="p-button--base">Today</button>
-          <div class="day-actions">
+      <input type="date" id="day-date" hidden>
+      <div class="day-bar p-card">
+        <div class="day-actions">
           <button type="button" id="timer-open" data-icon="play" aria-controls="timerbar" aria-expanded="false">Start timer</button>
           <span id="timer-display" class="timer-display" role="timer" hidden>00:00:00</span>
           <button type="button" id="timer-stop" data-icon="stop" class="secondary" hidden>Stop</button>
           <button type="button" id="timer-discard" class="link" hidden>Discard</button>
-          </div>
+        </div>
+        <nav class="day-nav" aria-label="Change day">
+          <button type="button" id="day-prev" aria-label="Previous day" title="Previous day"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
+          <span id="day-label" class="day-label"></span>
+          <button type="button" id="day-next" aria-label="Next day" title="Next day"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
+        </nav>
+        <div class="day-end">
+          <button type="button" id="day-today" class="link">Return to today</button>
         </div>
       </div>
       <div class="timerbar p-card p-card--muted" id="timerbar" hidden>
@@ -200,16 +199,15 @@
 
     <!-- WEEK -->
     <section id="panel-week" role="tabpanel" aria-labelledby="ts-week" tabindex="0" hidden>
-      <div class="day-bar p-card date-toolbar">
-        <nav class="date-navigation" aria-label="Choose week">
-          <button type="button" id="week-prev" class="p-button has-icon" aria-label="Previous week" title="Previous week"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
-          <label class="sr-only" for="week-date">Choose a date in the week</label>
-          <input type="date" id="week-date" class="date-picker">
-          <button type="button" id="week-next" class="p-button has-icon" aria-label="Next week" title="Next week"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
-          <span id="week-label" class="week-range" aria-live="polite"></span>
+      <input type="date" id="week-date" hidden>
+      <div class="day-bar">
+        <nav class="day-nav" aria-label="Change week">
+          <button type="button" id="week-prev" aria-label="Previous week" title="Previous week"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
+          <span id="week-label" class="day-label"></span>
+          <button type="button" id="week-next" aria-label="Next week" title="Next week"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
         </nav>
         <div class="day-end">
-          <button type="button" id="week-today" class="p-button--base">Today</button>
+          <button type="button" id="week-today" class="link">Return to this week</button>
         </div>
       </div>
       <p class="hint">Type hours into a cell and press Enter or click away to save. Clearing a cell deletes that entry.</p>

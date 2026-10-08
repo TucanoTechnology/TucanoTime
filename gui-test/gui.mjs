@@ -81,16 +81,6 @@ function check(name, cond) {
   if (!cond) failures++;
 }
 
-const dayDatePicker = window.document.getElementById('day-date');
-const weekDatePicker = window.document.getElementById('week-date');
-check('day and week date pickers are visible and labelled',
-  !dayDatePicker.hidden && !weekDatePicker.hidden
-  && window.document.querySelector('label[for="day-date"]')?.textContent.trim() === 'Choose day'
-  && window.document.querySelector('label[for="week-date"]')?.textContent.trim() === 'Choose a date in the week');
-check('day and week share the Today action label',
-  window.document.getElementById('day-today').textContent.trim() === 'Today'
-  && window.document.getElementById('week-today').textContent.trim() === 'Today');
-
 // #135: the invoice table defaults to the Open tab; row checks that need
 // drafts/paid go through the All tab first.
 const showAllInvoices = async () => {
@@ -344,18 +334,6 @@ check('week strip shows week total', window.document.querySelector('.ws-week').t
 window.document.getElementById('day-next').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(200);
 check('day navigator moves forward', window.document.getElementById('day-date').value === '2026-11-12');
-dayDatePicker.value = '2026-11-10';
-dayDatePicker.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(200);
-check('day date picker selects the requested date', dayDatePicker.value === '2026-11-10');
-window.document.getElementById('day-today').click();
-await tick(200);
-const currentDate = new Date();
-const currentDateValue = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
-check('day Today action selects the current date', dayDatePicker.value === currentDateValue);
-dayDatePicker.value = '2026-11-12';
-dayDatePicker.dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(200);
 
 const copyButton = window.document.getElementById('copy-previous');
 check('copy previous day is a button rather than a dropdown',
@@ -431,16 +409,6 @@ const tabWeek = window.document.getElementById('ts-week');
 tabWeek.dispatchEvent(new window.Event('click', { bubbles: true }));
 window.document.getElementById('week-date').value = '2026-11-11';
 window.document.getElementById('week-date').dispatchEvent(new window.Event('change', { bubbles: true }));
-await tick(300);
-check('week date picker normalizes selection to Monday', weekDatePicker.value === '2026-11-09');
-window.document.getElementById('week-today').click();
-await tick(300);
-const currentMonday = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
-currentMonday.setDate(currentMonday.getDate() - ((currentMonday.getDay() + 6) % 7));
-const currentMondayValue = `${currentMonday.getFullYear()}-${String(currentMonday.getMonth() + 1).padStart(2, '0')}-${String(currentMonday.getDate()).padStart(2, '0')}`;
-check('week Today action selects the current week', weekDatePicker.value === currentMondayValue);
-weekDatePicker.value = '2026-11-11';
-weekDatePicker.dispatchEvent(new window.Event('change', { bubbles: true }));
 await tick(300);
 const wkRows = window.document.querySelectorAll('#week-table tbody tr');
 const wkRowText = wkRows[0] ? wkRows[0].textContent : '';
