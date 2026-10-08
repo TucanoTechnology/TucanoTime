@@ -28,6 +28,7 @@ rand = "0.8"
 aes-gcm = { version = "0.11", features = ["getrandom"] }
 ureq = "3"
 pdf-writer = "0.15.0"
+futures-util = { version = "0.3.34", default-features = false }
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }
