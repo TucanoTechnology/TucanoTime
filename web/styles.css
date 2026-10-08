@@ -248,8 +248,11 @@ button.primary { width: 100%; }
 .day-nav button { display: inline-grid; place-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); width: 2.5rem; height: 2.5rem; padding: 0; font-size: 1rem; line-height: 1; cursor: pointer; }
 .day-nav button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--brand-deep); }
 .day-label { font-weight: 700; font-size: 1.1rem; min-width: 14ch; }
+/* Week strip — .ws-day uses Vanilla p-card as its shell; all rules here are
+   layout overrides (inner grid, margin/padding reset, accent border-bottom)
+   and interactive states that Vanilla cards do not provide. */
 .week-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .5rem; margin-bottom: 1rem; }
-.ws-day.p-card { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-content: center; gap: .1rem .4rem; min-width: 0; min-height: 4.5rem; margin: 0; padding: .55rem .65rem; border-bottom: 3px solid transparent; color: var(--fg); cursor: pointer; text-align: left; transition: border-color .12s, background-color .12s, box-shadow .12s; }
+.ws-day.p-card { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-content: center; gap: .1rem .4rem; min-width: 0; min-height: 4.5rem; margin: 0; padding: .55rem .65rem; border-bottom: 3px solid transparent; cursor: pointer; text-align: left; transition: border-color .12s, background-color .12s, box-shadow .12s; }
 .ws-day:hover { border-color: var(--accent); background: var(--accent-soft); }
 .ws-day:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .ws-day.selected { border-bottom-color: var(--accent); background: var(--accent-soft); }
@@ -258,7 +261,6 @@ button.primary { width: 100%; }
 .ws-day.selected .ws-name, .ws-day.selected .ws-date { color: var(--brand-deep); font-weight: 700; }
 .ws-total { grid-column: 1; font-variant-numeric: tabular-nums; font-weight: 600; line-height: 1.25; }
 .ws-clock { position: static; grid-column: 2; grid-row: 2; justify-self: end; align-self: end; color: var(--muted); line-height: 1; }
-.ws-clock [class*="p-icon--"] { width: .8rem; height: .8rem; margin: 0; }
 .ws-week { grid-column: 1 / -1; justify-self: end; padding: .15rem 0 0; color: var(--muted); font-size: .9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .entry-main { padding: .65rem .75rem; }
 .entry-project { font-weight: 600; }
@@ -400,8 +402,6 @@ td.cell.locked .cell-input { opacity: .6; }
 #day-table tbody td:first-child { border-left: 1px solid var(--line); border-radius: var(--radius) 0 0 var(--radius); }
 #day-table tbody td:last-child { border-right: 1px solid var(--line); border-radius: 0 var(--radius) var(--radius) 0; }
 #day-table .entry-hours { white-space: nowrap; }
-.ws-day { position: relative; }
-.ws-clock { position: absolute; right: .5rem; bottom: .45rem; font-size: .85rem; opacity: .55; }
 .lock { margin-left: .45rem; font-size: .95rem; opacity: .75; }
 .day-total-cell { text-align: right; font-weight: 700; }
 .day-empty.p-notification { margin: .5rem 0 .75rem; }

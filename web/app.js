@@ -663,7 +663,7 @@ async function refreshWeekStrip() {
           }),
           el('span', { cls: 'ws-date', text: String(dd) }),
           el('span', { cls: 'ws-total num', text: fmtHM(totals[date] || 0) }),
-          el('span', { cls: 'ws-clock', attrs: { 'aria-hidden': 'true' } }, [ubuntuIcon('history')]),
+          el('span', { cls: 'ws-clock', attrs: { 'aria-hidden': 'true' } }, [ubuntuIcon(totals[date] ? 'success' : 'history')]),
         ],
       ),
     );
