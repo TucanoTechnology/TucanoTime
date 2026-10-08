@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug server (cargo run)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "--bin", "tucano-time"],
+        "filter": { "name": "tucano-time", "kind": "bin" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1",
+        "TUCANO_DATA_DIR": "${workspaceFolder}/data",
+        "TUCANO_PORT": "8080"
+      },
+      "sourceLanguages": ["rust"],
+      "preLaunchTask": "cargo build"
+    },
+    {
+      "name": "Debug unit tests (lib)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib"],
+        "filter": { "name": "tucano-time", "kind": "lib" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": { "RUST_BACKTRACE": "1" },
+      "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "Debug contract tests",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["test", "--no-run", "--test", "contract"],
+        "filter": { "name": "contract", "kind": "test" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": { "RUST_BACKTRACE": "1" },
+      "sourceLanguages": ["rust"]
+    }
+  ]
+}

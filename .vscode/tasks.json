@@ -1,0 +1,53 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cargo build",
+      "type": "cargo",
+      "command": "build",
+      "problemMatcher": ["$rustc"],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "cargo run",
+      "type": "cargo",
+      "command": "run",
+      "problemMatcher": ["$rustc"],
+      "options": {
+        "env": {
+          "RUST_BACKTRACE": "1",
+          "TUCANO_DATA_DIR": "${workspaceFolder}/data"
+        }
+      }
+    },
+    {
+      "label": "cargo test",
+      "type": "cargo",
+      "command": "test",
+      "args": ["--all-targets"],
+      "problemMatcher": ["$rustc"],
+      "group": { "kind": "test", "isDefault": true }
+    },
+    {
+      "label": "cargo clippy",
+      "type": "cargo",
+      "command": "clippy",
+      "args": ["--all-targets", "--", "-D", "warnings"],
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "cargo fmt",
+      "type": "cargo",
+      "command": "fmt",
+      "args": ["--all"],
+      "problemMatcher": []
+    },
+    {
+      "label": "cargo fmt check",
+      "type": "cargo",
+      "command": "fmt",
+      "args": ["--all", "--", "--check"],
+      "problemMatcher": []
+    }
+  ]
+}

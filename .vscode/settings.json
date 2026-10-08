@@ -1,0 +1,24 @@
+{
+  "//": "Portable Rust setup — committed so every PC gets the same build, test and debug experience.",
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.allTargets": true,
+  "rust-analyzer.imports.granularity.group": "module",
+  "rust-analyzer.cargo.extraEnv": {
+    "RUST_BACKTRACE": "1"
+  },
+  "editor.formatOnSave": true,
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true
+  },
+  "files.exclude": {
+    "**/target": true
+  },
+  "search.exclude": {
+    "**/target": true
+  },
+  "terminal.integrated.env.linux": {
+    "RUST_BACKTRACE": "1"
+  }
+}
