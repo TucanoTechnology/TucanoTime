@@ -50,6 +50,50 @@
       "command": "cargo",
       "args": ["fmt", "--all", "--", "--check"],
       "problemMatcher": []
+    },
+    {
+      "label": "gui: server (background)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["run"],
+      "isBackground": true,
+      "problemMatcher": [
+        {
+          "owner": "custom",
+          "pattern": [{ "regexp": "^$" }],
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "Compiling|Finished",
+            "endsPattern": "listening on :"
+          }
+        }
+      ],
+      "options": {
+        "env": {
+          "RUST_BACKTRACE": "1",
+          "TUCANO_DATA_DIR": "${workspaceFolder}/data"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "gui: open Simple Browser",
+      "command": "${input:openSimpleBrowser}",
+      "problemMatcher": []
+    },
+    {
+      "label": "gui: run (server + Simple Browser)",
+      "dependsOn": ["gui: server (background)", "gui: open Simple Browser"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "openSimpleBrowser",
+      "type": "command",
+      "command": "simpleBrowser.show",
+      "args": ["http://127.0.0.1:8080"]
     }
   ]
 }
