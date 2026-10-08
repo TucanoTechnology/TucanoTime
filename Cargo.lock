@@ -1527,6 +1527,7 @@ dependencies = [
  "chrono",
  "flate2",
  "fs2",
+ "futures-util",
  "hmac",
  "http-body-util",
  "lopdf",

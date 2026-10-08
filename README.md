@@ -135,6 +135,20 @@ cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 ```
 
+### GUI live reload (dev mode)
+
+To serve GUI assets from disk on every request (no Rust rebuild needed for HTML/CSS/JS changes), start the server with:
+
+```sh
+TUCANO_WEB_DIR=./web cargo run
+```
+
+**How it works:** when `TUCANO_WEB_DIR` is set, static files are read from that directory on every request rather than from the compiled-in bundle.
+
+**Auto-reload:** a tiny script is injected into HTML pages that opens an SSE connection to `/_dev/reload`. The server polls the `web/` directory every 300 ms and fires a reload event whenever any file's modification time changes, causing the browser to refresh automatically on save.
+
+**Production:** without `TUCANO_WEB_DIR`, the embedded bundle runs as always and `/_dev/reload` returns 404 — no dev overhead in production.
+
 Storage is file-based JSON under `TUCANO_DATA_DIR` (the API is the only
 writer). The canonical layout — customers/projects/tasks, entries by day,
 invoices (+ archived PDFs and the `.seq.json` number ledger), users,
