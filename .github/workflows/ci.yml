@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  packages: write   # needed to push to ghcr.io
 
 # Fork-PR guard (review A1): these jobs run on SELF-HOSTED runners, where an
 # untrusted fork PR means arbitrary code executing on org infra with a live
@@ -41,13 +42,43 @@ jobs:
   build-image:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, Linux, X64]
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # A build-only check; pushing to a registry starts once releases do.
-      - name: Docker build
-        run: docker build --pull -t tucanotime:${{ github.sha }} .
+      # Log in to GHCR on main pushes; skip on PRs (no token needed for build-only).
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Derive tags:
+      #   • ghcr.io/<owner>/<repo>:latest      (main pushes only)
+      #   • ghcr.io/<owner>/<repo>:<short-sha> (main pushes only)
+      #   • tucanotime:<sha>                   (PRs — local build check, never pushed)
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,format=short
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          pull: true
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
   actionlint:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
