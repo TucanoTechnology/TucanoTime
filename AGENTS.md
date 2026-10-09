@@ -120,6 +120,7 @@ carry the same version; bump all three in one intentional PR.
 | Branching & git | [`AgentRules/coding/branching-and-git.md`](AgentRules/coding/branching-and-git.md) |
 | Code review | [`AgentRules/coding/code-review.md`](AgentRules/coding/code-review.md) |
 | Dependencies | [`AgentRules/coding/dependencies.md`](AgentRules/coding/dependencies.md) |
+| Peak-hour warnings | [`AgentRules/generic/peak-hours.md`](AgentRules/generic/peak-hours.md) |
 | Principles | [`AgentRules/generic/principles.md`](AgentRules/generic/principles.md) |
 | Ticket template | [`AgentRules/project-management/ticket-template.md`](AgentRules/project-management/ticket-template.md) |
 | Ticket workflow | [`AgentRules/project-management/workflow.md`](AgentRules/project-management/workflow.md) |

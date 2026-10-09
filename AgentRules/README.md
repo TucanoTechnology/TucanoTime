@@ -15,6 +15,7 @@ read the whole directory.
 | Rule file | Read when |
 | --- | --- |
 | [`generic/principles.md`](generic/principles.md) | always |
+| [`generic/peak-hours.md`](generic/peak-hours.md) | always, DeepSeek-backed agents |
 | [`coding/branching-and-git.md`](coding/branching-and-git.md) | branching, committing, merging |
 | [`coding/api-and-data-contracts.md`](coding/api-and-data-contracts.md) | endpoints, payloads, stored shapes |
 | [`coding/code-review.md`](coding/code-review.md) | reviewing a pull request |
