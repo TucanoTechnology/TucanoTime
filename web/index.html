@@ -12,26 +12,30 @@
   <a class="skip-link" href="#main">Skip to content</a>
 
   <div id="auth-overlay" class="auth-overlay" hidden>
-    <form id="auth-form" class="card auth-card">
-      <h1 id="auth-title" class="auth-title">Sign in</h1>
-      <p id="auth-sub" class="hint"></p>
-      <div class="field" id="auth-name-field" hidden>
-        <label for="auth-name">Your name</label>
-        <input id="auth-name" maxlength="120" autocomplete="name">
-      </div>
-      <div class="field">
-        <label for="auth-email">Email</label>
-        <input id="auth-email" type="email" autocomplete="username" required>
-      </div>
-      <div class="field">
-        <label for="auth-password">Password</label>
-        <input id="auth-password" type="password" autocomplete="current-password" minlength="8" required>
-      </div>
-      <p class="form-error" id="auth-error" role="alert" hidden></p>
-      <button type="submit" id="auth-submit" class="primary">Sign in</button>
-      <div id="sso-box" hidden>
-        <p class="hint">Single sign-on <span class="beta">Beta</span></p>
-        <div id="sso-buttons"></div>
+    <form id="auth-form" class="p-card auth-card">
+      <header class="p-card__header">
+        <h1 id="auth-title" class="auth-title">Sign in</h1>
+        <p id="auth-sub" class="hint"></p>
+      </header>
+      <div class="p-card__content">
+        <div class="field" id="auth-name-field" hidden>
+          <label for="auth-name">Your name</label>
+          <input id="auth-name" maxlength="120" autocomplete="name">
+        </div>
+        <div class="field">
+          <label for="auth-email">Email</label>
+          <input id="auth-email" type="email" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="auth-password">Password</label>
+          <input id="auth-password" type="password" autocomplete="current-password" minlength="8" required>
+        </div>
+        <p class="form-error" id="auth-error" role="alert" hidden></p>
+        <button type="submit" id="auth-submit" class="primary">Sign in</button>
+        <div id="sso-box" hidden>
+          <p class="hint">Single sign-on <span class="beta">Beta</span></p>
+          <div id="sso-buttons"></div>
+        </div>
       </div>
     </form>
   </div>
@@ -784,42 +788,48 @@
 
   <!-- First-run setup wizard (#111): modal, one step at a time. -->
   <dialog id="wizard-dialog" aria-labelledby="wz-title">
-    <h2 id="wz-title">Welcome to TucanoTime</h2>
-    <div id="wz-steps">
-      <div id="wz-step-0" class="wz-step">
-        <p>Let's get you recording time in under a minute: add your first customer, then a project for it. You can finish this at any time — progress is kept server-side as you go.</p>
+    <div class="p-card">
+      <header class="p-card__header">
+        <h2 id="wz-title">Welcome to TucanoTime</h2>
+      </header>
+      <div class="p-card__content">
+        <div id="wz-steps">
+          <div id="wz-step-0" class="wz-step">
+            <p>Let's get you recording time in under a minute: add your first customer, then a project for it. You can finish this at any time — progress is kept server-side as you go.</p>
+          </div>
+          <div id="wz-step-1" class="wz-step" hidden>
+            <div class="field"><label for="wz-cust-name">Customer name</label>
+              <input id="wz-cust-name" maxlength="120" autocomplete="off" value="Tucano Time" placeholder="Acme Ltd."></div>
+            <div class="field"><label for="wz-cust-currency">Currency (ISO-4217)</label>
+              <input id="wz-cust-currency" maxlength="3" value="EUR"></div>
+            <div class="field"><label for="wz-cust-rate">Default hourly rate (e.g. 60.00)</label>
+              <input id="wz-cust-rate" type="number" min="0" step="0.01" value="60.00" inputmode="decimal"></div>
+          </div>
+          <div id="wz-step-2" class="wz-step" hidden>
+            <div class="field" id="wz-pick-customer-field"><label for="wz-project-customer">Add a project to</label>
+              <select id="wz-project-customer"></select></div>
+            <div class="field"><label for="wz-project-code">Project code</label>
+              <input id="wz-project-code" maxlength="24" autocomplete="off" placeholder="WEB-1"></div>
+            <div class="field"><label for="wz-project-name">Project name (optional)</label>
+              <input id="wz-project-name" maxlength="120" autocomplete="off"></div>
+            <div class="field"><label for="wz-project-currency">Currency (from customer default)</label>
+              <input id="wz-project-currency" maxlength="3"></div>
+            <div class="field"><label for="wz-project-rate">Hourly rate (from customer default)</label>
+              <input id="wz-project-rate" type="number" min="0" step="0.01" inputmode="decimal"></div>
+          </div>
+          <div id="wz-step-3" class="wz-step" hidden>
+            <p id="wz-done-text"></p>
+            <p>The entry form is open with your new customer and project selected — record your first time entry straight away.</p>
+          </div>
+        </div>
+        <p class="form-error" id="wz-error" role="alert" hidden></p>
+        <p id="wz-status" role="status" aria-live="polite" class="hint"></p>
+        <div class="dlg-actions">
+          <button id="wz-later" class="secondary" type="button">Skip</button>
+          <button id="wz-back" class="secondary" type="button">Back</button>
+          <button id="wz-next" class="primary" type="button">Next</button>
+        </div>
       </div>
-      <div id="wz-step-1" class="wz-step" hidden>
-        <div class="field"><label for="wz-cust-name">Customer name</label>
-          <input id="wz-cust-name" maxlength="120" autocomplete="off" placeholder="Capybara Solutions"></div>
-        <div class="field"><label for="wz-cust-currency">Currency (ISO-4217)</label>
-          <input id="wz-cust-currency" maxlength="3" value="EUR"></div>
-        <div class="field"><label for="wz-cust-rate">Default hourly rate (e.g. 60.00)</label>
-          <input id="wz-cust-rate" type="number" min="0" step="0.01" value="60.00" inputmode="decimal"></div>
-      </div>
-      <div id="wz-step-2" class="wz-step" hidden>
-        <div class="field" id="wz-pick-customer-field"><label for="wz-project-customer">Add a project to</label>
-          <select id="wz-project-customer"></select></div>
-        <div class="field"><label for="wz-project-code">Project code</label>
-          <input id="wz-project-code" maxlength="24" autocomplete="off" placeholder="WEB-1"></div>
-        <div class="field"><label for="wz-project-name">Project name (optional)</label>
-          <input id="wz-project-name" maxlength="120" autocomplete="off"></div>
-        <div class="field"><label for="wz-project-currency">Currency (from customer default)</label>
-          <input id="wz-project-currency" maxlength="3"></div>
-        <div class="field"><label for="wz-project-rate">Hourly rate (from customer default)</label>
-          <input id="wz-project-rate" type="number" min="0" step="0.01" inputmode="decimal"></div>
-      </div>
-      <div id="wz-step-3" class="wz-step" hidden>
-        <p id="wz-done-text"></p>
-        <p>The entry form is open with your new customer and project selected — record your first time entry straight away.</p>
-      </div>
-    </div>
-    <p class="form-error" id="wz-error" role="alert" hidden></p>
-    <p id="wz-status" role="status" aria-live="polite" class="hint"></p>
-    <div class="dlg-actions">
-      <button id="wz-later" class="secondary" type="button">Set up later</button>
-      <button id="wz-back" class="secondary" type="button">Back</button>
-      <button id="wz-next" class="primary" type="button">Next</button>
     </div>
   </dialog>
 

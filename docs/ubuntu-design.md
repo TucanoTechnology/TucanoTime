@@ -49,6 +49,15 @@ Backlog — one component family per reviewed PR, behind existing element ids,
 each gated by the jsdom + contrast suites and a manual keyboard/AT pass on the
 affected screens:
 
+0. **Stage 2b (in progress)** — cards: the **first-admin sign-in** and the
+   **first-run setup wizard** are now twins built on Vanilla `p-card`
+   (`p-card__header` + `p-card__content`) with the ruled header, `.65rem`
+   field rhythm and full-width `p-button--positive` action (#229). The
+   wizard's native dialog keeps its modal behaviour and backdrop but is left
+   chromeless so the inner `p-card` is the single frame, matching the auth
+   overlay exactly. Its first-customer field is prefilled with the `Tucano
+   Time` example. Element ids are unchanged, so the jsdom + wizard smoke
+   suites stay the gate. The remaining `.card` sites follow below.
 1. **Stage 2a** — tables: the customer/project/task/expense/submission/user
    registers onto `p-table` (invoice register gains `p-table--sortable`;
    dense registers gain the mobile-card pattern for narrow screens).

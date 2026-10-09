@@ -94,7 +94,7 @@ const wzOpen = () => wzDlg.open === true || wzDlg.hasAttribute('open');
 check('wizard auto-opens as a modal on first login with no customers', wzOpen());
 check('wizard starts on the welcome step', !window.document.getElementById('wz-step-0').hidden);
 window.document.getElementById('wz-later').dispatchEvent(new window.Event('click', { bubbles: true }));
-check('"Set up later" dismisses the wizard cleanly', !wzOpen());
+check('"Skip" dismisses the wizard cleanly', !wzOpen());
 // The setup wizard is a utility action after core and secondary navigation.
 // #191 moved the utility action out of the tablist (ARIA required-owned-
 // children); #125's invariant is that the wizard stays the LAST sidebar
@@ -141,10 +141,17 @@ check('the icon reopens the wizard fresh', wzOpen() && !window.document.getEleme
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(80);
 check('Next advances to the customer step', !window.document.getElementById('wz-step-1').hidden && window.document.getElementById('wz-step-0').hidden);
+// #229: the first-customer field is prefilled with the example name, so a
+// fresh setup needs no typing (still editable).
+check('customer name is prefilled with the Tucano Time example',
+  window.document.getElementById('wz-cust-name').value === 'Tucano Time');
+// Clear the prefill and submit: an empty name must refuse to save.
+window.document.getElementById('wz-cust-name').value = '';
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(80);
 check('empty customer name shows an inline error (no silent partial save)',
-  !window.document.getElementById('wz-error').hidden);
+  !window.document.getElementById('wz-error').hidden
+  && !window.document.getElementById('wz-step-1').hidden);
 window.document.getElementById('wz-cust-name').value = 'ACME';
 window.document.getElementById('wz-cust-currency').value = 'eur';
 window.document.getElementById('wz-cust-rate').value = '60.00';
