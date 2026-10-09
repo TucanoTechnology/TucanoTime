@@ -47,7 +47,10 @@ blanket WCAG conformance.
 
 Backlog — one component family per reviewed PR, behind existing element ids,
 each gated by the jsdom + contrast suites and a manual keyboard/AT pass on the
-affected screens:
+affected screens. **Page-by-page execution order, review URLs and ground rules
+moved to [`ubuntu-migration-plan.md`](ubuntu-migration-plan.md)** after the API
+moved under `/api` and every view gained a stable path (`spa_page` in
+`src/lib.rs` ↔ `TAB_ROUTES` in `web/app.js` — keep them in sync):
 
 0. **Stage 2b (in progress)** — cards: the **first-admin sign-in** and the
    **first-run setup wizard** are now twins built on Vanilla `p-card`

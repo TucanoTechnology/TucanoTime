@@ -12,7 +12,7 @@
 //! deliberately does NOT live here — config.json is plaintext next to the
 //! data it protects. Secrets keep the env/vault story (#77) plus the new
 //! `*_FILE` mounts; the whitelist below is enforced on write, so
-//! `PUT /admin/config` physically cannot persist a secret by accident.
+//! `PUT /api/admin/config` physically cannot persist a secret by accident.
 
 use std::path::{Path, PathBuf};
 
@@ -87,7 +87,7 @@ pub const KEYS: &[KeyDef] = &[
         name: "calendar_oauth_redirect",
         env: "TUCANO_CALENDAR_OAUTH_REDIRECT",
         kind: Kind::Str {
-            default: "/calendar/oauth/callback",
+            default: "/api/calendar/oauth/callback",
         },
         description: "Redirect URI registered with the OAuth calendar app (#36)",
     },
@@ -304,7 +304,7 @@ impl AppConfig {
         Ok(())
     }
 
-    /// The effective table for `GET /admin/config`: every whitelisted key with
+    /// The effective table for `GET /api/admin/config`: every whitelisted key with
     /// its resolved value, source, and a default. Secret material is not part
     /// of the whitelist, so nothing needs masking here.
     pub fn effective(&self, env: &dyn Fn(&str) -> Option<String>) -> Vec<Value> {

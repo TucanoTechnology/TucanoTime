@@ -70,11 +70,19 @@ The GUI is a presentation layer and nothing more — it never reads storage.
 - The **contract is `openapi.json`** (checked in, served at `/openapi.json`,
   rendered at `/docs`). Route changes and contract changes land in the same
   commit. Range queries are capped at 400 days.
+- **Page routing:** the JSON API is mounted under `/api` (`nest` in
+  `build_router`); only `/healthz`, `/openapi.json`, `/docs` and the GUI stay
+  at the root. Each GUI view owns a top-level path (`/timesheets/day|week|
+  calendar`, `/customers`, `/projects`, `/tasks`, `/invoices`, `/expenses`,
+  `/approvals`, `/reports`, `/settings/security|users|invoices|catalog|
+  expenses`). `spa_page` (lib.rs) is the case-insensitive allowlist serving
+  `index.html`; unknown paths keep the JSON 404. `TAB_ROUTES`/`DEFAULT_ROUTE`
+  in `web/app.js` mirror that list — change both together.
 - `web/` is dependency-free vanilla HTML/CSS/JS embedded via rust-embed (no
   build step). All DOM data is inserted with `textContent`, never `innerHTML`.
 - **Auth (#19):** users are file-based (`users/<id>.json`), passwords argon2id,
   sessions are HMAC-signed HttpOnly cookies (`tt_session`). Data routes require a
-  valid session; `/users` requires `admin`. First-run `/auth/bootstrap` creates
+  valid session; `/api/users` requires `admin`. First-run `/api/auth/bootstrap` creates
   the initial admin only while no users exist. Key: `TUCANO_SESSION_SECRET[_FILE]`
   else the auto-created `<data>/session.key`, so restarts keep sessions (#94);
   the `Secure` cookie flag is the independent `TUCANO_SECURE_COOKIES` axis
@@ -82,7 +90,7 @@ The GUI is a presentation layer and nothing more — it never reads storage.
   review A5). `password_hash` is never serialised to clients.
 - **RBAC / private-per-user (#51):** entries and expenses carry `user_id` (the
   author). A **member** sees/edits only their own records; an **admin** sees all
-  and owns `/invoices` (admin tier) and submission approval. Enforce via
+  and owns `/api/invoices` (admin tier) and submission approval. Enforce via
   `visible_to()` on reads and by ownership check on mutations (a non-owned record
   returns 404, not 403, to avoid leaking existence). Customers/projects/tasks/
   categories are shared org-wide reference data (any authenticated user).

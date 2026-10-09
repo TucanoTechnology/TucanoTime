@@ -164,7 +164,7 @@ pub async fn calendar_events(
 
 // ---------------------------------------------------------- notifications --
 
-/// `GET /calendar/oauth/start` — optional `provider` param (default google).
+/// `GET /api/calendar/oauth/start` — optional `provider` param (default google).
 #[derive(Debug, serde::Deserialize)]
 pub struct OAuthStartQuery {
     #[serde(default)]
@@ -215,7 +215,7 @@ pub async fn calendar_oauth_start(
     Ok(Json(serde_json::json!({ "url": url })).into_response())
 }
 
-/// `GET /calendar/oauth/callback` — the provider redirects back with these.
+/// `GET /api/calendar/oauth/callback` — the provider redirects back with these.
 #[derive(Debug, serde::Deserialize)]
 pub struct OAuthCallbackQuery {
     #[serde(default)]
