@@ -7,7 +7,7 @@
       "name": "AGPL-3.0-or-later",
       "identifier": "AGPL-3.0-or-later"
     },
-    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /users and /invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62)."
+    "description": "Timesheet system: daily/weekly time entries, customers and project codes with per-entity currencies and hourly rates. File-backed (no database); the API is the only writer below TUCANO_DATA_DIR. Access is private-per-user (#51): a member sees and edits only their own entries/expenses/submissions; an administrator sees all data and owns invoicing, approvals and user management (the /api/users and /api/invoices routes return 403 for members). Mutating endpoints may return 503 (Retry-After) under write contention (#62)."
   },
   "servers": [
     {
@@ -57,7 +57,7 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "tt_session",
-        "description": "HttpOnly session cookie issued by /auth/login or /auth/bootstrap."
+        "description": "HttpOnly session cookie issued by /api/auth/login or /api/auth/bootstrap."
       }
     },
     "schemas": {
@@ -2437,7 +2437,7 @@
     }
   },
   "paths": {
-    "/auth/sso/providers": {
+    "/api/auth/sso/providers": {
       "get": {
         "operationId": "ssoProviders",
         "tags": [
@@ -2470,7 +2470,7 @@
         }
       }
     },
-    "/auth/sso/assertion": {
+    "/api/auth/sso/assertion": {
       "post": {
         "operationId": "ssoAssertion",
         "tags": [
@@ -2529,7 +2529,7 @@
         }
       }
     },
-    "/auth/status": {
+    "/api/auth/status": {
       "get": {
         "operationId": "authStatus",
         "tags": [
@@ -2560,7 +2560,7 @@
         }
       }
     },
-    "/auth/bootstrap": {
+    "/api/auth/bootstrap": {
       "post": {
         "operationId": "bootstrap",
         "tags": [
@@ -2598,7 +2598,7 @@
         }
       }
     },
-    "/auth/login": {
+    "/api/auth/login": {
       "post": {
         "operationId": "login",
         "tags": [
@@ -2636,7 +2636,7 @@
         }
       }
     },
-    "/auth/logout": {
+    "/api/auth/logout": {
       "post": {
         "operationId": "logout",
         "tags": [
@@ -2651,7 +2651,7 @@
         }
       }
     },
-    "/auth/me": {
+    "/api/auth/me": {
       "get": {
         "operationId": "me",
         "tags": [
@@ -2675,7 +2675,7 @@
         }
       }
     },
-    "/users": {
+    "/api/users": {
       "get": {
         "operationId": "listUsers",
         "tags": [
@@ -2749,7 +2749,7 @@
         }
       }
     },
-    "/users/{id}": {
+    "/api/users/{id}": {
       "parameters": [
         {
           "name": "id",
@@ -2824,7 +2824,7 @@
         }
       }
     },
-    "/users/{id}/password": {
+    "/api/users/{id}/password": {
       "parameters": [
         {
           "name": "id",
@@ -2946,7 +2946,7 @@
         }
       }
     },
-    "/customers": {
+    "/api/customers": {
       "get": {
         "operationId": "listCustomers",
         "tags": [
@@ -3011,7 +3011,7 @@
         }
       }
     },
-    "/customers/{id}": {
+    "/api/customers/{id}": {
       "parameters": [
         {
           "name": "id",
@@ -3099,7 +3099,7 @@
         }
       }
     },
-    "/customers/{cid}/projects": {
+    "/api/customers/{cid}/projects": {
       "parameters": [
         {
           "name": "cid",
@@ -3184,7 +3184,7 @@
         }
       }
     },
-    "/customers/{cid}/projects/{code}": {
+    "/api/customers/{cid}/projects/{code}": {
       "parameters": [
         {
           "name": "cid",
@@ -3280,7 +3280,7 @@
         }
       }
     },
-    "/customers/{cid}/projects/{pcode}/tasks": {
+    "/api/customers/{cid}/projects/{pcode}/tasks": {
       "parameters": [
         {
           "name": "cid",
@@ -3373,7 +3373,7 @@
         }
       }
     },
-    "/customers/{cid}/projects/{pcode}/tasks/{code}": {
+    "/api/customers/{cid}/projects/{pcode}/tasks/{code}": {
       "parameters": [
         {
           "name": "cid",
@@ -3477,7 +3477,7 @@
         }
       }
     },
-    "/entries": {
+    "/api/entries": {
       "parameters": [
         {
           "$ref": "#/components/parameters/DateParam"
@@ -3558,7 +3558,7 @@
         }
       }
     },
-    "/entries/{id}": {
+    "/api/entries/{id}": {
       "parameters": [
         {
           "name": "id",
@@ -3643,7 +3643,7 @@
         }
       }
     },
-    "/reports/summary": {
+    "/api/reports/summary": {
       "parameters": [
         {
           "$ref": "#/components/parameters/FromParam"
@@ -3700,7 +3700,7 @@
         }
       }
     },
-    "/reports/export.csv": {
+    "/api/reports/export.csv": {
       "parameters": [
         {
           "$ref": "#/components/parameters/FromParam"
@@ -3741,7 +3741,7 @@
         }
       }
     },
-    "/reports/budgets": {
+    "/api/reports/budgets": {
       "get": {
         "operationId": "budgetReport",
         "tags": [
@@ -3831,7 +3831,7 @@
         }
       }
     },
-    "/reports/profitability": {
+    "/api/reports/profitability": {
       "parameters": [
         {
           "$ref": "#/components/parameters/FromParam"
@@ -3905,7 +3905,7 @@
         }
       }
     },
-    "/timer": {
+    "/api/timer": {
       "get": {
         "operationId": "getTimer",
         "tags": [
@@ -4044,7 +4044,7 @@
         }
       }
     },
-    "/timer/stop": {
+    "/api/timer/stop": {
       "post": {
         "operationId": "stopTimer",
         "tags": [
@@ -4068,7 +4068,7 @@
         }
       }
     },
-    "/calendar/oauth/start": {
+    "/api/calendar/oauth/start": {
       "get": {
         "operationId": "calendarOAuthStart",
         "tags": [
@@ -4122,7 +4122,7 @@
         }
       }
     },
-    "/calendar/oauth/callback": {
+    "/api/calendar/oauth/callback": {
       "get": {
         "operationId": "calendarOAuthCallback",
         "tags": [
@@ -4185,7 +4185,7 @@
         }
       }
     },
-    "/calendar/events": {
+    "/api/calendar/events": {
       "parameters": [
         {
           "$ref": "#/components/parameters/FromParam"
@@ -4259,7 +4259,7 @@
         }
       }
     },
-    "/notifications": {
+    "/api/notifications": {
       "get": {
         "operationId": "listNotifications",
         "tags": [
@@ -4327,7 +4327,7 @@
         }
       }
     },
-    "/notifications/read": {
+    "/api/notifications/read": {
       "post": {
         "operationId": "markNotificationsRead",
         "tags": [
@@ -4341,7 +4341,7 @@
         }
       }
     },
-    "/schedules": {
+    "/api/schedules": {
       "get": {
         "operationId": "listSchedules",
         "tags": [
@@ -4412,7 +4412,7 @@
         }
       }
     },
-    "/schedules/{id}": {
+    "/api/schedules/{id}": {
       "parameters": [
         {
           "name": "id",
@@ -4482,7 +4482,7 @@
         }
       }
     },
-    "/invoices": {
+    "/api/invoices": {
       "get": {
         "operationId": "listInvoices",
         "tags": [
@@ -4550,7 +4550,7 @@
         }
       }
     },
-    "/invoices/{id}": {
+    "/api/invoices/{id}": {
       "parameters": [
         {
           "name": "id",
@@ -4656,7 +4656,7 @@
         }
       }
     },
-    "/invoices/{id}/issue": {
+    "/api/invoices/{id}/issue": {
       "parameters": [
         {
           "name": "id",
@@ -4694,7 +4694,7 @@
         }
       }
     },
-    "/invoices/{id}/pdf": {
+    "/api/invoices/{id}/pdf": {
       "parameters": [
         {
           "name": "id",
@@ -4748,7 +4748,7 @@
         }
       }
     },
-    "/invoices/{id}/email": {
+    "/api/invoices/{id}/email": {
       "parameters": [
         {
           "name": "id",
@@ -4813,7 +4813,7 @@
         }
       }
     },
-    "/invoices/{id}/email-copy": {
+    "/api/invoices/{id}/email-copy": {
       "parameters": [
         {
           "name": "id",
@@ -4904,7 +4904,7 @@
         }
       }
     },
-    "/invoices/{id}/pay": {
+    "/api/invoices/{id}/pay": {
       "parameters": [
         {
           "name": "id",
@@ -4969,7 +4969,7 @@
         "description": "amount_minor absent = the full remaining balance (legacy behaviour). 0 is a 422, over-balance a 409 \u2014 both without persistence. Settling the last cent flips to paid; anything less parks at partly_paid with a ledger entry."
       }
     },
-    "/invoices/{id}/checkout": {
+    "/api/invoices/{id}/checkout": {
       "parameters": [
         {
           "name": "id",
@@ -5058,7 +5058,7 @@
         }
       }
     },
-    "/payments/webhook/{provider}": {
+    "/api/payments/webhook/{provider}": {
       "parameters": [
         {
           "name": "provider",
@@ -5115,7 +5115,7 @@
         }
       }
     },
-    "/invoices/{id}/sync": {
+    "/api/invoices/{id}/sync": {
       "parameters": [
         {
           "name": "id",
@@ -5182,7 +5182,7 @@
         }
       }
     },
-    "/sync/accounting": {
+    "/api/sync/accounting": {
       "get": {
         "operationId": "accountingSyncStatus",
         "tags": [
@@ -5273,7 +5273,7 @@
         }
       }
     },
-    "/invoices/summary": {
+    "/api/invoices/summary": {
       "get": {
         "operationId": "invoiceSummary",
         "tags": [
@@ -5294,7 +5294,7 @@
         }
       }
     },
-    "/invoices/report": {
+    "/api/invoices/report": {
       "parameters": [
         {
           "$ref": "#/components/parameters/FromParam"
@@ -5397,7 +5397,7 @@
         }
       }
     },
-    "/invoices/export.csv": {
+    "/api/invoices/export.csv": {
       "get": {
         "operationId": "invoiceExportCsv",
         "tags": [
@@ -5418,7 +5418,7 @@
         }
       }
     },
-    "/categories": {
+    "/api/categories": {
       "get": {
         "operationId": "listCategories",
         "tags": [
@@ -5483,7 +5483,7 @@
         }
       }
     },
-    "/categories/{id}": {
+    "/api/categories/{id}": {
       "parameters": [
         {
           "name": "id",
@@ -5549,7 +5549,7 @@
         }
       }
     },
-    "/expenses": {
+    "/api/expenses": {
       "get": {
         "operationId": "listExpenses",
         "tags": [
@@ -5631,7 +5631,7 @@
         }
       }
     },
-    "/expenses/{id}": {
+    "/api/expenses/{id}": {
       "parameters": [
         {
           "name": "id",
@@ -5681,7 +5681,7 @@
         }
       }
     },
-    "/audit": {
+    "/api/audit": {
       "get": {
         "operationId": "auditLog",
         "tags": [
@@ -5717,7 +5717,7 @@
         }
       }
     },
-    "/admin/config": {
+    "/api/admin/config": {
       "get": {
         "operationId": "adminConfig",
         "tags": [
@@ -5836,7 +5836,7 @@
         }
       }
     },
-    "/admin/secrets": {
+    "/api/admin/secrets": {
       "get": {
         "operationId": "listSecrets",
         "tags": [
@@ -5888,7 +5888,7 @@
         }
       }
     },
-    "/admin/secrets/{key}": {
+    "/api/admin/secrets/{key}": {
       "parameters": [
         {
           "name": "key",
@@ -5961,7 +5961,7 @@
         }
       }
     },
-    "/submissions": {
+    "/api/submissions": {
       "get": {
         "operationId": "listSubmissions",
         "tags": [
@@ -6026,7 +6026,7 @@
         }
       }
     },
-    "/submissions/{id}/decision": {
+    "/api/submissions/{id}/decision": {
       "parameters": [
         {
           "name": "id",
@@ -6074,7 +6074,7 @@
         }
       }
     },
-    "/claims": {
+    "/api/claims": {
       "get": {
         "operationId": "listClaims",
         "tags": [
@@ -6139,7 +6139,7 @@
         }
       }
     },
-    "/claims/{id}/submit": {
+    "/api/claims/{id}/submit": {
       "parameters": [
         {
           "name": "id",
@@ -6177,7 +6177,7 @@
         }
       }
     },
-    "/claims/{id}/decision": {
+    "/api/claims/{id}/decision": {
       "parameters": [
         {
           "name": "id",
@@ -6228,7 +6228,7 @@
         }
       }
     },
-    "/admin/invoice-template": {
+    "/api/admin/invoice-template": {
       "get": {
         "operationId": "getInvoiceTemplate",
         "tags": [
@@ -6317,7 +6317,7 @@
         }
       }
     },
-    "/invoices/{id}/document": {
+    "/api/invoices/{id}/document": {
       "parameters": [
         {
           "name": "id",
@@ -6369,7 +6369,7 @@
         }
       }
     },
-    "/invoices/{id}/write-off": {
+    "/api/invoices/{id}/write-off": {
       "parameters": [
         {
           "name": "id",
@@ -6435,7 +6435,7 @@
         }
       }
     },
-    "/admin/org": {
+    "/api/admin/org": {
       "get": {
         "operationId": "getOrg",
         "tags": [
@@ -6495,7 +6495,7 @@
         }
       }
     },
-    "/invoices/manual": {
+    "/api/invoices/manual": {
       "post": {
         "operationId": "createManualInvoice",
         "tags": [
@@ -6533,14 +6533,14 @@
         }
       }
     },
-    "/invoices/preview": {
+    "/api/invoices/preview": {
       "post": {
         "operationId": "previewInvoice",
         "tags": [
           "invoices"
         ],
         "summary": "Stateless generation preview for the staged wizard (#134)",
-        "description": "Runs the exact POST /invoices pipeline but does NOT persist: the wizard reviews the resulting lines, then saves via POST /invoices. Errors (mixed currency, nothing to invoice) are identical to the real call.",
+        "description": "Runs the exact POST /api/invoices pipeline but does NOT persist: the wizard reviews the resulting lines, then saves via POST /api/invoices. Errors (mixed currency, nothing to invoice) are identical to the real call.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6574,7 +6574,7 @@
         }
       }
     },
-    "/admin/item-types": {
+    "/api/admin/item-types": {
       "get": {
         "operationId": "listItemTypes",
         "tags": [
@@ -6645,7 +6645,7 @@
         }
       }
     },
-    "/admin/item-types/{id}": {
+    "/api/admin/item-types/{id}": {
       "parameters": [
         {
           "name": "id",
@@ -6714,7 +6714,7 @@
         }
       }
     },
-    "/retainers": {
+    "/api/retainers": {
       "get": {
         "operationId": "listRetainers",
         "tags": [
@@ -6837,7 +6837,7 @@
         }
       }
     },
-    "/retainers/{id}": {
+    "/api/retainers/{id}": {
       "parameters": [
         {
           "name": "id",
@@ -6929,7 +6929,7 @@
         }
       }
     },
-    "/retainers/{id}/credit": {
+    "/api/retainers/{id}/credit": {
       "parameters": [
         {
           "name": "id",
@@ -6997,7 +6997,7 @@
         }
       }
     },
-    "/retainers/{id}/draw": {
+    "/api/retainers/{id}/draw": {
       "parameters": [
         {
           "name": "id",

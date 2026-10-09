@@ -69,7 +69,7 @@ async fn login_cookie(router: &Router, email: &str, pw: &str) -> String {
     let (_s, _b, c) = raw(
         router,
         "POST",
-        "/auth/login",
+        "/api/auth/login",
         Some(json!({"email": email, "password": pw})),
         None,
     )
@@ -163,7 +163,7 @@ impl Client {
         let _ = raw(
             &router,
             "POST",
-            "/auth/bootstrap",
+            "/api/auth/bootstrap",
             Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
             None,
         )
@@ -253,7 +253,7 @@ async fn seed_issued_invoice(client: &Client) -> (Value, String) {
     let (sc, cust) = json_req(
         client,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
     )
     .await;
@@ -263,19 +263,19 @@ async fn seed_issued_invoice(client: &Client) -> (Value, String) {
     json_req(
         client,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         client,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap().to_string();
-    let (si, issued) = json_req(client, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (si, issued) = json_req(client, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     assert_eq!(si, StatusCode::OK, "{issued}");
     (issued, iid)
 }
@@ -296,7 +296,7 @@ async fn new_customer(app: &Client, name: &str, currency: &str, rate: u64) -> Va
     let (status, body) = json_req(
         app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name": name, "currency": currency, "default_rate_minor": rate})),
     )
     .await;
@@ -316,7 +316,7 @@ async fn new_project(app: &Client, cid: &str, code: &str, extra: Value) -> Value
     let (status, created) = json_req(
         app,
         "POST",
-        &format!("/customers/{cid}/projects"),
+        &format!("/api/customers/{cid}/projects"),
         Some(body),
     )
     .await;
@@ -347,13 +347,13 @@ async fn contract_paths_have_documented_responses() {
     assert_eq!(contract["openapi"], "3.1.0");
     let paths = contract["paths"].as_object().expect("paths object");
     for path in [
-        "/customers",
-        "/entries",
-        "/reports/summary",
-        "/reports/export.csv",
-        "/invoices",
-        "/auth/login",
-        "/users",
+        "/api/customers",
+        "/api/entries",
+        "/api/reports/summary",
+        "/api/reports/export.csv",
+        "/api/invoices",
+        "/api/auth/login",
+        "/api/users",
     ] {
         assert!(paths.contains_key(path), "contract missing {path}");
     }
@@ -365,7 +365,7 @@ async fn unknown_field_rejected_before_persist() {
     let (status, body) = json_req(
         &app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":1,"evil":true})),
     )
     .await;
@@ -374,7 +374,7 @@ async fn unknown_field_rejected_before_persist() {
     assert_eq!(body["error"]["fields"][0]["field"], "evil");
     assert_eq!(body["error"]["fields"][0]["message"], "unknown field");
     // Nothing was written: the customers collection stays empty.
-    let (s2, list) = json_req(&app, "GET", "/customers", None).await;
+    let (s2, list) = json_req(&app, "GET", "/api/customers", None).await;
     assert_eq!(s2, StatusCode::OK);
     assert!(list["customers"].as_array().unwrap().is_empty());
     let _ = d;
@@ -387,7 +387,7 @@ async fn wrong_type_is_validation_failure() {
     let (status, body) = json_req(
         &app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name":42,"currency":"EUR","default_rate_minor":1})),
     )
     .await;
@@ -407,7 +407,7 @@ async fn currency_normalised_and_rejected() {
     let (status, _) = json_req(
         &app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name":"X","currency":"Euros","default_rate_minor":1})),
     )
     .await;
@@ -426,7 +426,7 @@ async fn full_customer_project_entry_flow() {
     let (status, entry) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "p-1", json!(8), "2026-10-02")),
     )
     .await;
@@ -436,10 +436,10 @@ async fn full_customer_project_entry_flow() {
     assert!(entry["note"].is_string(), "note defaults to empty string");
 
     // Read back by day and by id.
-    let (s, list) = json_req(&app, "GET", "/entries?date=2026-10-02", None).await;
+    let (s, list) = json_req(&app, "GET", "/api/entries?date=2026-10-02", None).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(list["entries"].as_array().unwrap().len(), 1);
-    let (s2, got) = json_req(&app, "GET", &format!("/entries/{eid}"), None).await;
+    let (s2, got) = json_req(&app, "GET", &format!("/api/entries/{eid}"), None).await;
     assert_eq!(s2, StatusCode::OK);
     assert_eq!(got["id"], eid);
 }
@@ -450,7 +450,7 @@ async fn entry_requires_existing_customer_and_project() {
     let (status, body) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(
             "00000000-0000-0000-0000-000000000000",
             "P1",
@@ -475,7 +475,7 @@ async fn project_must_belong_to_customer() {
     let (status, body) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(
             b["id"].as_str().unwrap(),
             "P1",
@@ -505,7 +505,7 @@ async fn hours_boundaries() {
     let (ok, _) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "P1", json!(24.00), "2026-10-02")),
     )
     .await;
@@ -515,7 +515,7 @@ async fn hours_boundaries() {
     let (bad, _) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "P1", json!(24.01), "2026-10-02")),
     )
     .await;
@@ -525,7 +525,7 @@ async fn hours_boundaries() {
     let (bad2, _) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "P1", json!(1.234), "2026-10-02")),
     )
     .await;
@@ -541,7 +541,7 @@ async fn invalid_date_rejected_with_field_detail() {
     let (status, body) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "P1", json!(1), "2026-13-40")),
     )
     .await;
@@ -558,7 +558,7 @@ async fn duplicate_project_conflicts() {
     let (status, _) = json_req(
         &app,
         "POST",
-        &format!("/customers/{cid}/projects"),
+        &format!("/api/customers/{cid}/projects"),
         Some(json!({"code": "P1", "currency": "EUR", "rate_minor": 6000})),
     )
     .await;
@@ -572,32 +572,32 @@ async fn customer_delete_blocked_while_referenced() {
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     // Has projects -> cannot delete.
-    let (status, _) = json_req(&app, "DELETE", &format!("/customers/{cid}"), None).await;
+    let (status, _) = json_req(&app, "DELETE", &format!("/api/customers/{cid}"), None).await;
     assert_eq!(status, StatusCode::CONFLICT);
     // Delete the project, then it's removable.
     let (s, _) = json_req(
         &app,
         "DELETE",
-        &format!("/customers/{cid}/projects/P1"),
+        &format!("/api/customers/{cid}/projects/P1"),
         None,
     )
     .await;
     assert_eq!(s, StatusCode::NO_CONTENT);
-    let (s2, _) = json_req(&app, "DELETE", &format!("/customers/{cid}"), None).await;
+    let (s2, _) = json_req(&app, "DELETE", &format!("/api/customers/{cid}"), None).await;
     assert_eq!(s2, StatusCode::NO_CONTENT);
-    let (s3, _) = json_req(&app, "GET", &format!("/customers/{cid}"), None).await;
+    let (s3, _) = json_req(&app, "GET", &format!("/api/customers/{cid}"), None).await;
     assert_eq!(s3, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn range_and_date_queries_are_exclusive_forms() {
     let (app, _d) = app().await;
-    let (status, _) = json_req(&app, "GET", "/entries", None).await;
+    let (status, _) = json_req(&app, "GET", "/api/entries", None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let (status2, _) = json_req(
         &app,
         "GET",
-        "/entries?date=2026-10-02&from=2026-10-01",
+        "/api/entries?date=2026-10-02&from=2026-10-01",
         None,
     )
     .await;
@@ -615,14 +615,14 @@ async fn report_groups_by_project_with_effective_rate() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "STD", json!(2), "2026-10-02")),
     )
     .await;
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "PREM", json!(2), "2026-10-02")),
     )
     .await;
@@ -630,7 +630,7 @@ async fn report_groups_by_project_with_effective_rate() {
     let (status, summary) = json_req(
         &app,
         "GET",
-        "/reports/summary?from=2026-10-01&to=2026-10-07&group=project",
+        "/api/reports/summary?from=2026-10-01&to=2026-10-07&group=project",
         None,
     )
     .await;
@@ -658,11 +658,11 @@ async fn csv_export_quotes_and_escapes_note() {
         "date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":1.5,
         "note":"=SUM(A1) injected"
     });
-    json_req(&app, "POST", "/entries", Some(body)).await;
+    json_req(&app, "POST", "/api/entries", Some(body)).await;
     let (status, csv) = json_req(
         &app,
         "GET",
-        "/reports/export.csv?from=2026-10-01&to=2026-10-07",
+        "/api/reports/export.csv?from=2026-10-01&to=2026-10-07",
         None,
     )
     .await;
@@ -684,7 +684,7 @@ async fn error_shape_never_leaks_internals() {
     let (status, body) = json_req(
         &app,
         "GET",
-        "/entries/00000000-0000-0000-0000-000000000000",
+        "/api/entries/00000000-0000-0000-0000-000000000000",
         None,
     )
     .await;
@@ -705,7 +705,7 @@ async fn update_entry_can_move_day() {
     let (_, entry) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "P1", json!(1), "2026-10-02")),
     )
     .await;
@@ -714,16 +714,16 @@ async fn update_entry_can_move_day() {
     let (status, updated) = json_req(
         &app,
         "PUT",
-        &format!("/entries/{eid}"),
+        &format!("/api/entries/{eid}"),
         Some(entry_body(cid, "P1", json!(1), "2026-10-03")),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(updated["date"], "2026-10-03");
     // Old day now empty, new day has it.
-    let (_, old) = json_req(&app, "GET", "/entries?date=2026-10-02", None).await;
+    let (_, old) = json_req(&app, "GET", "/api/entries?date=2026-10-02", None).await;
     assert!(old["entries"].as_array().unwrap().is_empty());
-    let (_, new) = json_req(&app, "GET", "/entries?date=2026-10-03", None).await;
+    let (_, new) = json_req(&app, "GET", "/api/entries?date=2026-10-03", None).await;
     assert_eq!(new["entries"].as_array().unwrap().len(), 1);
 }
 
@@ -737,7 +737,7 @@ async fn oversized_note_rejected() {
         "date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":1,
         "note": "x".repeat(501)
     });
-    let (status, _) = json_req(&app, "POST", "/entries", Some(body)).await;
+    let (status, _) = json_req(&app, "POST", "/api/entries", Some(body)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
@@ -750,7 +750,7 @@ async fn project_requires_currency_and_rate() {
     let (s1, b1) = json_req(
         &app,
         "POST",
-        &format!("/customers/{cid}/projects"),
+        &format!("/api/customers/{cid}/projects"),
         Some(json!({"code": "P1", "currency": "EUR"})),
     )
     .await;
@@ -759,7 +759,7 @@ async fn project_requires_currency_and_rate() {
     let (s2, _) = json_req(
         &app,
         "POST",
-        &format!("/customers/{cid}/projects"),
+        &format!("/api/customers/{cid}/projects"),
         Some(json!({"code": "P1", "rate_minor": 6000})),
     )
     .await;
@@ -788,7 +788,7 @@ async fn legacy_project_document_resolves_from_customer() {
     let (status, project) = json_req(
         &app,
         "GET",
-        &format!("/customers/{cid}/projects/OLD-1"),
+        &format!("/api/customers/{cid}/projects/OLD-1"),
         None,
     )
     .await;
@@ -796,7 +796,7 @@ async fn legacy_project_document_resolves_from_customer() {
     assert_eq!(project["currency"], "USD");
     assert_eq!(project["rate_minor"], 4500);
     // And it appears in the list with the same resolved values.
-    let (ls, list) = json_req(&app, "GET", &format!("/customers/{cid}/projects"), None).await;
+    let (ls, list) = json_req(&app, "GET", &format!("/api/customers/{cid}/projects"), None).await;
     assert_eq!(ls, StatusCode::OK);
     assert_eq!(list["projects"].as_array().unwrap().len(), 1);
 }
@@ -812,7 +812,7 @@ async fn entry_billable_defaults_true_and_persists_false() {
     let (_, def) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "P1", json!(1), "2026-10-02")),
     )
     .await;
@@ -823,10 +823,10 @@ async fn entry_billable_defaults_true_and_persists_false() {
         "date": "2026-10-03", "customer_id": cid, "project_code": "P1",
         "hours": 2, "note": "internal", "billable": false
     });
-    let (_, nb) = json_req(&app, "POST", "/entries", Some(body)).await;
+    let (_, nb) = json_req(&app, "POST", "/api/entries", Some(body)).await;
     assert_eq!(nb["billable"], false);
     let eid = nb["id"].as_str().unwrap();
-    let (_, got) = json_req(&app, "GET", &format!("/entries/{eid}"), None).await;
+    let (_, got) = json_req(&app, "GET", &format!("/api/entries/{eid}"), None).await;
     assert_eq!(got["billable"], false);
 }
 
@@ -847,7 +847,7 @@ async fn legacy_entry_document_without_billable_reads_true() {
         ),
     )
     .unwrap();
-    let (status, list) = json_req(&app, "GET", "/entries?date=2026-10-04", None).await;
+    let (status, list) = json_req(&app, "GET", "/api/entries?date=2026-10-04", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list["entries"][0]["billable"], true);
 }
@@ -861,7 +861,7 @@ async fn entry_source_defaults_manual() {
     let (_, e) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "P1", json!(1), "2026-10-02")),
     )
     .await;
@@ -884,7 +884,7 @@ async fn legacy_entry_document_without_source_reads_manual() {
         ),
     )
     .unwrap();
-    let (status, e) = json_req(&app, "GET", &format!("/entries/{id}"), None).await;
+    let (status, e) = json_req(&app, "GET", &format!("/api/entries/{id}"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(e["source"], "manual");
 }
@@ -898,7 +898,7 @@ async fn locked_entry_rejects_edit_and_delete_but_not_read() {
     let (_, e) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "P1", json!(1), "2026-10-02")),
     )
     .await;
@@ -908,11 +908,11 @@ async fn locked_entry_rejects_edit_and_delete_but_not_read() {
     // Reopen the same data dir with that entry locked (as an invoice would).
     let app2 = app_locked(d.path(), Arc::new(LockOne(Some(eid)))).await;
     let body = json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2,"billable":true});
-    let (s_edit, _) = json_req(&app2, "PUT", &format!("/entries/{eid}"), Some(body)).await;
+    let (s_edit, _) = json_req(&app2, "PUT", &format!("/api/entries/{eid}"), Some(body)).await;
     assert_eq!(s_edit, StatusCode::CONFLICT);
-    let (s_del, _) = json_req(&app2, "DELETE", &format!("/entries/{eid}"), None).await;
+    let (s_del, _) = json_req(&app2, "DELETE", &format!("/api/entries/{eid}"), None).await;
     assert_eq!(s_del, StatusCode::CONFLICT);
-    let (s_get, _) = json_req(&app2, "GET", &format!("/entries/{eid}"), None).await;
+    let (s_get, _) = json_req(&app2, "GET", &format!("/api/entries/{eid}"), None).await;
     assert_eq!(s_get, StatusCode::OK, "locked entries are still readable");
 }
 
@@ -930,7 +930,7 @@ async fn unverifiable_lock_state_refuses_writes_but_never_reads() {
     let (_, e) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(&cid, "P1", json!(1), "2026-10-02")),
     )
     .await;
@@ -942,13 +942,13 @@ async fn unverifiable_lock_state_refuses_writes_but_never_reads() {
     std::fs::write(inv_dir.join("corrupt.json"), b"{ this is not json").unwrap();
 
     let body = json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2,"billable":true});
-    let (s_edit, _) = json_req(&app, "PUT", &format!("/entries/{eid}"), Some(body)).await;
+    let (s_edit, _) = json_req(&app, "PUT", &format!("/api/entries/{eid}"), Some(body)).await;
     assert_eq!(
         s_edit,
         StatusCode::SERVICE_UNAVAILABLE,
         "edit must fail closed"
     );
-    let (s_del, _) = json_req(&app, "DELETE", &format!("/entries/{eid}"), None).await;
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/api/entries/{eid}"), None).await;
     assert_eq!(
         s_del,
         StatusCode::SERVICE_UNAVAILABLE,
@@ -957,7 +957,7 @@ async fn unverifiable_lock_state_refuses_writes_but_never_reads() {
     let (s_sub, _) = json_req(
         &app,
         "POST",
-        "/submissions",
+        "/api/submissions",
         Some(json!({"week_start": "2026-09-28"})),
     )
     .await;
@@ -966,7 +966,7 @@ async fn unverifiable_lock_state_refuses_writes_but_never_reads() {
         StatusCode::SERVICE_UNAVAILABLE,
         "submit must fail closed"
     );
-    let (s_get, _) = json_req(&app, "GET", &format!("/entries/{eid}"), None).await;
+    let (s_get, _) = json_req(&app, "GET", &format!("/api/entries/{eid}"), None).await;
     assert_eq!(s_get, StatusCode::OK, "reads are never blocked");
 }
 
@@ -985,7 +985,7 @@ async fn delete_customer_refused_when_project_docs_are_unreadable() {
         .join(format!("data/customers/{cid}/projects/P1.json"));
     std::fs::write(&project_path, b"{ this is not json").unwrap();
 
-    let (s, b) = json_req(&app, "DELETE", &format!("/customers/{cid}"), None).await;
+    let (s, b) = json_req(&app, "DELETE", &format!("/api/customers/{cid}"), None).await;
     assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{b}");
     assert!(
         d.path().join(format!("data/customers/{cid}.json")).exists(),
@@ -1017,20 +1017,20 @@ async fn concurrent_identical_webhook_records_exactly_one_payment() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap().to_string();
     let number = inv["number"].as_str().unwrap().to_string();
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
 
     // A PARTIAL (6000 of 18000) with a fixed provider event id, delivered twice
     // concurrently: a full settle would end at "already_paid" before the
@@ -1059,7 +1059,7 @@ async fn concurrent_identical_webhook_records_exactly_one_payment() {
         "second delivery must be reported as a replay: {statuses:?}"
     );
 
-    let (_s, got) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let (_s, got) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
     assert_eq!(got["status"], "partly_paid");
     let payments = got["payments"].as_array().unwrap();
     assert_eq!(
@@ -1096,7 +1096,7 @@ async fn concurrent_identical_webhook_records_exactly_one_payment() {
         [status_a, status_b].contains(&StatusCode::CONFLICT),
         "the unrecorded competing event must remain retryable: {body_a} {body_b}"
     );
-    let (_s, after_race) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let (_s, after_race) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
     let race_payments = after_race["payments"].as_array().unwrap();
     assert_eq!(
         race_payments.len(),
@@ -1125,7 +1125,7 @@ async fn new_task(app: &Client, cid: &str, pcode: &str, code: &str, extra: Value
     let (status, created) = json_req(
         app,
         "POST",
-        &format!("/customers/{cid}/projects/{pcode}/tasks"),
+        &format!("/api/customers/{cid}/projects/{pcode}/tasks"),
         Some(body),
     )
     .await;
@@ -1148,7 +1148,7 @@ async fn task_crud_and_entry_reference() {
         "date": "2026-10-02", "customer_id": cid, "project_code": "P1",
         "task_code": "T-9", "hours": 2
     });
-    let (s, e) = json_req(&app, "POST", "/entries", Some(body)).await;
+    let (s, e) = json_req(&app, "POST", "/api/entries", Some(body)).await;
     assert_eq!(s, StatusCode::CREATED, "{e}");
     assert_eq!(e["task_code"], "T-9");
 
@@ -1156,7 +1156,7 @@ async fn task_crud_and_entry_reference() {
     let (s_del, _) = json_req(
         &app,
         "DELETE",
-        &format!("/customers/{cid}/projects/P1/tasks/T-9"),
+        &format!("/api/customers/{cid}/projects/P1/tasks/T-9"),
         None,
     )
     .await;
@@ -1166,7 +1166,7 @@ async fn task_crud_and_entry_reference() {
     let (s_pdel, _) = json_req(
         &app,
         "DELETE",
-        &format!("/customers/{cid}/projects/P1"),
+        &format!("/api/customers/{cid}/projects/P1"),
         None,
     )
     .await;
@@ -1186,7 +1186,7 @@ async fn entry_task_must_belong_to_project() {
         "date": "2026-10-02", "customer_id": cid, "project_code": "P1",
         "task_code": "T1", "hours": 1
     });
-    let (s, b) = json_req(&app, "POST", "/entries", Some(body)).await;
+    let (s, b) = json_req(&app, "POST", "/api/entries", Some(body)).await;
     assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(
         b["error"]["fields"]
@@ -1223,12 +1223,12 @@ async fn reports_and_invoices_use_project_rates_for_legacy_tasks() {
         "date": "2026-10-02", "customer_id": cid, "project_code": "P1",
         "task_code": "PREM", "hours": 2
     });
-    json_req(&app, "POST", "/entries", Some(body)).await;
+    json_req(&app, "POST", "/api/entries", Some(body)).await;
     // Same project, no task -> project rate.
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":1})),
     )
     .await;
@@ -1236,7 +1236,7 @@ async fn reports_and_invoices_use_project_rates_for_legacy_tasks() {
     let (s, summary) = json_req(
         &app,
         "GET",
-        "/reports/summary?from=2026-10-01&to=2026-10-07&group=customer",
+        "/api/reports/summary?from=2026-10-01&to=2026-10-07&group=customer",
         None,
     )
     .await;
@@ -1246,7 +1246,7 @@ async fn reports_and_invoices_use_project_rates_for_legacy_tasks() {
     let (status, invoice) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({
             "customer_id": cid, "from": "2026-10-01", "to": "2026-10-07"
         })),
@@ -1271,7 +1271,7 @@ async fn tasks_reject_billing_overrides_without_persistence() {
     let cid = customer["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
     let task = new_task(&app, cid, "P1", "T1", json!({"name": "Original"})).await;
-    let base = format!("/customers/{cid}/projects/P1/tasks");
+    let base = format!("/api/customers/{cid}/projects/P1/tasks");
     for field in ["rate_minor", "currency"] {
         for method in ["POST", "PUT"] {
             let mut payload =
@@ -1302,10 +1302,10 @@ async fn tasks_reject_billing_overrides_without_persistence() {
 async fn protected_routes_require_auth() {
     let (app, _d) = app().await;
     // Unauthenticated -> 401.
-    let (s, _) = anon_req(&app, "GET", "/customers", None).await;
+    let (s, _) = anon_req(&app, "GET", "/api/customers", None).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
     // Authenticated -> 200.
-    let (s2, _) = json_req(&app, "GET", "/customers", None).await;
+    let (s2, _) = json_req(&app, "GET", "/api/customers", None).await;
     assert_eq!(s2, StatusCode::OK);
 }
 
@@ -1316,7 +1316,7 @@ async fn bootstrap_only_works_once() {
     let (s, _) = anon_req(
         &app,
         "POST",
-        "/auth/bootstrap",
+        "/api/auth/bootstrap",
         Some(json!({"name":"X","email":"x@y.co","password":"whatever12"})),
     )
     .await;
@@ -1329,7 +1329,7 @@ async fn login_rejects_bad_password_without_leaking() {
     let (s, body) = anon_req(
         &app,
         "POST",
-        "/auth/login",
+        "/api/auth/login",
         Some(json!({"email": ADMIN_EMAIL, "password": "wrong-password"})),
     )
     .await;
@@ -1339,7 +1339,7 @@ async fn login_rejects_bad_password_without_leaking() {
     let (s2, b2) = anon_req(
         &app,
         "POST",
-        "/auth/login",
+        "/api/auth/login",
         Some(json!({"email": "nobody@test.local", "password": "whatever12"})),
     )
     .await;
@@ -1350,7 +1350,7 @@ async fn login_rejects_bad_password_without_leaking() {
 #[tokio::test]
 async fn me_returns_current_user() {
     let (app, _d) = app().await;
-    let (s, me) = json_req(&app, "GET", "/auth/me", None).await;
+    let (s, me) = json_req(&app, "GET", "/api/auth/me", None).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(me["email"], ADMIN_EMAIL);
     assert_eq!(me["role"], "admin");
@@ -1367,7 +1367,7 @@ async fn member_cannot_manage_users() {
     let (s, _) = json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Pam","email":"pam@test.local","password":"memberpass1","role":"member"}),
         ),
@@ -1376,9 +1376,9 @@ async fn member_cannot_manage_users() {
     assert_eq!(s, StatusCode::CREATED);
     // Member logs in and is forbidden from /users, but can use /customers.
     let cookie = login_cookie(&app.router, "pam@test.local", "memberpass1").await;
-    let (s_users, _, _) = raw(&app.router, "GET", "/users", None, Some(&cookie)).await;
+    let (s_users, _, _) = raw(&app.router, "GET", "/api/users", None, Some(&cookie)).await;
     assert_eq!(s_users, StatusCode::FORBIDDEN);
-    let (s_cust, _, _) = raw(&app.router, "GET", "/customers", None, Some(&cookie)).await;
+    let (s_cust, _, _) = raw(&app.router, "GET", "/api/customers", None, Some(&cookie)).await;
     assert_eq!(s_cust, StatusCode::OK);
 }
 
@@ -1388,7 +1388,7 @@ async fn admin_can_update_user_and_duplicate_email_is_rejected_without_persisten
     let (s, bob) = json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({
             "name":"Bob","email":"bob@test.local","password":"bobpass123","role":"member",
             "active":true,"default_rate_minor":4500,"cost_rate_minor":2200
@@ -1401,7 +1401,7 @@ async fn admin_can_update_user_and_duplicate_email_is_rejected_without_persisten
     let (s, updated) = json_req(
         &app,
         "PUT",
-        &format!("/users/{bob_id}"),
+        &format!("/api/users/{bob_id}"),
         Some(json!({
             "name":"Bob Q","email":"bob@test.local","role":"admin","active":false,
             "default_rate_minor":5000,"cost_rate_minor":2400
@@ -1418,7 +1418,7 @@ async fn admin_can_update_user_and_duplicate_email_is_rejected_without_persisten
     let (s, _) = json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({
             "name":"Other","email":"BOB@test.local","password":"otherpass1","role":"member"
         })),
@@ -1433,7 +1433,7 @@ async fn member_cannot_update_user() {
     let (s, user) = json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Pam","email":"pam@test.local","password":"memberpass1","role":"member"}),
         ),
@@ -1444,7 +1444,7 @@ async fn member_cannot_update_user() {
     let (s, _, _) = raw(
         &app.router,
         "PUT",
-        &format!("/users/{}", user["id"].as_str().unwrap()),
+        &format!("/api/users/{}", user["id"].as_str().unwrap()),
         Some(json!({"name":"Changed"})),
         Some(&cookie),
     )
@@ -1458,7 +1458,7 @@ async fn password_change_revokes_existing_sessions_and_accepts_new_password() {
     let (s, user) = json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({
             "name":"Pam",
             "email":"pam@test.local",
@@ -1473,17 +1473,17 @@ async fn password_change_revokes_existing_sessions_and_accepts_new_password() {
     let (s, _) = json_req(
         &app,
         "PUT",
-        &format!("/users/{id}/password"),
+        &format!("/api/users/{id}/password"),
         Some(json!({ "password": "newmemberpass1" })),
     )
     .await;
     assert_eq!(s, StatusCode::NO_CONTENT);
 
-    let (s_old, _, _) = raw(&app.router, "GET", "/auth/me", None, Some(&old_cookie)).await;
+    let (s_old, _, _) = raw(&app.router, "GET", "/api/auth/me", None, Some(&old_cookie)).await;
     assert_eq!(s_old, StatusCode::UNAUTHORIZED);
 
     let new_cookie = login_cookie(&app.router, "pam@test.local", "newmemberpass1").await;
-    let (s_new, _, _) = raw(&app.router, "GET", "/auth/me", None, Some(&new_cookie)).await;
+    let (s_new, _, _) = raw(&app.router, "GET", "/api/auth/me", None, Some(&new_cookie)).await;
     assert_eq!(s_new, StatusCode::OK);
 }
 
@@ -1493,12 +1493,12 @@ async fn user_management_validation_and_authorization_persist_nothing() {
     let (_, user) = json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({"name":"QA","email":"qa@test.local","password":"qa-password1"})),
     )
     .await;
     let id = user["id"].as_str().unwrap();
-    let path = format!("/users/{id}");
+    let path = format!("/api/users/{id}");
     let store = Store::open(dir.path().join("data")).unwrap();
     let uid = uuid::Uuid::parse_str(id).unwrap();
     let before = serde_json::to_value(store.get_user(uid).unwrap().unwrap()).unwrap();
@@ -1520,7 +1520,7 @@ async fn user_management_validation_and_authorization_persist_nothing() {
             .as_object_mut()
             .unwrap()
             .extend(invalid.as_object().unwrap().clone());
-        let (status, _) = json_req(&app, "POST", "/users", Some(create)).await;
+        let (status, _) = json_req(&app, "POST", "/api/users", Some(create)).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(store.list_users().unwrap().len(), 2);
         assert_eq!(
@@ -1530,9 +1530,9 @@ async fn user_management_validation_and_authorization_persist_nothing() {
     }
     for method in ["POST", "PUT"] {
         let path = if method == "POST" {
-            "/users".to_string()
+            "/api/users".to_string()
         } else {
-            format!("/users/{id}/password")
+            format!("/api/users/{id}/password")
         };
         let payload = if method == "POST" {
             json!({"name":"New","email":"new@test.local","password":"short"})
@@ -1544,23 +1544,23 @@ async fn user_management_validation_and_authorization_persist_nothing() {
     }
     let cookie = login_cookie(&app.router, "qa@test.local", "qa-password1").await;
     for (method, path, payload) in [
-        ("GET", "/users".to_string(), None),
+        ("GET", "/api/users".to_string(), None),
         (
             "POST",
-            "/users".to_string(),
+            "/api/users".to_string(),
             Some(json!({"name":"New","email":"new@test.local","password":"initial-password1"})),
         ),
         (
             "PUT",
-            format!("/users/{id}"),
+            format!("/api/users/{id}"),
             Some(json!({"name":"Changed"})),
         ),
         (
             "PUT",
-            format!("/users/{id}/password"),
+            format!("/api/users/{id}/password"),
             Some(json!({"password":"changed-password1"})),
         ),
-        ("DELETE", format!("/users/{id}"), None),
+        ("DELETE", format!("/api/users/{id}"), None),
     ] {
         let (status, _, _) = raw(&app.router, method, &path, payload, Some(&cookie)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
@@ -1574,23 +1574,24 @@ async fn user_management_validation_and_authorization_persist_nothing() {
 #[tokio::test]
 async fn user_management_preserves_admin_history_and_revalidates_sessions() {
     let (app, dir) = app().await;
-    let (_, me) = json_req(&app, "GET", "/auth/me", None).await;
+    let (_, me) = json_req(&app, "GET", "/api/auth/me", None).await;
     let admin_id = me["id"].as_str().unwrap();
     for body in [json!({"role":"member"}), json!({"active":false})] {
-        let (status, _) = json_req(&app, "PUT", &format!("/users/{admin_id}"), Some(body)).await;
+        let (status, _) =
+            json_req(&app, "PUT", &format!("/api/users/{admin_id}"), Some(body)).await;
         assert_eq!(status, StatusCode::CONFLICT);
     }
-    let (status, _) = json_req(&app, "DELETE", &format!("/users/{admin_id}"), None).await;
+    let (status, _) = json_req(&app, "DELETE", &format!("/api/users/{admin_id}"), None).await;
     assert_eq!(status, StatusCode::CONFLICT);
     let (_, user) = json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({"name":"QA","email":"qa@test.local","password":"qa-password1"})),
     )
     .await;
     let id = user["id"].as_str().unwrap();
-    let path = format!("/users/{id}");
+    let path = format!("/api/users/{id}");
     let cookie = login_cookie(&app.router, "qa@test.local", "qa-password1").await;
     let (status, _) = json_req(
         &app,
@@ -1601,7 +1602,7 @@ async fn user_management_preserves_admin_history_and_revalidates_sessions() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        raw(&app.router, "GET", "/auth/me", None, Some(&cookie))
+        raw(&app.router, "GET", "/api/auth/me", None, Some(&cookie))
             .await
             .0,
         StatusCode::OK
@@ -1617,17 +1618,29 @@ async fn user_management_preserves_admin_history_and_revalidates_sessions() {
     assert_eq!(status, StatusCode::CONFLICT);
     json_req(&app, "PUT", &path, Some(json!({"role":"admin"}))).await;
     assert_eq!(
-        raw(&app.router, "GET", "/auth/me", None, Some(&renamed_cookie))
-            .await
-            .0,
+        raw(
+            &app.router,
+            "GET",
+            "/api/auth/me",
+            None,
+            Some(&renamed_cookie)
+        )
+        .await
+        .0,
         StatusCode::UNAUTHORIZED
     );
     let admin_cookie = login_cookie(&app.router, "renamed@test.local", "qa-password1").await;
     json_req(&app, "PUT", &path, Some(json!({"active":false}))).await;
     assert_eq!(
-        raw(&app.router, "GET", "/auth/me", None, Some(&admin_cookie))
-            .await
-            .0,
+        raw(
+            &app.router,
+            "GET",
+            "/api/auth/me",
+            None,
+            Some(&admin_cookie)
+        )
+        .await
+        .0,
         StatusCode::UNAUTHORIZED
     );
     json_req(
@@ -1644,7 +1657,7 @@ async fn user_management_preserves_admin_history_and_revalidates_sessions() {
     let (timer_status, _, _) = raw(
         &app.router,
         "POST",
-        "/timer",
+        "/api/timer",
         Some(json!({"customer_id":cid,"project_code":"P1"})),
         Some(&cookie),
     )
@@ -1655,7 +1668,7 @@ async fn user_management_preserves_admin_history_and_revalidates_sessions() {
         StatusCode::CONFLICT
     );
     assert_eq!(
-        raw(&app.router, "DELETE", "/timer", None, Some(&cookie))
+        raw(&app.router, "DELETE", "/api/timer", None, Some(&cookie))
             .await
             .0,
         StatusCode::NO_CONTENT
@@ -1663,7 +1676,7 @@ async fn user_management_preserves_admin_history_and_revalidates_sessions() {
     let (status, _, _) = raw(
         &app.router,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-06","customer_id":cid,"project_code":"P1","hours":1})),
         Some(&cookie),
     )
@@ -1678,14 +1691,14 @@ async fn user_management_preserves_admin_history_and_revalidates_sessions() {
         json_req(&app, "DELETE", &path, None).await.0,
         StatusCode::CONFLICT
     );
-    let (_, list) = json_req(&app, "GET", "/users", None).await;
+    let (_, list) = json_req(&app, "GET", "/api/users", None).await;
     assert!(!list.to_string().contains("password"));
-    let (_, disposable) = json_req(&app, "POST", "/users", Some(json!({"name":"Disposable","email":"disposable@test.local","password":"disposable-password1"}))).await;
+    let (_, disposable) = json_req(&app, "POST", "/api/users", Some(json!({"name":"Disposable","email":"disposable@test.local","password":"disposable-password1"}))).await;
     assert_eq!(
         json_req(
             &app,
             "DELETE",
-            &format!("/users/{}", disposable["id"].as_str().unwrap()),
+            &format!("/api/users/{}", disposable["id"].as_str().unwrap()),
             None
         )
         .await
@@ -1725,7 +1738,7 @@ async fn report_applies_person_rate_tier_and_attributes_entry() {
     let (_s, bob) = json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({"name":"Bob","email":"bob@test.local","password":"bobpass123","role":"member","default_rate_minor":4500})),
     )
     .await;
@@ -1736,7 +1749,7 @@ async fn report_applies_person_rate_tier_and_attributes_entry() {
     let (_s2, entry, _) = raw(
         &app.router,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
         Some(&bob_cookie),
     )
@@ -1750,7 +1763,7 @@ async fn report_applies_person_rate_tier_and_attributes_entry() {
     let (_s3, summary) = json_req(
         &app,
         "GET",
-        "/reports/summary?from=2026-10-01&to=2026-10-07&group=customer",
+        "/api/reports/summary?from=2026-10-01&to=2026-10-07&group=customer",
         None,
     )
     .await;
@@ -1769,17 +1782,17 @@ async fn invoice_sums_billable_and_ignores_nonbillable() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     // 5h NON-billable -> excluded
-    json_req(&app, "POST", "/entries", Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":5,"billable":false}))).await;
+    json_req(&app, "POST", "/api/entries", Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":5,"billable":false}))).await;
 
     let (s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -1799,7 +1812,7 @@ async fn issuing_invoice_locks_its_entries() {
     let (_, e) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
@@ -1808,7 +1821,7 @@ async fn issuing_invoice_locks_its_entries() {
     let (_, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -1818,7 +1831,7 @@ async fn issuing_invoice_locks_its_entries() {
     let (s_before, _) = json_req(
         &app,
         "PUT",
-        &format!("/entries/{eid}"),
+        &format!("/api/entries/{eid}"),
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":4})),
     )
     .await;
@@ -1829,17 +1842,17 @@ async fn issuing_invoice_locks_its_entries() {
     );
 
     // Issue -> now locked.
-    let (si, _) = json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (si, _) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     assert_eq!(si, StatusCode::OK);
     let (s_edit, body) = json_req(
         &app,
         "PUT",
-        &format!("/entries/{eid}"),
+        &format!("/api/entries/{eid}"),
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":4})),
     )
     .await;
     assert_eq!(s_edit, StatusCode::CONFLICT, "{body}");
-    let (s_del, _) = json_req(&app, "DELETE", &format!("/entries/{eid}"), None).await;
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/api/entries/{eid}"), None).await;
     assert_eq!(s_del, StatusCode::CONFLICT);
 }
 
@@ -1852,21 +1865,21 @@ async fn regeneration_excludes_invoiced_entries() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+        &format!("/api/invoices/{}/issue", inv["id"].as_str().unwrap()),
         None,
     )
     .await;
@@ -1874,7 +1887,7 @@ async fn regeneration_excludes_invoiced_entries() {
     let (s2, body) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -1891,21 +1904,21 @@ async fn invoice_rejects_mixed_currencies() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":1})),
     )
     .await;
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P2","hours":1})),
     )
     .await;
     let (s, body) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -1923,7 +1936,7 @@ async fn invoice_rejects_mixed_currencies() {
 #[tokio::test]
 async fn category_and_expense_crud_with_references() {
     let (app, _d) = app().await;
-    let (s0, defaults) = json_req(&app, "GET", "/categories", None).await;
+    let (s0, defaults) = json_req(&app, "GET", "/api/categories", None).await;
     assert_eq!(s0, StatusCode::OK);
     let default_names = defaults["categories"]
         .as_array()
@@ -1941,14 +1954,20 @@ async fn category_and_expense_crud_with_references() {
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({})).await;
 
-    let (sc, cat) = json_req(&app, "POST", "/categories", Some(json!({"name":"Travel"}))).await;
+    let (sc, cat) = json_req(
+        &app,
+        "POST",
+        "/api/categories",
+        Some(json!({"name":"Travel"})),
+    )
+    .await;
     assert_eq!(sc, StatusCode::CREATED);
     let cat_id = cat["id"].as_str().unwrap();
 
     let (su, updated) = json_req(
         &app,
         "PUT",
-        &format!("/categories/{cat_id}"),
+        &format!("/api/categories/{cat_id}"),
         Some(json!({"name":"Work travel","default_billable":true,"active":true})),
     )
     .await;
@@ -1958,7 +1977,7 @@ async fn category_and_expense_crud_with_references() {
     let (se, exp) = json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(json!({
             "date":"2026-10-02","customer_id":cid,"project_code":"P1","category_id":cat_id,
             "amount_minor":12500,"currency":"EUR","note":"flight"
@@ -1969,11 +1988,17 @@ async fn category_and_expense_crud_with_references() {
     assert_eq!(exp["billable"], true); // default
 
     // Category can't be deleted while an expense references it.
-    let (sd, _) = json_req(&app, "DELETE", &format!("/categories/{cat_id}"), None).await;
+    let (sd, _) = json_req(&app, "DELETE", &format!("/api/categories/{cat_id}"), None).await;
     assert_eq!(sd, StatusCode::CONFLICT);
 
     // Filter expenses by customer.
-    let (sf, list) = json_req(&app, "GET", &format!("/expenses?customer_id={cid}"), None).await;
+    let (sf, list) = json_req(
+        &app,
+        "GET",
+        &format!("/api/expenses?customer_id={cid}"),
+        None,
+    )
+    .await;
     assert_eq!(sf, StatusCode::OK);
     assert_eq!(list["expenses"].as_array().unwrap().len(), 1);
 }
@@ -1986,7 +2011,7 @@ async fn expense_rejects_unknown_project_and_category() {
     let (s, body) = json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(json!({
             "date":"2026-10-02","customer_id":cid,"project_code":"NOPE",
             "category_id":"00000000-0000-0000-0000-000000000000","amount_minor":100,"currency":"EUR"
@@ -2012,7 +2037,7 @@ async fn expense_receipt_roundtrips() {
     let (_, e) = json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(json!({
             "date":"2026-10-02","customer_id":cid,"amount_minor":500,"currency":"EUR",
             "receipt_name":"hotel.png","receipt_b64":"aGVsbG8="
@@ -2020,7 +2045,7 @@ async fn expense_receipt_roundtrips() {
     )
     .await;
     let eid = e["id"].as_str().unwrap();
-    let (_, got) = json_req(&app, "GET", &format!("/expenses/{eid}"), None).await;
+    let (_, got) = json_req(&app, "GET", &format!("/api/expenses/{eid}"), None).await;
     assert_eq!(got["receipt_name"], "hotel.png");
     assert_eq!(got["receipt_b64"], "aGVsbG8=");
 }
@@ -2031,7 +2056,7 @@ async fn seed_week(app: &Client, cid: &str) -> String {
     let (_, e) = json_req(
         app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
@@ -2049,7 +2074,7 @@ async fn submit_locks_and_reject_unlocks() {
     let (s, sub) = json_req(
         &app,
         "POST",
-        "/submissions",
+        "/api/submissions",
         Some(json!({"week_start":"2026-09-28"})),
     )
     .await;
@@ -2061,7 +2086,7 @@ async fn submit_locks_and_reject_unlocks() {
     let (s1, _) = json_req(
         &app,
         "PUT",
-        &format!("/entries/{eid}"),
+        &format!("/api/entries/{eid}"),
         Some(edit_body.clone()),
     )
     .await;
@@ -2071,12 +2096,12 @@ async fn submit_locks_and_reject_unlocks() {
     let (sd, _) = json_req(
         &app,
         "POST",
-        &format!("/submissions/{sid}/decision"),
+        &format!("/api/submissions/{sid}/decision"),
         Some(json!({"decision":"reject","comment":"redo"})),
     )
     .await;
     assert_eq!(sd, StatusCode::OK);
-    let (s2, _) = json_req(&app, "PUT", &format!("/entries/{eid}"), Some(edit_body)).await;
+    let (s2, _) = json_req(&app, "PUT", &format!("/api/entries/{eid}"), Some(edit_body)).await;
     assert_eq!(s2, StatusCode::OK);
 }
 
@@ -2091,7 +2116,7 @@ async fn approve_keeps_locked_and_double_submit_refused() {
     let (_, sub) = json_req(
         &app,
         "POST",
-        "/submissions",
+        "/api/submissions",
         Some(json!({"week_start":"2026-09-28"})),
     )
     .await;
@@ -2099,7 +2124,7 @@ async fn approve_keeps_locked_and_double_submit_refused() {
     json_req(
         &app,
         "POST",
-        &format!("/submissions/{sid}/decision"),
+        &format!("/api/submissions/{sid}/decision"),
         Some(json!({"decision":"approve"})),
     )
     .await;
@@ -2108,7 +2133,7 @@ async fn approve_keeps_locked_and_double_submit_refused() {
     let (s_edit, _) = json_req(
         &app,
         "PUT",
-        &format!("/entries/{eid}"),
+        &format!("/api/entries/{eid}"),
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":4})),
     )
     .await;
@@ -2118,7 +2143,7 @@ async fn approve_keeps_locked_and_double_submit_refused() {
     let (s2, _) = json_req(
         &app,
         "POST",
-        "/submissions",
+        "/api/submissions",
         Some(json!({"week_start":"2026-09-28"})),
     )
     .await;
@@ -2135,16 +2160,16 @@ async fn report_splits_billable_and_groups_by_person() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
-    json_req(&app, "POST", "/entries", Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2,"billable":false}))).await;
+    json_req(&app, "POST", "/api/entries", Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2,"billable":false}))).await;
 
     let (_, s) = json_req(
         &app,
         "GET",
-        "/reports/summary?from=2026-10-01&to=2026-10-07&group=customer",
+        "/api/reports/summary?from=2026-10-01&to=2026-10-07&group=customer",
         None,
     )
     .await;
@@ -2156,7 +2181,7 @@ async fn report_splits_billable_and_groups_by_person() {
     let (_, sb) = json_req(
         &app,
         "GET",
-        "/reports/summary?from=2026-10-01&to=2026-10-07&group=customer&billable=true",
+        "/api/reports/summary?from=2026-10-01&to=2026-10-07&group=customer&billable=true",
         None,
     )
     .await;
@@ -2166,7 +2191,7 @@ async fn report_splits_billable_and_groups_by_person() {
     let (_, sp) = json_req(
         &app,
         "GET",
-        "/reports/summary?from=2026-10-01&to=2026-10-07&group=person",
+        "/api/reports/summary?from=2026-10-01&to=2026-10-07&group=person",
         None,
     )
     .await;
@@ -2183,21 +2208,21 @@ async fn invoice_pay_flow_and_summary() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap().to_string();
 
     // Issue sets due_date (net-14).
-    let (_, issued) = json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (_, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     assert_eq!(issued["status"], "issued");
     assert!(issued["due_date"].is_string(), "issue sets a due date");
 
@@ -2205,7 +2230,7 @@ async fn invoice_pay_flow_and_summary() {
     let (_, paid) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference":"bank-123"})),
     )
     .await;
@@ -2213,7 +2238,7 @@ async fn invoice_pay_flow_and_summary() {
     assert_eq!(paid["payment_reference"], "bank-123");
 
     // Summary reflects one paid invoice, nothing outstanding.
-    let (s, sum) = json_req(&app, "GET", "/invoices/summary", None).await;
+    let (s, sum) = json_req(&app, "GET", "/api/invoices/summary", None).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(sum["paid"], 1);
     assert_eq!(sum["issued"], 0);
@@ -2232,19 +2257,19 @@ async fn member_sees_only_own_entries() {
     let (_, admin_entry) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
     )
     .await;
     let admin_eid = admin_entry["id"].as_str().unwrap().to_string();
 
     // Create member Dana and log one entry as Dana.
-    json_req(&app, "POST", "/users", Some(json!({"name":"Dana","email":"dana@test.local","password":"danapass123","role":"member"}))).await;
+    json_req(&app, "POST", "/api/users", Some(json!({"name":"Dana","email":"dana@test.local","password":"danapass123","role":"member"}))).await;
     let dana = login_cookie(&app.router, "dana@test.local", "danapass123").await;
     let (_, dana_entry, _) = raw(
         &app.router,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
         Some(&dana),
     )
@@ -2255,7 +2280,7 @@ async fn member_sees_only_own_entries() {
     let (s, list, _) = raw(
         &app.router,
         "GET",
-        "/entries?date=2026-10-02",
+        "/api/entries?date=2026-10-02",
         None,
         Some(&dana),
     )
@@ -2273,7 +2298,7 @@ async fn member_sees_only_own_entries() {
     let (s404, _, _) = raw(
         &app.router,
         "GET",
-        &format!("/entries/{admin_eid}"),
+        &format!("/api/entries/{admin_eid}"),
         None,
         Some(&dana),
     )
@@ -2281,7 +2306,7 @@ async fn member_sees_only_own_entries() {
     assert_eq!(s404, StatusCode::NOT_FOUND);
 
     // Admin sees both.
-    let (_, admin_list) = json_req(&app, "GET", "/entries?date=2026-10-02", None).await;
+    let (_, admin_list) = json_req(&app, "GET", "/api/entries?date=2026-10-02", None).await;
     assert_eq!(admin_list["entries"].as_array().unwrap().len(), 2);
 }
 
@@ -2294,7 +2319,7 @@ async fn member_cannot_invoice_or_approve() {
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
         ),
@@ -2305,7 +2330,7 @@ async fn member_cannot_invoice_or_approve() {
     let (s_inv, _, _) = raw(
         &app.router,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
         Some(&eve),
     )
@@ -2315,12 +2340,12 @@ async fn member_cannot_invoice_or_approve() {
         StatusCode::FORBIDDEN,
         "member cannot create invoices"
     );
-    let (s_users, _, _) = raw(&app.router, "GET", "/users", None, Some(&eve)).await;
+    let (s_users, _, _) = raw(&app.router, "GET", "/api/users", None, Some(&eve)).await;
     assert_eq!(s_users, StatusCode::FORBIDDEN, "member cannot list users");
     let (s_dec, _, _) = raw(
         &app.router,
         "POST",
-        "/submissions/00000000-0000-0000-0000-000000000000/decision",
+        "/api/submissions/00000000-0000-0000-0000-000000000000/decision",
         Some(json!({"decision":"approve"})),
         Some(&eve),
     )
@@ -2390,7 +2415,7 @@ async fn mutation_without_csrf_header_is_forbidden() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/customers")
+                .uri("/api/customers")
                 .header(header::COOKIE, &client.cookie)
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -2404,17 +2429,71 @@ async fn mutation_without_csrf_header_is_forbidden() {
 }
 
 #[tokio::test]
+async fn page_routes_serve_the_shell_and_never_shadow_the_api() {
+    let (app, _d) = app().await;
+    let get = |uri: &str| {
+        let router = app.router.clone();
+        let uri = uri.to_owned();
+        async move {
+            router
+                .oneshot(
+                    Request::builder()
+                        .uri(uri)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response")
+        }
+    };
+    // Page routes serve the single-page shell (case-insensitive, trailing
+    // slash ignored) so every view can be bookmarked or referenced.
+    for uri in [
+        "/",
+        "/timesheets/week",
+        "/Timesheets/Calendar/",
+        "/customers",
+        "/settings/users",
+        "/approvals",
+    ] {
+        let res = get(uri).await;
+        assert_eq!(res.status(), StatusCode::OK, "{uri}");
+        assert_eq!(
+            res.headers()[header::CONTENT_TYPE],
+            "text/html; charset=utf-8",
+            "{uri}"
+        );
+        let bytes = res.into_body().collect().await.expect("body").to_bytes();
+        assert!(
+            String::from_utf8_lossy(&bytes).starts_with("<!doctype html>"),
+            "{uri}: expected the GUI shell"
+        );
+    }
+    // The API lives under /api and keeps its session gate; page paths are
+    // allowlisted (not a blanket catch-all), and meta stays at the root.
+    let res = get("/api/customers").await;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let res = get("/healthz").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = get("/definitely/not/a/page").await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let bytes = res.into_body().collect().await.expect("body").to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).expect("json error shape");
+    assert_eq!(body["error"]["code"], "not_found");
+}
+
+#[tokio::test]
 async fn login_rate_limited_after_repeated_failures() {
     let (client, _d) = app().await;
     let body = json!({"email": "attacker@test.local", "password": "wrong"});
     let mut last = StatusCode::UNAUTHORIZED;
     // 8 failures allowed (each 401); the 9th is locked out (429).
     for _ in 0..8 {
-        let (s, _) = anon_req(&client, "POST", "/auth/login", Some(body.clone())).await;
+        let (s, _) = anon_req(&client, "POST", "/api/auth/login", Some(body.clone())).await;
         assert_eq!(s, StatusCode::UNAUTHORIZED);
         last = s;
     }
-    let (s9, _) = anon_req(&client, "POST", "/auth/login", Some(body)).await;
+    let (s9, _) = anon_req(&client, "POST", "/api/auth/login", Some(body)).await;
     assert_eq!(
         s9,
         StatusCode::TOO_MANY_REQUESTS,
@@ -2480,12 +2559,12 @@ async fn audit_log_records_login_failure() {
     let _ = anon_req(
         &client,
         "POST",
-        "/auth/login",
+        "/api/auth/login",
         Some(json!({"email":"ghost@test.local","password":"wrong"})),
     )
     .await;
     // Admin reads the audit log and sees the event.
-    let (s, body) = json_req(&client, "GET", "/audit", None).await;
+    let (s, body) = json_req(&client, "GET", "/api/audit", None).await;
     assert_eq!(s, StatusCode::OK);
     let events = body["events"].as_array().unwrap();
     assert!(
@@ -2503,20 +2582,20 @@ async fn audit_log_records_login_failure() {
 async fn logout_revokes_the_session() {
     let (client, _d) = app().await;
     // Session works.
-    let (s1, _) = json_req(&client, "GET", "/auth/me", None).await;
+    let (s1, _) = json_req(&client, "GET", "/api/auth/me", None).await;
     assert_eq!(s1, StatusCode::OK);
     // Log out (CSRF header is sent by raw()).
     let (s2, _, _) = raw(
         &client.router,
         "POST",
-        "/auth/logout",
+        "/api/auth/logout",
         None,
         Some(&client.cookie),
     )
     .await;
     assert_eq!(s2, StatusCode::NO_CONTENT);
     // The same cookie is now revoked.
-    let (s3, _) = json_req(&client, "GET", "/auth/me", None).await;
+    let (s3, _) = json_req(&client, "GET", "/api/auth/me", None).await;
     assert_eq!(
         s3,
         StatusCode::UNAUTHORIZED,
@@ -2534,19 +2613,19 @@ async fn invoice_includes_billable_expenses_and_locks_them() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
     )
     .await;
     // billable expense 50.00 = 5000
-    let (_, exp) = json_req(&app, "POST", "/expenses", Some(json!({"date":"2026-10-03","customer_id":cid,"project_code":"P1","amount_minor":5000,"currency":"EUR"}))).await;
+    let (_, exp) = json_req(&app, "POST", "/api/expenses", Some(json!({"date":"2026-10-03","customer_id":cid,"project_code":"P1","amount_minor":5000,"currency":"EUR"}))).await;
     let xid = exp["id"].as_str().unwrap().to_string();
 
     // Invoice includes both -> 12000 + 5000 = 17000, two lines of different kinds.
     let (_, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -2566,11 +2645,11 @@ async fn invoice_includes_billable_expenses_and_locks_them() {
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+        &format!("/api/invoices/{}/issue", inv["id"].as_str().unwrap()),
         None,
     )
     .await;
-    let (s_del, _) = json_req(&app, "DELETE", &format!("/expenses/{xid}"), None).await;
+    let (s_del, _) = json_req(&app, "DELETE", &format!("/api/expenses/{xid}"), None).await;
     assert_eq!(
         s_del,
         StatusCode::CONFLICT,
@@ -2587,18 +2666,18 @@ async fn invoice_can_exclude_expenses() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
     )
     .await;
     json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(json!({"date":"2026-10-03","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
     )
     .await;
-    let (_, inv) = json_req(&app, "POST", "/invoices", Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07","include_expenses":false}))).await;
+    let (_, inv) = json_req(&app, "POST", "/api/invoices", Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07","include_expenses":false}))).await;
     assert_eq!(inv["total_minor"], 12000, "expenses excluded");
     assert!(
         inv["lines"]
@@ -2616,13 +2695,13 @@ async fn profitability_revenue_vs_cost() {
     let cid = c["id"].as_str().unwrap();
     new_project(&app, cid, "P1", json!({"rate_minor": 6000})).await;
     // Bob: cost rate 20/h.
-    json_req(&app, "POST", "/users", Some(json!({"name":"Bob","email":"bob@t.local","password":"bobpass123","role":"member","cost_rate_minor":2000}))).await;
+    json_req(&app, "POST", "/api/users", Some(json!({"name":"Bob","email":"bob@t.local","password":"bobpass123","role":"member","cost_rate_minor":2000}))).await;
     let bob = login_cookie(&app.router, "bob@t.local", "bobpass123").await;
     // Bob logs 2h billable (revenue 2x60=12000, labour cost 2x20=4000).
     raw(
         &app.router,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
         Some(&bob),
     )
@@ -2631,7 +2710,7 @@ async fn profitability_revenue_vs_cost() {
     json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(json!({"date":"2026-10-03","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
     )
     .await;
@@ -2639,14 +2718,14 @@ async fn profitability_revenue_vs_cost() {
     let (_, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+        &format!("/api/invoices/{}/issue", inv["id"].as_str().unwrap()),
         None,
     )
     .await;
@@ -2654,7 +2733,7 @@ async fn profitability_revenue_vs_cost() {
     let (s, prof) = json_req(
         &app,
         "GET",
-        "/reports/profitability?from=2026-10-01&to=2026-10-31",
+        "/api/reports/profitability?from=2026-10-01&to=2026-10-31",
         None,
     )
     .await;
@@ -2679,21 +2758,21 @@ async fn invoice_report_and_export() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+        &format!("/api/invoices/{}/issue", inv["id"].as_str().unwrap()),
         None,
     )
     .await;
@@ -2701,7 +2780,7 @@ async fn invoice_report_and_export() {
     let (s, rep) = json_req(
         &app,
         "GET",
-        "/invoices/report?from=2026-10-01&to=2026-10-31",
+        "/api/invoices/report?from=2026-10-01&to=2026-10-31",
         None,
     )
     .await;
@@ -2712,7 +2791,7 @@ async fn invoice_report_and_export() {
     assert_eq!(row["label"], "ACME");
     assert_eq!(row["revenue_minor"], 18000);
 
-    let (s2, csv) = json_req(&app, "GET", "/invoices/export.csv", None).await;
+    let (s2, csv) = json_req(&app, "GET", "/api/invoices/export.csv", None).await;
     assert_eq!(s2, StatusCode::OK);
     let text = csv.as_str().unwrap();
     assert!(text.starts_with("number,customer,"), "csv header: {text}");
@@ -2739,7 +2818,7 @@ async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
         let (s, e) = json_req(
             &app,
             "POST",
-            "/entries",
+            "/api/entries",
             Some(entry_body(&cid, proj, json!(hours), "2026-10-02")),
         )
         .await;
@@ -2750,7 +2829,7 @@ async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
         let (s, rep) = json_req(
             &app,
             "GET",
-            &format!("/reports/summary?from=2026-10-01&to=2026-10-07&group={group}"),
+            &format!("/api/reports/summary?from=2026-10-01&to=2026-10-07&group={group}"),
             None,
         )
         .await;
@@ -2781,7 +2860,7 @@ async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
         let (_, inv) = json_req(
             &app,
             "POST",
-            "/invoices",
+            "/api/invoices",
             Some(json!({
                 "customer_id": cid,
                 "from": "2026-10-01",
@@ -2795,7 +2874,7 @@ async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
         json_req(
             &app,
             "POST",
-            &format!("/invoices/{}/issue", inv["id"].as_str().unwrap()),
+            &format!("/api/invoices/{}/issue", inv["id"].as_str().unwrap()),
             None,
         )
         .await;
@@ -2803,7 +2882,7 @@ async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
     let (_s, rep) = json_req(
         &app,
         "GET",
-        "/invoices/report?from=2026-10-01&to=2026-10-31",
+        "/api/invoices/report?from=2026-10-01&to=2026-10-31",
         None,
     )
     .await;
@@ -2815,7 +2894,7 @@ async fn reports_partition_by_currency_and_never_sum_cents_across_it() {
     let (_s, prof) = json_req(
         &app,
         "GET",
-        "/reports/profitability?from=2026-10-01&to=2026-10-31",
+        "/api/reports/profitability?from=2026-10-01&to=2026-10-31",
         None,
     )
     .await;
@@ -2836,14 +2915,14 @@ async fn reimbursement_claim_lifecycle_locks_expenses() {
     let (_, e1) = json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(json!({"date":"2026-10-02","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
     )
     .await;
     let (_, e2) = json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(json!({"date":"2026-10-03","customer_id":cid,"amount_minor":3000,"currency":"EUR"})),
     )
     .await;
@@ -2853,7 +2932,7 @@ async fn reimbursement_claim_lifecycle_locks_expenses() {
     let (s, claim) = json_req(
         &app,
         "POST",
-        "/claims",
+        "/api/claims",
         Some(json!({"title":"Oct costs","expense_ids":ids})),
     )
     .await;
@@ -2865,7 +2944,7 @@ async fn reimbursement_claim_lifecycle_locks_expenses() {
 
     // Draft does not lock; submit then it locks.
     assert_eq!(
-        json_req(&app, "DELETE", &format!("/expenses/{xid}"), None)
+        json_req(&app, "DELETE", &format!("/api/expenses/{xid}"), None)
             .await
             .0,
         StatusCode::NO_CONTENT
@@ -2874,7 +2953,7 @@ async fn reimbursement_claim_lifecycle_locks_expenses() {
     let (_, e1b) = json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(json!({"date":"2026-10-02","customer_id":cid,"amount_minor":5000,"currency":"EUR"})),
     )
     .await;
@@ -2882,14 +2961,14 @@ async fn reimbursement_claim_lifecycle_locks_expenses() {
     let (_, claim2) = json_req(
         &app,
         "POST",
-        "/claims",
+        "/api/claims",
         Some(json!({"title":"Oct costs","expense_ids":[e1b["id"], e2["id"]]})),
     )
     .await;
     let cid2 = claim2["id"].as_str().unwrap().to_string();
-    json_req(&app, "POST", &format!("/claims/{cid2}/submit"), None).await;
+    json_req(&app, "POST", &format!("/api/claims/{cid2}/submit"), None).await;
     assert_eq!(
-        json_req(&app, "DELETE", &format!("/expenses/{xid}"), None)
+        json_req(&app, "DELETE", &format!("/api/expenses/{xid}"), None)
             .await
             .0,
         StatusCode::CONFLICT,
@@ -2900,7 +2979,7 @@ async fn reimbursement_claim_lifecycle_locks_expenses() {
     let (sd, decided) = json_req(
         &app,
         "POST",
-        &format!("/claims/{cid2}/decision"),
+        &format!("/api/claims/{cid2}/decision"),
         Some(json!({"decision":"approve"})),
     )
     .await;
@@ -2951,7 +3030,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     raw(
         &router,
         "POST",
-        "/auth/bootstrap",
+        "/api/auth/bootstrap",
         Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
         None,
     )
@@ -2961,7 +3040,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     raw(
         &router,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({"name":"M","email":"m@t.local","password":"memberpass1","role":"member"})),
         Some(&admin),
     )
@@ -2972,14 +3051,14 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s, _, _) = raw(
         &router,
         "PUT",
-        "/admin/secrets/stripe.secret_key",
+        "/api/admin/secrets/stripe.secret_key",
         Some(json!({"value":"dummy-secret-value-1234"})),
         Some(&admin),
     )
     .await;
     assert_eq!(s, StatusCode::NO_CONTENT);
     // list shows masked hint, never the value
-    let (s2, list, _) = raw(&router, "GET", "/admin/secrets", None, Some(&admin)).await;
+    let (s2, list, _) = raw(&router, "GET", "/api/admin/secrets", None, Some(&admin)).await;
     assert_eq!(s2, StatusCode::OK);
     let text = serde_json::to_string(&list).unwrap();
     assert!(text.contains("stripe.secret_key"), "{text}");
@@ -2996,7 +3075,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s3, _, _) = raw(
         &router,
         "PUT",
-        "/admin/secrets/x",
+        "/api/admin/secrets/x",
         Some(json!({"value":"y"})),
         Some(&member),
     )
@@ -3006,7 +3085,7 @@ async fn secret_vault_endpoints_mask_and_authorize() {
     let (s4, _, _) = raw(
         &router,
         "DELETE",
-        "/admin/secrets/stripe.secret_key",
+        "/api/admin/secrets/stripe.secret_key",
         None,
         Some(&admin),
     )
@@ -3025,7 +3104,7 @@ async fn timer_start_stop_creates_entry() {
     let (s, timer) = json_req(
         &app,
         "POST",
-        "/timer",
+        "/api/timer",
         Some(json!({"customer_id":cid,"project_code":"P1","note":"focus"})),
     )
     .await;
@@ -3035,7 +3114,7 @@ async fn timer_start_stop_creates_entry() {
         json_req(
             &app,
             "POST",
-            "/timer",
+            "/api/timer",
             Some(json!({"customer_id":cid,"project_code":"P1"}))
         )
         .await
@@ -3043,16 +3122,16 @@ async fn timer_start_stop_creates_entry() {
         StatusCode::CONFLICT
     );
     // Get shows it running.
-    let (sg, cur) = json_req(&app, "GET", "/timer", None).await;
+    let (sg, cur) = json_req(&app, "GET", "/api/timer", None).await;
     assert_eq!(sg, StatusCode::OK);
     assert_eq!(cur["timer"]["project_code"], "P1");
     // Stop -> creates a timer-sourced entry.
-    let (ss, entry) = json_req(&app, "POST", "/timer/stop", None).await;
+    let (ss, entry) = json_req(&app, "POST", "/api/timer/stop", None).await;
     assert_eq!(ss, StatusCode::OK, "{entry}");
     assert_eq!(entry["source"], "timer");
     assert_eq!(entry["project_code"], "P1");
     // Timer cleared.
-    let (_, none) = json_req(&app, "GET", "/timer", None).await;
+    let (_, none) = json_req(&app, "GET", "/api/timer", None).await;
     assert!(none.is_null());
 }
 
@@ -3103,7 +3182,7 @@ async fn calendar_events_from_configured_feed() {
     raw(
         &router,
         "POST",
-        "/auth/bootstrap",
+        "/api/auth/bootstrap",
         Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
         None,
     )
@@ -3113,7 +3192,7 @@ async fn calendar_events_from_configured_feed() {
     let (s, body, _) = raw(
         &router,
         "GET",
-        "/calendar/events?from=2026-10-01&to=2026-10-07",
+        "/api/calendar/events?from=2026-10-01&to=2026-10-07",
         None,
         Some(&admin),
     )
@@ -3127,11 +3206,11 @@ async fn calendar_events_from_configured_feed() {
 #[tokio::test]
 async fn notifications_endpoint_empty_then_read() {
     let (app, _d) = app().await;
-    let (s, body) = json_req(&app, "GET", "/notifications", None).await;
+    let (s, body) = json_req(&app, "GET", "/api/notifications", None).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body["notifications"].as_array().unwrap().len(), 0);
     assert_eq!(body["unread"], 0);
-    let (s2, _) = json_req(&app, "POST", "/notifications/read", None).await;
+    let (s2, _) = json_req(&app, "POST", "/api/notifications/read", None).await;
     assert_eq!(s2, StatusCode::NO_CONTENT);
 }
 
@@ -3165,7 +3244,7 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
             )
             .unwrap();
     }
-    let (status, before) = json_req(&app, "GET", "/notifications", None).await;
+    let (status, before) = json_req(&app, "GET", "/api/notifications", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(before["notifications"].as_array().unwrap().len(), 2);
     assert_eq!(before["unread"], 2);
@@ -3175,7 +3254,7 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
     let (created, _) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({
             "date": now.date_naive().to_string(),
             "customer_id": cid,
@@ -3185,7 +3264,7 @@ async fn notifications_hide_stale_and_resolved_no_time_reminders() {
     )
     .await;
     assert_eq!(created, StatusCode::CREATED);
-    let (_, after) = json_req(&app, "GET", "/notifications", None).await;
+    let (_, after) = json_req(&app, "GET", "/api/notifications", None).await;
     let notifications = after["notifications"].as_array().unwrap();
     assert_eq!(notifications.len(), 1);
     assert_eq!(notifications[0]["kind"], "submit_timesheet");
@@ -3197,29 +3276,29 @@ async fn schedule_crud_admin_only() {
     let (app, _d) = app().await;
     let c = new_customer(&app, "ACME", "EUR", 6000).await;
     let cid = c["id"].as_str().unwrap();
-    let (s, sched) = json_req(&app, "POST", "/schedules", Some(json!({"customer_id":cid,"cadence":"monthly","mode":"retainer","retainer_amount_minor":150000,"currency":"EUR"}))).await;
+    let (s, sched) = json_req(&app, "POST", "/api/schedules", Some(json!({"customer_id":cid,"cadence":"monthly","mode":"retainer","retainer_amount_minor":150000,"currency":"EUR"}))).await;
     assert_eq!(s, StatusCode::CREATED, "{sched}");
     let sid = sched["id"].as_str().unwrap().to_string();
-    let (sl, list) = json_req(&app, "GET", "/schedules", None).await;
+    let (sl, list) = json_req(&app, "GET", "/api/schedules", None).await;
     assert_eq!(sl, StatusCode::OK);
     assert_eq!(list["schedules"].as_array().unwrap().len(), 1);
     // Retainer with 0 amount rejected.
-    let (sz, _) = json_req(&app, "POST", "/schedules", Some(json!({"customer_id":cid,"cadence":"monthly","mode":"retainer","retainer_amount_minor":0,"currency":"EUR"}))).await;
+    let (sz, _) = json_req(&app, "POST", "/api/schedules", Some(json!({"customer_id":cid,"cadence":"monthly","mode":"retainer","retainer_amount_minor":0,"currency":"EUR"}))).await;
     assert_eq!(sz, StatusCode::UNPROCESSABLE_ENTITY);
     // Member forbidden (admin tier).
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({"name":"N","email":"n@t.local","password":"memberpass1","role":"member"})),
     )
     .await;
     let member = login_cookie(&app.router, "n@t.local", "memberpass1").await;
-    let (sm, _, _) = raw(&app.router, "GET", "/schedules", None, Some(&member)).await;
+    let (sm, _, _) = raw(&app.router, "GET", "/api/schedules", None, Some(&member)).await;
     assert_eq!(sm, StatusCode::FORBIDDEN);
     // Delete.
     assert_eq!(
-        json_req(&app, "DELETE", &format!("/schedules/{sid}"), None)
+        json_req(&app, "DELETE", &format!("/api/schedules/{sid}"), None)
             .await
             .0,
         StatusCode::NO_CONTENT
@@ -3241,12 +3320,12 @@ async fn budget_report_shows_burn() {
     let (s, _) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(cid, "P1", json!(6), "2026-10-02")),
     )
     .await;
     assert_eq!(s, StatusCode::CREATED);
-    let (sb, body) = json_req(&app, "GET", "/reports/budgets", None).await;
+    let (sb, body) = json_req(&app, "GET", "/api/reports/budgets", None).await;
     assert_eq!(sb, StatusCode::OK);
     let rows = body["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 1);
@@ -3265,7 +3344,7 @@ async fn invoice_email_sends_to_customer() {
     let (sc, cust) = json_req(
         &app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
     )
     .await;
@@ -3276,25 +3355,25 @@ async fn invoice_email_sends_to_customer() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap();
 
     // Draft invoices must be issued before emailing.
-    let (sd, _) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    let (sd, _) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(sd, StatusCode::CONFLICT);
 
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
-    let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK, "{body}");
     assert_eq!(body["sent_to"], "billing@acme.test");
     // #130: the result names the transport; the test recorder never claims smtp.
@@ -3318,20 +3397,20 @@ async fn invoice_email_without_customer_email_is_422() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap();
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
-    let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(app.email.messages().len(), 0);
 }
@@ -3346,7 +3425,7 @@ async fn webhook_post(
 ) -> (StatusCode, Value) {
     let mut b = Request::builder()
         .method("POST")
-        .uri(format!("/payments/webhook/{provider}"))
+        .uri(format!("/api/payments/webhook/{provider}"))
         .header("content-type", "application/json");
     if let Some(s) = signature {
         b = b.header("x-webhook-signature", s);
@@ -3380,14 +3459,14 @@ async fn checkout_then_signed_webhook_marks_invoice_paid() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -3398,19 +3477,19 @@ async fn checkout_then_signed_webhook_marks_invoice_paid() {
     let (sd, _) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/checkout"),
+        &format!("/api/invoices/{iid}/checkout"),
         Some(json!({"provider":"stripe"})),
     )
     .await;
     assert_eq!(sd, StatusCode::CONFLICT);
 
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
 
     // Unknown provider rejected.
     let (su, _) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/checkout"),
+        &format!("/api/invoices/{iid}/checkout"),
         Some(json!({"provider":"bitcoin"})),
     )
     .await;
@@ -3420,7 +3499,7 @@ async fn checkout_then_signed_webhook_marks_invoice_paid() {
     let (sc, session) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/checkout"),
+        &format!("/api/invoices/{iid}/checkout"),
         Some(json!({"provider":"stripe"})),
     )
     .await;
@@ -3443,7 +3522,7 @@ async fn checkout_then_signed_webhook_marks_invoice_paid() {
     let (sgood, body) = webhook_post(&app.router, "stripe", &payload, Some(&sig)).await;
     assert_eq!(sgood, StatusCode::OK, "{body}");
     assert_eq!(body["status"], "paid");
-    let (_s2, got) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let (_s2, got) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
     assert_eq!(got["status"], "paid");
     assert!(
         got["payment_reference"]
@@ -3480,24 +3559,24 @@ async fn webhook_partial_settles_partly_and_mismatch_stays_refused() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap().to_string();
     let number = inv["number"].as_str().unwrap().to_string();
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     let (_s2, session) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/checkout"),
+        &format!("/api/invoices/{iid}/checkout"),
         Some(json!({"provider":"stripe"})),
     )
     .await;
@@ -3531,7 +3610,7 @@ async fn webhook_partial_settles_partly_and_mismatch_stays_refused() {
     let (sp, bp) = webhook_post(&app.router, "stripe", &partial, Some(&sig)).await;
     assert_eq!(sp, StatusCode::OK, "{bp}");
     assert_eq!(bp["status"], "partly_paid");
-    let (_s3, mid) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let (_s3, mid) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
     assert_eq!(
         mid["status"], "partly_paid",
         "partial does not fully settle"
@@ -3544,7 +3623,7 @@ async fn webhook_partial_settles_partly_and_mismatch_stays_refused() {
     let (sr, br) = webhook_post(&app.router, "stripe", &partial, Some(&sig)).await;
     assert_eq!(sr, StatusCode::OK, "{br}");
     assert_eq!(br["status"], "already_processed");
-    let (_s4, mid2) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let (_s4, mid2) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
     assert_eq!(
         mid2["payments"].as_array().unwrap().len(),
         1,
@@ -3609,14 +3688,14 @@ async fn accounting_sync_idempotent_with_visible_status() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -3626,19 +3705,19 @@ async fn accounting_sync_idempotent_with_visible_status() {
     let (sd, _) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/sync"),
+        &format!("/api/invoices/{iid}/sync"),
         Some(json!({"provider":"qbo"})),
     )
     .await;
     assert_eq!(sd, StatusCode::CONFLICT);
 
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
 
     // Unknown provider -> 400.
     let (su, _) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/sync"),
+        &format!("/api/invoices/{iid}/sync"),
         Some(json!({"provider":"sage"})),
     )
     .await;
@@ -3648,7 +3727,7 @@ async fn accounting_sync_idempotent_with_visible_status() {
     let (ss, body) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/sync"),
+        &format!("/api/invoices/{iid}/sync"),
         Some(json!({"provider":"qbo"})),
     )
     .await;
@@ -3666,7 +3745,7 @@ async fn accounting_sync_idempotent_with_visible_status() {
     let (s2, b2) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/sync"),
+        &format!("/api/invoices/{iid}/sync"),
         Some(json!({"provider":"qbo"})),
     )
     .await;
@@ -3675,7 +3754,7 @@ async fn accounting_sync_idempotent_with_visible_status() {
     assert_eq!(t.posts.lock().unwrap().len(), posts_before);
 
     // Visible status lists the record + enabled providers.
-    let (sv, status) = json_req(&app, "GET", "/sync/accounting", None).await;
+    let (sv, status) = json_req(&app, "GET", "/api/sync/accounting", None).await;
     assert_eq!(sv, StatusCode::OK);
     assert_eq!(status["providers"].as_array().unwrap(), &vec![json!("qbo")]);
     assert_eq!(status["records"].as_array().unwrap().len(), 1);
@@ -3684,14 +3763,14 @@ async fn accounting_sync_idempotent_with_visible_status() {
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference":"bank-transfer"})),
     )
     .await;
     let (_s3, b3) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/sync"),
+        &format!("/api/invoices/{iid}/sync"),
         Some(json!({"provider":"qbo"})),
     )
     .await;
@@ -3706,7 +3785,7 @@ async fn accounting_sync_idempotent_with_visible_status() {
     let (_s4, b4) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/sync"),
+        &format!("/api/invoices/{iid}/sync"),
         Some(json!({"provider":"qbo"})),
     )
     .await;
@@ -3735,25 +3814,25 @@ async fn accounting_sync_failure_is_recorded_not_fatal() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":2})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap().to_string();
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
 
     // First sync fails at the transport -> 200 with a recorded failure.
     let (sf, body) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/sync"),
+        &format!("/api/invoices/{iid}/sync"),
         Some(json!({"provider":"qbo"})),
     )
     .await;
@@ -3763,7 +3842,7 @@ async fn accounting_sync_failure_is_recorded_not_fatal() {
     // #190: the persisted/serialised error is a stable marker; the raw
     // transport text ("stub offline") stays in the server log only.
     assert_eq!(body["record"]["error"], "sync failed (see server log)");
-    let (_sv, st) = json_req(&app, "GET", "/sync/accounting", None).await;
+    let (_sv, st) = json_req(&app, "GET", "/api/sync/accounting", None).await;
     assert!(
         !st.to_string().contains("stub offline"),
         "sync_status must not echo provider detail: {st}"
@@ -3774,7 +3853,7 @@ async fn accounting_sync_failure_is_recorded_not_fatal() {
     let (sr, body2) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/sync"),
+        &format!("/api/invoices/{iid}/sync"),
         Some(json!({"provider":"qbo"})),
     )
     .await;
@@ -3809,7 +3888,7 @@ async fn sso_jit_provisions_and_logs_in() {
     let (sa, _, _) = raw(
         &router,
         "POST",
-        "/auth/bootstrap",
+        "/api/auth/bootstrap",
         Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
         None,
     )
@@ -3817,7 +3896,7 @@ async fn sso_jit_provisions_and_logs_in() {
     assert_eq!(sa, StatusCode::CREATED);
 
     // Providers are advertised pre-session.
-    let (s, body, _) = raw(&router, "GET", "/auth/sso/providers", None, None).await;
+    let (s, body, _) = raw(&router, "GET", "/api/auth/sso/providers", None, None).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(
         body["providers"].as_array().unwrap(),
@@ -3838,7 +3917,7 @@ async fn sso_jit_provisions_and_logs_in() {
     let (s1, user, _) = raw(
         &router,
         "POST",
-        "/auth/sso/assertion",
+        "/api/auth/sso/assertion",
         Some(json!({"provider":"okta-test","payload":token,"signature":""})),
         None,
     )
@@ -3852,14 +3931,14 @@ async fn sso_jit_provisions_and_logs_in() {
         let (_s, _b, c) = raw(
             &router,
             "POST",
-            "/auth/sso/assertion",
+            "/api/auth/sso/assertion",
             Some(json!({"provider":"okta-test","payload":token,"signature":""})),
             None,
         )
         .await;
         c.unwrap_or_default()
     };
-    let (sm, me, _) = raw(&router, "GET", "/auth/me", None, Some(&cookie)).await;
+    let (sm, me, _) = raw(&router, "GET", "/api/auth/me", None, Some(&cookie)).await;
     assert_eq!(sm, StatusCode::OK, "{me}");
     assert_eq!(me["name"], "New Bie");
 
@@ -3867,7 +3946,7 @@ async fn sso_jit_provisions_and_logs_in() {
     let (sb, _, _) = raw(
         &router,
         "POST",
-        "/auth/sso/assertion",
+        "/api/auth/sso/assertion",
         Some(json!({"provider":"okta-test","payload":"aGVhZGVy.cGF5bG9hZC5mb3JnZWQ.bad","signature":""})),
         None,
     )
@@ -3878,7 +3957,7 @@ async fn sso_jit_provisions_and_logs_in() {
     let (sl, _, _) = raw(
         &router,
         "POST",
-        "/auth/login",
+        "/api/auth/login",
         Some(json!({"email":ADMIN_EMAIL,"password":ADMIN_PW})),
         None,
     )
@@ -3892,7 +3971,7 @@ async fn sso_unknown_provider_is_400() {
     let (s, _) = json_req(
         &app,
         "POST",
-        "/auth/sso/assertion",
+        "/api/auth/sso/assertion",
         Some(json!({"provider":"nope","payload":"x","signature":""})),
     )
     .await;
@@ -3904,18 +3983,30 @@ async fn sso_unknown_provider_is_400() {
 async fn calendar_oauth_start_and_callback_plumbing() {
     let (app, _d) = app().await;
     // No client id configured (no vault in this test app) -> 422.
-    let (s1, b1) = json_req(&app, "GET", "/calendar/oauth/start?provider=google", None).await;
+    let (s1, b1) = json_req(
+        &app,
+        "GET",
+        "/api/calendar/oauth/start?provider=google",
+        None,
+    )
+    .await;
     assert_eq!(s1, StatusCode::UNPROCESSABLE_ENTITY, "{b1}");
 
     // Unknown provider -> 400.
-    let (s2, _) = json_req(&app, "GET", "/calendar/oauth/start?provider=yahoo", None).await;
+    let (s2, _) = json_req(
+        &app,
+        "GET",
+        "/api/calendar/oauth/start?provider=yahoo",
+        None,
+    )
+    .await;
     assert_eq!(s2, StatusCode::BAD_REQUEST);
 
     // Callback with a state we never issued -> 401 (CSRF state is the defence).
     let (s3, b3) = json_req(
         &app,
         "GET",
-        "/calendar/oauth/callback?code=abc&state=forged",
+        "/api/calendar/oauth/callback?code=abc&state=forged",
         None,
     )
     .await;
@@ -3925,7 +4016,7 @@ async fn calendar_oauth_start_and_callback_plumbing() {
     let (s4, _) = json_req(
         &app,
         "GET",
-        "/calendar/events?from=2026-10-01&to=2026-10-07",
+        "/api/calendar/events?from=2026-10-01&to=2026-10-07",
         None,
     )
     .await;
@@ -3936,7 +4027,7 @@ async fn calendar_oauth_start_and_callback_plumbing() {
 async fn admin_config_roundtrip_precedence_and_guards() {
     let (app, d) = app().await;
     // Effective view: everything starts at its default source.
-    let (s1, body) = json_req(&app, "GET", "/admin/config", None).await;
+    let (s1, body) = json_req(&app, "GET", "/api/admin/config", None).await;
     assert_eq!(s1, StatusCode::OK, "{body}");
     // #190: no on-disk path is serialised (AGENTS.md: responses never expose
     // paths). The old `path` key leaked `<data>/config.json`.
@@ -3964,7 +4055,7 @@ async fn admin_config_roundtrip_precedence_and_guards() {
     let (s3, body3) = json_req(
         &app,
         "PUT",
-        "/admin/config",
+        "/api/admin/config",
         Some(json!({"reminder_days": 15, "sso_admin_group": "tt-admins"})),
     )
     .await;
@@ -3973,7 +4064,7 @@ async fn admin_config_roundtrip_precedence_and_guards() {
     let cfg_file = d.path().join("data").join("config.json");
     let persisted = std::fs::read_to_string(&cfg_file).unwrap();
     assert!(persisted.contains("reminder_days"), "{persisted}");
-    let (_s4, eff) = json_req(&app, "GET", "/admin/config", None).await;
+    let (_s4, eff) = json_req(&app, "GET", "/api/admin/config", None).await;
     let days2 = eff["config"]
         .as_array()
         .unwrap()
@@ -3987,24 +4078,30 @@ async fn admin_config_roundtrip_precedence_and_guards() {
     let (s5, b5) = json_req(
         &app,
         "PUT",
-        "/admin/config",
+        "/api/admin/config",
         Some(json!({"smtp.password": "hunter2"})),
     )
     .await;
     assert_eq!(s5, StatusCode::UNPROCESSABLE_ENTITY, "{b5}");
-    let (s6, _) = json_req(&app, "PUT", "/admin/config", Some(json!({"max_docs": 2}))).await;
+    let (s6, _) = json_req(
+        &app,
+        "PUT",
+        "/api/admin/config",
+        Some(json!({"max_docs": 2})),
+    )
+    .await;
     assert_eq!(s6, StatusCode::UNPROCESSABLE_ENTITY, "out of range refused");
 
     // Members cannot see or edit configuration (admin tier).
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({"name":"N","email":"cfgmember@t.local","password":"memberpass1","role":"member"})),
     )
     .await;
     let member = login_cookie(&app.router, "cfgmember@t.local", "memberpass1").await;
-    let (sm, _, _) = raw(&app.router, "GET", "/admin/config", None, Some(&member)).await;
+    let (sm, _, _) = raw(&app.router, "GET", "/api/admin/config", None, Some(&member)).await;
     assert_eq!(sm, StatusCode::FORBIDDEN);
 }
 
@@ -4012,7 +4109,7 @@ async fn admin_config_roundtrip_precedence_and_guards() {
 async fn config_file_changes_request_time_behaviour_without_restart() {
     // #94: request-time knobs (SSO admin group) read the live config.
     let (app, _d) = app().await;
-    let (_s, eff) = json_req(&app, "GET", "/admin/config", None).await;
+    let (_s, eff) = json_req(&app, "GET", "/api/admin/config", None).await;
     let grp = eff["config"]
         .as_array()
         .unwrap()
@@ -4023,11 +4120,11 @@ async fn config_file_changes_request_time_behaviour_without_restart() {
     json_req(
         &app,
         "PUT",
-        "/admin/config",
+        "/api/admin/config",
         Some(json!({"sso_admin_group": "finance-admins"})),
     )
     .await;
-    let (_s2, eff2) = json_req(&app, "GET", "/admin/config", None).await;
+    let (_s2, eff2) = json_req(&app, "GET", "/api/admin/config", None).await;
     let grp2 = eff2["config"]
         .as_array()
         .unwrap()
@@ -4045,12 +4142,12 @@ async fn management_reports_are_admin_only() {
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(json!({"name":"M","email":"repmember@t.local","password":"memberpass1","role":"member"})),
     )
     .await;
     let member = login_cookie(&app.router, "repmember@t.local", "memberpass1").await;
-    for path in ["/reports/profitability", "/reports/budgets"] {
+    for path in ["/api/reports/profitability", "/api/reports/budgets"] {
         let (s, _, _) = raw(&app.router, "GET", path, None, Some(&member)).await;
         assert_eq!(s, StatusCode::FORBIDDEN, "{path} must be admin-only");
     }
@@ -4058,7 +4155,7 @@ async fn management_reports_are_admin_only() {
     let (s, _, _) = raw(
         &app.router,
         "GET",
-        "/reports/summary?from=2026-10-01&to=2026-10-07",
+        "/api/reports/summary?from=2026-10-01&to=2026-10-07",
         None,
         Some(&member),
     )
@@ -4073,7 +4170,7 @@ async fn sso_assertion_is_csrf_exempt_pre_session() {
     let (app, _d) = app().await;
     let req = Request::builder()
         .method("POST")
-        .uri("/auth/sso/assertion")
+        .uri("/api/auth/sso/assertion")
         .header("content-type", "application/json")
         .body(Body::from(
             json!({"provider":"nope","payload":"x"}).to_string(),
@@ -4088,7 +4185,7 @@ async fn demo_flags_cannot_be_persisted_via_config() {
     // Review A3: webhook-bypass flags are env-only, never config.json.
     let (app, _d) = app().await;
     for key in ["stripe_demo", "paypal_demo"] {
-        let (s, body) = json_req(&app, "PUT", "/admin/config", Some(json!({key: true}))).await;
+        let (s, body) = json_req(&app, "PUT", "/api/admin/config", Some(json!({key: true}))).await;
         assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{key}: {body}");
     }
 }
@@ -4120,7 +4217,7 @@ async fn invoice_pdf_archived_at_issue_and_downloadable() {
     let on_disk = std::fs::read(&pdf_path).unwrap();
 
     // Download contract: admin 200 + binary headers, ETag from the sha256.
-    let (status, headers, body) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (status, headers, body) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers[header::CONTENT_TYPE], "application/pdf");
     let disp = headers[header::CONTENT_DISPOSITION]
@@ -4145,7 +4242,7 @@ async fn invoice_pdf_archived_at_issue_and_downloadable() {
     );
 
     // Re-download: same bytes (immutable archive, stable ETag).
-    let (s2, h2, body2) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (s2, h2, body2) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert_eq!(s2, StatusCode::OK);
     assert_eq!(h2[header::ETAG], headers[header::ETAG]);
     assert_eq!(body, body2);
@@ -4155,7 +4252,7 @@ async fn invoice_pdf_archived_at_issue_and_downloadable() {
 async fn invoice_pdf_legacy_invoice_resolves_byte_stably() {
     let (app, d) = app().await;
     let (_issued, iid) = seed_issued_invoice(&app).await;
-    let (_s, headers, first) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_s, headers, first) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert!(headers[header::ETAG].to_str().unwrap().starts_with('"'));
 
     // Simulate a legacy archive: the file vanishes while the (immutable)
@@ -4168,7 +4265,7 @@ async fn invoice_pdf_legacy_invoice_resolves_byte_stably() {
             .join(format!("{iid}.pdf")),
     )
     .unwrap();
-    let (_s2, _h2, second) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_s2, _h2, second) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert_eq!(first, second, "legacy re-render is byte-stable");
     let path = d
         .path()
@@ -4178,7 +4275,7 @@ async fn invoice_pdf_legacy_invoice_resolves_byte_stably() {
     assert!(path.exists(), "archive re-persisted on first read");
     assert_eq!(std::fs::read(&path).unwrap(), second);
     // The hint's sha still matches (recomputed, but from identical bytes).
-    let (_s3, fresh) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let (_s3, fresh) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
     use sha2::{Digest, Sha256};
     assert_eq!(
         fresh["pdf"]["sha256"].as_str().unwrap(),
@@ -4198,21 +4295,21 @@ async fn invoice_pdf_rejects_draft_and_unknown() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap();
 
     // Draft: 409, nothing persisted.
-    let (status, _h, body) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (status, _h, body) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert!(String::from_utf8_lossy(&body).contains("issue the invoice"));
 
@@ -4220,7 +4317,7 @@ async fn invoice_pdf_rejects_draft_and_unknown() {
     let (s404, _, _) = raw_req(
         &app,
         "GET",
-        "/invoices/00000000-0000-0000-0000-000000000000/pdf",
+        "/api/invoices/00000000-0000-0000-0000-000000000000/pdf",
     )
     .await;
     assert_eq!(s404, StatusCode::NOT_FOUND);
@@ -4233,7 +4330,7 @@ async fn member_cannot_download_invoice_pdf() {
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
         ),
@@ -4243,7 +4340,7 @@ async fn member_cannot_download_invoice_pdf() {
     let (s, _, _) = raw(
         &app.router,
         "GET",
-        &format!("/invoices/{iid}/pdf"),
+        &format!("/api/invoices/{iid}/pdf"),
         None,
         Some(&cookie),
     )
@@ -4256,9 +4353,9 @@ async fn member_cannot_download_invoice_pdf() {
 async fn invoice_email_carries_the_archived_pdf_attachment() {
     let (app, _d) = app().await;
     let (issued, iid) = seed_issued_invoice(&app).await;
-    let (_s, _h, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_s, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
 
-    let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK, "{body}");
     let msgs = app.email.messages();
     assert_eq!(msgs.len(), 1);
@@ -4286,12 +4383,12 @@ async fn invoice_email_carries_the_archived_pdf_attachment() {
 async fn email_copy_sends_pdf_to_third_party_with_audit_trail() {
     let (app, _d) = app().await;
     let (issued, iid) = seed_issued_invoice(&app).await;
-    let (_s, _h, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_s, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
 
     let (status, body) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/email-copy"),
+        &format!("/api/invoices/{iid}/email-copy"),
         Some(json!({"to": "accountant@firm.co", "note": "for the October books"})),
     )
     .await;
@@ -4316,7 +4413,7 @@ async fn email_copy_sends_pdf_to_third_party_with_audit_trail() {
     assert_eq!(*bytes, pdf, "the attached copy is the archived document");
 
     // Audit records recipient + invoice, never the bytes (#52).
-    let (_s, audit) = json_req(&app, "GET", "/audit", None).await;
+    let (_s, audit) = json_req(&app, "GET", "/api/audit", None).await;
     let hit = audit["events"]
         .as_array()
         .unwrap()
@@ -4338,7 +4435,7 @@ async fn email_copy_invalid_recipient_is_422_without_sending() {
     let (status, body) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/email-copy"),
+        &format!("/api/invoices/{iid}/email-copy"),
         Some(json!({"to": "not-an-email"})),
     )
     .await;
@@ -4346,7 +4443,7 @@ async fn email_copy_invalid_recipient_is_422_without_sending() {
     assert_eq!(body["error"]["fields"][0]["field"], "to");
     // Nothing sent, nothing persisted beyond the earlier issue.
     assert_eq!(app.email.messages().len(), 0);
-    let (_s, audit) = json_req(&app, "GET", "/audit", None).await;
+    let (_s, audit) = json_req(&app, "GET", "/api/audit", None).await;
     assert!(
         !audit["events"]
             .as_array()
@@ -4366,14 +4463,14 @@ async fn email_copy_draft_is_409_and_shapes_are_rejected() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -4383,7 +4480,7 @@ async fn email_copy_draft_is_409_and_shapes_are_rejected() {
     let (status, _b) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/email-copy"),
+        &format!("/api/invoices/{iid}/email-copy"),
         Some(json!({"to": "x@y.co"})),
     )
     .await;
@@ -4394,7 +4491,7 @@ async fn email_copy_draft_is_409_and_shapes_are_rejected() {
     let (s1, _b1) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/email-copy"),
+        &format!("/api/invoices/{iid}/email-copy"),
         Some(json!({"to": "x@y.co", "bcc": "sneaky@evil.co"})),
     )
     .await;
@@ -4402,7 +4499,7 @@ async fn email_copy_draft_is_409_and_shapes_are_rejected() {
     let (s2, _b2) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/email-copy"),
+        &format!("/api/invoices/{iid}/email-copy"),
         Some(json!({"to": "x@y.co", "note": "n".repeat(2001)})),
     )
     .await;
@@ -4413,7 +4510,7 @@ async fn email_copy_draft_is_409_and_shapes_are_rejected() {
     let (s3, _) = json_req(
         &app,
         "POST",
-        "/invoices/00000000-0000-0000-0000-000000000000/email-copy",
+        "/api/invoices/00000000-0000-0000-0000-000000000000/email-copy",
         Some(json!({"to": "x@y.co"})),
     )
     .await;
@@ -4423,7 +4520,7 @@ async fn email_copy_draft_is_409_and_shapes_are_rejected() {
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
         ),
@@ -4433,7 +4530,7 @@ async fn email_copy_draft_is_409_and_shapes_are_rejected() {
     let (s4, _, _) = raw(
         &app.router,
         "POST",
-        &format!("/invoices/{iid}/email-copy"),
+        &format!("/api/invoices/{iid}/email-copy"),
         Some(json!({"to": "x@y.co"})),
         Some(&cookie),
     )
@@ -4450,14 +4547,14 @@ async fn email_copy_accepts_paid_invoices() {
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "bank:42"})),
     )
     .await;
     let (status, body) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/email-copy"),
+        &format!("/api/invoices/{iid}/email-copy"),
         Some(json!({"to": "books@firm.co"})),
     )
     .await;
@@ -4470,7 +4567,7 @@ async fn email_copy_accepts_paid_invoices() {
 // ------------------------------------------------------------------ #116 ---
 
 async fn new_customer_ex(app: &Client, body: Value) -> (StatusCode, Value) {
-    json_req(app, "POST", "/customers", Some(body)).await
+    json_req(app, "POST", "/api/customers", Some(body)).await
 }
 
 /// Draft an invoice for a customer (billing email set), returning (customer,
@@ -4490,14 +4587,14 @@ async fn seed_customer_invoice(app: &Client, name: &str, extra: Value) -> (Value
     json_req(
         app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s2, inv) = json_req(
         app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -4523,7 +4620,7 @@ async fn payment_terms_decide_due_date_at_issue() {
             seed_customer_invoice(&app, &format!("TERMS{i}"), json!({"payment_terms": terms}))
                 .await;
         let iid = inv["id"].as_str().unwrap();
-        let (s, issued) = json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+        let (s, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
         assert_eq!(s, StatusCode::OK, "{issued}");
         assert_eq!(
             issued["due_date"].as_str().unwrap(),
@@ -4539,7 +4636,7 @@ async fn legacy_net14_fallback_is_untouched_and_org_default_applies() {
     let (app, _d) = app().await;
     let (_c, inv) = seed_customer_invoice(&app, "LEGACY", json!({})).await;
     let iid = inv["id"].as_str().unwrap();
-    let (_, issued) = json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    let (_, issued) = json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     assert_eq!(
         issued["due_date"], "2026-10-21",
         "legacy fallback unchanged"
@@ -4549,14 +4646,14 @@ async fn legacy_net14_fallback_is_untouched_and_org_default_applies() {
     let (s, _) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"","body":"","footer":"","payment_terms":{"kind":"net_20"}})),
     )
     .await;
     assert_eq!(s, StatusCode::OK);
     let (_c2, inv2) = seed_customer_invoice(&app, "NEXT", json!({})).await;
     let iid2 = inv2["id"].as_str().unwrap();
-    let (_, issued2) = json_req(&app, "POST", &format!("/invoices/{iid2}/issue"), None).await;
+    let (_, issued2) = json_req(&app, "POST", &format!("/api/invoices/{iid2}/issue"), None).await;
     let today = chrono::Utc::now().date_naive();
     assert_eq!(
         issued2["due_date"].as_str().unwrap(),
@@ -4571,7 +4668,7 @@ async fn legacy_net14_fallback_is_untouched_and_org_default_applies() {
     )
     .await;
     let iid3 = inv3["id"].as_str().unwrap();
-    let (_, issued3) = json_req(&app, "POST", &format!("/invoices/{iid3}/issue"), None).await;
+    let (_, issued3) = json_req(&app, "POST", &format!("/api/invoices/{iid3}/issue"), None).await;
     assert_eq!(issued3["due_date"].as_str().unwrap(), today.to_string());
 }
 
@@ -4582,7 +4679,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     let (s, body) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"Inv %invoice_number%","body":"pay %bogus% now","footer":""})),
     )
     .await;
@@ -4603,7 +4700,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     let (s2, _) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"%Total%","body":"","footer":""})),
     )
     .await;
@@ -4613,7 +4710,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     let (s3, b3) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"payment_terms": {"kind": "custom"}})),
     )
     .await;
@@ -4621,7 +4718,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     let (s4, _) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"payment_terms": {"kind": "net_30", "days": 30}})),
     )
     .await;
@@ -4629,7 +4726,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     let (s5, _) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"payment_terms": {"kind": "custom", "days": 0}})),
     )
     .await;
@@ -4639,7 +4736,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     let (s6, _) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject": "s", "evil": true})),
     )
     .await;
@@ -4649,7 +4746,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     let (s7, saved) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"Invoice %invoice_number% for %customer_name%","body":"# Hello\n\nthanks","footer":"Bank: IBAN","payment_terms":{"kind":"net_30"}})),
     )
     .await;
@@ -4657,7 +4754,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     assert_eq!(saved["body"], "# Hello\n\nthanks");
 
     // GET returns the template plus the variable cheatsheet.
-    let (_s8, got) = json_req(&app, "GET", "/admin/invoice-template", None).await;
+    let (_s8, got) = json_req(&app, "GET", "/api/admin/invoice-template", None).await;
     assert_eq!(
         got["template"]["subject"],
         "Invoice %invoice_number% for %customer_name%"
@@ -4670,7 +4767,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
         ),
@@ -4680,7 +4777,7 @@ async fn template_save_validates_and_rejects_without_persisting() {
     let (s9, _, _) = raw(
         &app.router,
         "GET",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         None,
         Some(&cookie),
     )
@@ -4700,12 +4797,12 @@ async fn document_endpoint_renders_live_and_escapes() {
     json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"October: %invoice_number%","body":"Dear %customer_name%,\n\n- consulting\n- support","footer":"Wire to IBAN XX","payment_terms":null})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap();
-    let (s, doc) = json_req(&app, "GET", &format!("/invoices/{iid}/document"), None).await;
+    let (s, doc) = json_req(&app, "GET", &format!("/api/invoices/{iid}/document"), None).await;
     assert_eq!(s, StatusCode::OK, "{doc}");
     assert_eq!(
         doc["subject"],
@@ -4722,7 +4819,7 @@ async fn document_endpoint_renders_live_and_escapes() {
     let (s404, _) = json_req(
         &app,
         "GET",
-        "/invoices/00000000-0000-0000-0000-000000000000/document",
+        "/api/invoices/00000000-0000-0000-0000-000000000000/document",
         None,
     )
     .await;
@@ -4741,13 +4838,13 @@ async fn email_uses_resolved_subject_and_html_body() {
     json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"WRONG %invoice_number%","body":"Org footer body","footer":"","payment_terms":null})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap();
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
-    let (s, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    let (s, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     let msgs = app.email.messages();
     assert_eq!(msgs.len(), 1);
@@ -4772,14 +4869,14 @@ async fn pdf_archive_applies_template_on_both_issue_and_lazy_paths() {
     json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"","body":"THANK-YOU NOTE text","footer":"","payment_terms":null})),
     )
     .await;
     let (_c, inv) = seed_customer_invoice(&app, "SEAM", json!({})).await;
     let iid = inv["id"].as_str().unwrap();
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
-    let (_s, _h, at_issue) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    let (_s, _h, at_issue) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
 
     // Drop the archive: the lazy path re-renders from the *same* content
     // source and must produce identical bytes (#113 determinism x #116 seam).
@@ -4790,7 +4887,7 @@ async fn pdf_archive_applies_template_on_both_issue_and_lazy_paths() {
             .join(format!("{iid}.pdf")),
     )
     .unwrap();
-    let (_s2, _h2, at_lazy) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_s2, _h2, at_lazy) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert_eq!(
         at_issue, at_lazy,
         "issue and lazy paths share the content source"
@@ -4801,7 +4898,7 @@ async fn pdf_archive_applies_template_on_both_issue_and_lazy_paths() {
     json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"","body":"","footer":"","payment_terms":null})),
     )
     .await;
@@ -4812,7 +4909,8 @@ async fn pdf_archive_applies_template_on_both_issue_and_lazy_paths() {
             .join(format!("{iid}.pdf")),
     )
     .unwrap();
-    let (_s3, _h3, at_no_template) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_s3, _h3, at_no_template) =
+        raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert_ne!(
         at_issue, at_no_template,
         "the body text changed the document"
@@ -4829,7 +4927,7 @@ async fn customer_invoice_fields_round_trip_and_validate() {
     )
     .await;
     assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
-    let (_s2, list) = json_req(&app, "GET", "/customers", None).await;
+    let (_s2, list) = json_req(&app, "GET", "/api/customers", None).await;
     assert!(list["customers"].as_array().unwrap().is_empty());
 
     // Invalid terms shapes.
@@ -4860,7 +4958,7 @@ async fn customer_invoice_fields_round_trip_and_validate() {
     let (_su, u) = json_req(
         &app,
         "PUT",
-        &format!("/customers/{cid}"),
+        &format!("/api/customers/{cid}"),
         Some(
             json!({"name":"FULL","currency":"EUR","default_rate_minor":1,
                     "payment_terms":{"kind":"upon_receipt"},
@@ -4888,7 +4986,7 @@ async fn record_payment_partial_then_settles_with_balance_semantics() {
     let (sp, part) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "bank:1", "amount_minor": 5000})),
     )
     .await;
@@ -4902,7 +5000,7 @@ async fn record_payment_partial_then_settles_with_balance_semantics() {
     assert!(pays[0]["received_at"].is_string());
 
     // Summary uses the BALANCE now: 13000 outstanding, not 18000.
-    let (_s1, sum) = json_req(&app, "GET", "/invoices/summary", None).await;
+    let (_s1, sum) = json_req(&app, "GET", "/api/invoices/summary", None).await;
     assert_eq!(sum["partly_paid"], 1);
     assert_eq!(sum["issued"], 0);
     assert_eq!(sum["outstanding"]["EUR"], 13000);
@@ -4911,7 +5009,7 @@ async fn record_payment_partial_then_settles_with_balance_semantics() {
     let (s0, _b0) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "x", "amount_minor": 0})),
     )
     .await;
@@ -4921,12 +5019,12 @@ async fn record_payment_partial_then_settles_with_balance_semantics() {
     let (so, bo) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "x", "amount_minor": 13001})),
     )
     .await;
     assert_eq!(so, StatusCode::CONFLICT, "{bo}");
-    let (_s2, mid) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let (_s2, mid) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
     assert_eq!(
         mid["payments"].as_array().unwrap().len(),
         1,
@@ -4937,7 +5035,7 @@ async fn record_payment_partial_then_settles_with_balance_semantics() {
     let (sf, paid) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "bank:2", "amount_minor": 13000})),
     )
     .await;
@@ -4951,14 +5049,14 @@ async fn record_payment_partial_then_settles_with_balance_semantics() {
     let (sx, _bx) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "x", "amount_minor": 1})),
     )
     .await;
     assert_eq!(sx, StatusCode::CONFLICT);
 
     // Audit trail (#52): two invoice_payment events.
-    let (_sa, audit) = json_req(&app, "GET", "/audit", None).await;
+    let (_sa, audit) = json_req(&app, "GET", "/api/audit", None).await;
     let n = audit["events"]
         .as_array()
         .unwrap()
@@ -4976,7 +5074,7 @@ async fn pay_without_amount_still_pays_in_full() {
     let (s, paid) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "cheque:9"})),
     )
     .await;
@@ -4994,7 +5092,7 @@ async fn write_off_requires_reason_and_excludes_the_balance() {
     let (sr, _br) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/write-off"),
+        &format!("/api/invoices/{iid}/write-off"),
         Some(json!({"reason": "   "})),
     )
     .await;
@@ -5004,7 +5102,7 @@ async fn write_off_requires_reason_and_excludes_the_balance() {
     let (sw, wo) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/write-off"),
+        &format!("/api/invoices/{iid}/write-off"),
         Some(json!({"reason": "customer insolvent, debt forgiven 2026-10"})),
     )
     .await;
@@ -5017,7 +5115,7 @@ async fn write_off_requires_reason_and_excludes_the_balance() {
     assert!(wo["written_off_at"].is_string());
 
     // Outstanding drops to zero but the invoice is counted separately.
-    let (_s1, sum) = json_req(&app, "GET", "/invoices/summary", None).await;
+    let (_s1, sum) = json_req(&app, "GET", "/api/invoices/summary", None).await;
     assert_eq!(sum["written_off"], 1);
     assert_eq!(sum["issued"], 0);
     assert!(
@@ -5030,7 +5128,7 @@ async fn write_off_requires_reason_and_excludes_the_balance() {
     let (s2, _) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/write-off"),
+        &format!("/api/invoices/{iid}/write-off"),
         Some(json!({"reason": "again"})),
     )
     .await;
@@ -5038,14 +5136,14 @@ async fn write_off_requires_reason_and_excludes_the_balance() {
     let (s3, _) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "x", "amount_minor": 100})),
     )
     .await;
     assert_eq!(s3, StatusCode::CONFLICT);
 
     // Audit: invoice_write_off recorded with id + actor.
-    let (_sa, audit) = json_req(&app, "GET", "/audit", None).await;
+    let (_sa, audit) = json_req(&app, "GET", "/api/audit", None).await;
     assert!(
         audit["events"]
             .as_array()
@@ -5065,14 +5163,14 @@ async fn write_off_rejects_draft_and_paid_states() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -5080,7 +5178,7 @@ async fn write_off_rejects_draft_and_paid_states() {
     let (sd, _) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{did}/write-off"),
+        &format!("/api/invoices/{did}/write-off"),
         Some(json!({"reason": "early forgiveness"})),
     )
     .await;
@@ -5091,14 +5189,14 @@ async fn write_off_rejects_draft_and_paid_states() {
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "full"})),
     )
     .await;
     let (sp, _) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/write-off"),
+        &format!("/api/invoices/{iid}/write-off"),
         Some(json!({"reason": "too late"})),
     )
     .await;
@@ -5112,14 +5210,14 @@ async fn invoice_report_gains_paid_and_balance_columns() {
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "half", "amount_minor": 8000})),
     )
     .await;
     let (s, rep) = json_req(
         &app,
         "GET",
-        "/invoices/report?from=2026-10-01&to=2026-10-31",
+        "/api/invoices/report?from=2026-10-01&to=2026-10-31",
         None,
     )
     .await;
@@ -5133,7 +5231,7 @@ async fn invoice_report_gains_paid_and_balance_columns() {
         .expect("ACME row");
     assert_eq!(row["paid_minor"], 8000);
     assert_eq!(row["balance_minor"], 10000);
-    let (s2, csv) = json_req(&app, "GET", "/invoices/export.csv", None).await;
+    let (s2, csv) = json_req(&app, "GET", "/api/invoices/export.csv", None).await;
     assert_eq!(s2, StatusCode::OK);
     let csv = csv.as_str().unwrap();
     assert!(
@@ -5149,7 +5247,7 @@ async fn partly_paid_invoice_still_locks_its_entries() {
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "half", "amount_minor": 9000})),
     )
     .await;
@@ -5157,7 +5255,7 @@ async fn partly_paid_invoice_still_locks_its_entries() {
     let (s, _) = json_req(
         &app,
         "PUT",
-        &format!("/entries/{eid}"),
+        &format!("/api/entries/{eid}"),
         Some(json!({"date":"2026-10-02","customer_id":issued["customer_id"],"project_code":"P1","hours":4})),
     )
     .await;
@@ -5174,7 +5272,7 @@ async fn legacy_paid_docs_read_with_synthesised_ledger() {
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference": "old:1"})),
     )
     .await;
@@ -5191,21 +5289,21 @@ async fn legacy_paid_docs_read_with_synthesised_ledger() {
     legacy.remove("payments");
     std::fs::write(&path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
 
-    let (_s, sum) = json_req(&app, "GET", "/invoices/summary", None).await;
+    let (_s, sum) = json_req(&app, "GET", "/api/invoices/summary", None).await;
     assert_eq!(sum["paid"], 1);
     assert!(
         sum["outstanding"].as_object().unwrap().is_empty()
             || sum["outstanding"]["EUR"] == serde_json::json!(0),
         "legacy paid counts as settled: {sum}"
     );
-    let (sr, rep) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let (sr, rep) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
     assert_eq!(sr, StatusCode::OK, "{rep}");
     assert_eq!(rep["payments"].as_array().map(Vec::len).unwrap_or(0), 0);
     // Reports see it fully paid (synthesised).
     let (_s2, rep2) = json_req(
         &app,
         "GET",
-        "/invoices/report?from=2026-10-01&to=2026-10-31",
+        "/api/invoices/report?from=2026-10-01&to=2026-10-31",
         None,
     )
     .await;
@@ -5225,7 +5323,7 @@ async fn email_result_reports_disabled_transport_honestly() {
     raw(
         &router,
         "POST",
-        "/auth/bootstrap",
+        "/api/auth/bootstrap",
         Some(json!({"name":"Admin","email":ADMIN_EMAIL,"password":ADMIN_PW})),
         None,
     )
@@ -5241,7 +5339,7 @@ async fn email_result_reports_disabled_transport_honestly() {
     };
     let (sc, cust) = call(
         "POST".to_string(),
-        "/customers".into(),
+        "/api/customers".into(),
         Some(json!({"name":"ACME","currency":"EUR","default_rate_minor":6000,"email":"billing@acme.test"})),
     )
     .await;
@@ -5249,38 +5347,38 @@ async fn email_result_reports_disabled_transport_honestly() {
     let cid = cust["id"].as_str().unwrap().to_string();
     call(
         "POST".to_string(),
-        format!("/customers/{cid}/projects"),
+        format!("/api/customers/{cid}/projects"),
         Some(json!({"code":"P1","currency":"EUR","rate_minor":6000})),
     )
     .await;
     call(
         "POST".to_string(),
-        "/entries".into(),
+        "/api/entries".into(),
         Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, inv) = call(
         "POST".to_string(),
-        "/invoices".into(),
+        "/api/invoices".into(),
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap().to_string();
-    call("POST".into(), format!("/invoices/{iid}/issue"), None).await;
-    let (se, body) = call("POST".into(), format!("/invoices/{iid}/email"), None).await;
+    call("POST".into(), format!("/api/invoices/{iid}/issue"), None).await;
+    let (se, body) = call("POST".into(), format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK, "{body}");
     assert_eq!(body["sent_to"], "billing@acme.test");
     assert_eq!(body["transport"], "disabled", "no SMTP => honest label");
     let (sc2, copy) = call(
         "POST".to_string(),
-        format!("/invoices/{iid}/email-copy"),
+        format!("/api/invoices/{iid}/email-copy"),
         Some(json!({"to": "books@firm.co"})),
     )
     .await;
     assert_eq!(sc2, StatusCode::OK, "{copy}");
     assert_eq!(copy["transport"], "disabled");
     // The audit line records the transport alongside the recipient (#52).
-    let (_sa, audit) = call("GET".into(), "/audit".into(), None).await;
+    let (_sa, audit) = call("GET".into(), "/api/audit".into(), None).await;
     let hit = audit["events"]
         .as_array()
         .unwrap()
@@ -5305,7 +5403,7 @@ async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     let (s, scd) = json_req(
         &app,
         "POST",
-        "/schedules",
+        "/api/schedules",
         Some(json!({"customer_id":cid,"cadence":"monthly","mode":"time","currency":"EUR"})),
     )
     .await;
@@ -5315,7 +5413,7 @@ async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     let (sp, paused) = json_req(
         &app,
         "PUT",
-        &format!("/schedules/{sid}"),
+        &format!("/api/schedules/{sid}"),
         Some(json!({"active": false})),
     )
     .await;
@@ -5324,12 +5422,12 @@ async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     assert_eq!(paused["customer_id"], cid);
     assert_eq!(paused["cadence"], "monthly");
     // Resume via re-read.
-    let (_sr, list) = json_req(&app, "GET", "/schedules", None).await;
+    let (_sr, list) = json_req(&app, "GET", "/api/schedules", None).await;
     assert_eq!(list["schedules"].as_array().unwrap().len(), 1);
     let (sa, act) = json_req(
         &app,
         "PUT",
-        &format!("/schedules/{sid}"),
+        &format!("/api/schedules/{sid}"),
         Some(json!({"active": true})),
     )
     .await;
@@ -5339,7 +5437,7 @@ async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     let (s4, _) = json_req(
         &app,
         "PUT",
-        "/schedules/00000000-0000-0000-0000-000000000000",
+        "/api/schedules/00000000-0000-0000-0000-000000000000",
         Some(json!({"active": false})),
     )
     .await;
@@ -5347,12 +5445,12 @@ async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     let (s5, _) = json_req(
         &app,
         "PUT",
-        &format!("/schedules/{sid}"),
+        &format!("/api/schedules/{sid}"),
         Some(json!({"active": false, "cadence": "weekly"})),
     )
     .await;
     assert_eq!(s5, StatusCode::UNPROCESSABLE_ENTITY);
-    let (_s6, still) = json_req(&app, "GET", "/schedules", None).await;
+    let (_s6, still) = json_req(&app, "GET", "/api/schedules", None).await;
     assert_eq!(
         still["schedules"][0]["active"], true,
         "rejection persisted nothing"
@@ -5361,7 +5459,7 @@ async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
         ),
@@ -5371,7 +5469,7 @@ async fn recurring_schedule_pause_resume_keeps_the_cursor() {
     let (s7, _, _) = raw(
         &app.router,
         "PUT",
-        &format!("/schedules/{sid}"),
+        &format!("/api/schedules/{sid}"),
         Some(json!({"active": false})),
         Some(&cookie),
     )
@@ -5387,7 +5485,7 @@ async fn customer_billing_details_round_trip_and_validate() {
     let (s, c) = json_req(
         &app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(
             json!({"name":"GLOBAL","currency":"USD","default_rate_minor":7000,
           "address":{"street":"Mainstross 1","city":"Berlin","postal_code":"10115","country":"DE"},
@@ -5414,20 +5512,20 @@ async fn customer_billing_details_round_trip_and_validate() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid.clone(),"project_code":"P1","hours":2})),
     )
     .await;
     let (_s2, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap();
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
-    let (se, body) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
+    let (se, body) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK, "{body}");
     assert_eq!(
         body["sent_to"], "ada@global.test",
@@ -5440,7 +5538,7 @@ async fn customer_billing_details_round_trip_and_validate() {
     let (s3, b3) = json_req(
         &app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name":"BAD","currency":"EUR","default_rate_minor":1,
           "contacts":[{"name":"N","email":"nope"}]})),
     )
@@ -5449,7 +5547,7 @@ async fn customer_billing_details_round_trip_and_validate() {
     let (s4, _) = json_req(
         &app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name":"BAD","currency":"EUR","default_rate_minor":1,
           "contacts":[{"name":"A","billing":true},{"name":"B","billing":true}]})),
     )
@@ -5458,7 +5556,7 @@ async fn customer_billing_details_round_trip_and_validate() {
     let (s5, _) = json_req(
         &app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name":"BAD","currency":"EUR","default_rate_minor":1,"tax_hundredths":10001})),
     )
     .await;
@@ -5466,13 +5564,13 @@ async fn customer_billing_details_round_trip_and_validate() {
     let (s6, b6) = json_req(
         &app,
         "POST",
-        "/customers",
+        "/api/customers",
         Some(json!({"name":"BAD","currency":"EUR","default_rate_minor":1,
           "address":{"street":"x","country":"D"}})),
     )
     .await;
     assert_eq!(s6, StatusCode::UNPROCESSABLE_ENTITY, "{b6}");
-    let (_s7, list) = json_req(&app, "GET", "/customers", None).await;
+    let (_s7, list) = json_req(&app, "GET", "/api/customers", None).await;
     assert!(
         list["customers"]
             .as_array()
@@ -5502,7 +5600,7 @@ async fn legacy_customer_keeps_working_and_new_fields_are_omitted_when_empty() {
     let (_s2, got) = json_req(
         &app,
         "GET",
-        &format!("/customers/{}", c["id"].as_str().unwrap()),
+        &format!("/api/customers/{}", c["id"].as_str().unwrap()),
         None,
     )
     .await;
@@ -5515,7 +5613,7 @@ async fn legacy_customer_keeps_working_and_new_fields_are_omitted_when_empty() {
 async fn org_profile_round_trips_and_prints_on_the_document() {
     let (app, _d) = app().await;
     // Default read: everything empty.
-    let (_s0, empty) = json_req(&app, "GET", "/admin/org", None).await;
+    let (_s0, empty) = json_req(&app, "GET", "/api/admin/org", None).await;
     assert_eq!(empty["name"], "");
     assert!(empty.get("address").is_none() || empty["address"].is_null());
 
@@ -5523,19 +5621,19 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
     let (sb, bb) = json_req(
         &app,
         "PUT",
-        "/admin/org",
+        "/api/admin/org",
         Some(json!({"name":"X","legal_id":"","address":{"street":"a","country":""}})),
     )
     .await;
     assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY, "{bb}");
-    let (_sv, before) = json_req(&app, "GET", "/admin/org", None).await;
+    let (_sv, before) = json_req(&app, "GET", "/api/admin/org", None).await;
     assert_eq!(before["name"], "", "rejection persisted nothing");
 
     // Valid save round-trips.
     let (sp, saved) = json_req(
         &app,
         "PUT",
-        "/admin/org",
+        "/api/admin/org",
         Some(json!({"name":"Tucano BV","legal_id":"BE0123456789",
           "address":{"street":"Markt 1","city":"Brugge","postal_code":"8000","country":"BE"}})),
     )
@@ -5546,7 +5644,7 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
     // The identity prints on the issued document (uncompressed streams, so
     // the bytes are greppable — the determinism contract of #113 in use).
     let (issued, iid) = seed_issued_invoice(&app).await;
-    let (_s2, _h2, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_s2, _h2, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     let text = String::from_utf8_lossy(&pdf).into_owned();
     // The layout emits one text-showing op per WORD (positions carry the
     // spacing), so decode the literals back into running text.
@@ -5568,19 +5666,19 @@ async fn org_profile_round_trips_and_prints_on_the_document() {
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
         ),
     )
     .await;
     let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
-    let (sm, _, _) = raw(&app.router, "GET", "/admin/org", None, Some(&cookie)).await;
+    let (sm, _, _) = raw(&app.router, "GET", "/api/admin/org", None, Some(&cookie)).await;
     assert_eq!(sm, StatusCode::FORBIDDEN);
     let (spm, _, _) = raw(
         &app.router,
         "PUT",
-        "/admin/org",
+        "/api/admin/org",
         Some(json!({"name":"Evil"})),
         Some(&cookie),
     )
@@ -5599,7 +5697,7 @@ async fn manual_invoice_creation_computes_exact_totals() {
     let (s, inv) = json_req(
         &app,
         "POST",
-        "/invoices/manual",
+        "/api/invoices/manual",
         Some(json!({"customer_id":cid,"tax_hundredths":2100,"discount_hundredths":1000,
           "lines":[{"description":"Office seat","item_kind":"product","quantity_hundredths":250,"unit_price_minor":4000,"project_code":"P1"},
                    {"description":"Setup service","item_kind":"service","quantity_hundredths":100,"unit_price_minor":5000}]})),
@@ -5620,12 +5718,12 @@ async fn manual_invoice_creation_computes_exact_totals() {
     assert_eq!(inv["tax_hundredths"], 2100);
     assert_eq!(inv["discount_hundredths"], 1000);
     // Draft locks nothing and sends nothing.
-    let eid = json_req(&app, "GET", "/entries", None).await;
+    let eid = json_req(&app, "GET", "/api/entries", None).await;
     let _ = eid;
     let pdf = raw_req(
         &app,
         "GET",
-        &format!("/invoices/{}/pdf", inv["id"].as_str().unwrap()),
+        &format!("/api/invoices/{}/pdf", inv["id"].as_str().unwrap()),
     )
     .await;
     assert_eq!(
@@ -5676,10 +5774,10 @@ async fn manual_invoice_validation_matrix_persists_nothing() {
             json!({"customer_id": cid, "lines": [{"description":"X","item_kind":"product","quantity_hundredths":1.5,"unit_price_minor":100}]}),
         ),
     ] {
-        let (st, body) = json_req(&app, "POST", "/invoices/manual", Some(body)).await;
+        let (st, body) = json_req(&app, "POST", "/api/invoices/manual", Some(body)).await;
         assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{label}: {body}");
     }
-    let (_s, list) = json_req(&app, "GET", "/invoices", None).await;
+    let (_s, list) = json_req(&app, "GET", "/api/invoices", None).await;
     assert!(
         list["invoices"].as_array().unwrap().is_empty(),
         "nothing persisted"
@@ -5695,14 +5793,14 @@ async fn draft_editing_replaces_lines_and_issued_stays_immutable() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1","hours":3})),
     )
     .await;
     let (_s, gent) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
@@ -5715,7 +5813,7 @@ async fn draft_editing_replaces_lines_and_issued_stays_immutable() {
         {"kind":"fixed","date":"2026-10-02","note":"Extra hosting","item_kind":"service",
          "quantity_hundredths":100,"unit_price_minor":900}],
         "tax_hundredths": 1000, "discount_hundredths": 0});
-    let (se, edited) = json_req(&app, "PUT", &format!("/invoices/{iid}"), Some(edit)).await;
+    let (se, edited) = json_req(&app, "PUT", &format!("/api/invoices/{iid}"), Some(edit)).await;
     assert_eq!(se, StatusCode::OK, "{edited}");
     assert_eq!(edited["lines"].as_array().unwrap().len(), 2);
     // 18000 + 900 = 18900 subtotal; 10% = 1890; total 20790.
@@ -5730,27 +5828,27 @@ async fn draft_editing_replaces_lines_and_issued_stays_immutable() {
     let (st, bt) = json_req(
         &app,
         "PUT",
-        &format!("/invoices/{iid}"),
+        &format!("/api/invoices/{iid}"),
         Some(json!({"lines":[tampered],"tax_hundredths":0,"discount_hundredths":0})),
     )
     .await;
     assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{bt}");
-    let (_sr, again) = json_req(&app, "GET", &format!("/invoices/{iid}"), None).await;
+    let (_sr, again) = json_req(&app, "GET", &format!("/api/invoices/{iid}"), None).await;
     assert_eq!(again["total_minor"], 20790, "rejection persisted nothing");
 
     // Issue: snapshot locks the document; PUT now conflicts.
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     let (si, _) = json_req(
         &app,
         "PUT",
-        &format!("/invoices/{iid}"),
+        &format!("/api/invoices/{iid}"),
         Some(json!({"lines":[],"tax_hundredths":0})),
     )
     .await;
     assert_eq!(si, StatusCode::CONFLICT);
     // The archived PDF shows the EDITED lines (the document follows the
     // draft at issue time, not the earlier generation).
-    let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     let joined: String = String::from_utf8_lossy(&pdf)
         .split('(')
         .skip(1)
@@ -5778,7 +5876,7 @@ async fn draft_line_input_rejects_unknown_fields_before_persisting() {
     let (_s, inv) = json_req(
         &app,
         "POST",
-        "/invoices/manual",
+        "/api/invoices/manual",
         Some(json!({"customer_id":cid,
           "lines":[{"description":"Seat","item_kind":"product","quantity_hundredths":100,"unit_price_minor":4000}]})),
     )
@@ -5792,7 +5890,7 @@ async fn draft_line_input_rejects_unknown_fields_before_persisting() {
     let (s, b) = json_req(
         &app,
         "PUT",
-        &format!("/invoices/{iid}"),
+        &format!("/api/invoices/{iid}"),
         Some(json!({"lines":[stale],"tax_hundredths":0,"discount_hundredths":0})),
     )
     .await;
@@ -5801,7 +5899,7 @@ async fn draft_line_input_rejects_unknown_fields_before_persisting() {
     let (ok, _) = json_req(
         &app,
         "PUT",
-        &format!("/invoices/{iid}"),
+        &format!("/api/invoices/{iid}"),
         Some(json!({"lines":[good],"tax_hundredths":0,"discount_hundredths":0})),
     )
     .await;
@@ -5818,7 +5916,7 @@ async fn manual_line_bounds_reject_identically_on_both_endpoints() {
     let (s1, b1) = json_req(
         &app,
         "POST",
-        "/invoices/manual",
+        "/api/invoices/manual",
         Some(json!({"customer_id":cid,
           "lines":[{"description":"Seat","item_kind":"product","quantity_hundredths":1_000_001,"unit_price_minor":4000}]})),
     )
@@ -5827,7 +5925,7 @@ async fn manual_line_bounds_reject_identically_on_both_endpoints() {
     let (_s, draft) = json_req(
         &app,
         "POST",
-        "/invoices/manual",
+        "/api/invoices/manual",
         Some(json!({"customer_id":cid,
           "lines":[{"description":"Seat","item_kind":"product","quantity_hundredths":100,"unit_price_minor":4000}]})),
     )
@@ -5836,7 +5934,7 @@ async fn manual_line_bounds_reject_identically_on_both_endpoints() {
     let (s2, b2) = json_req(
         &app,
         "PUT",
-        &format!("/invoices/{iid}"),
+        &format!("/api/invoices/{iid}"),
         Some(
             json!({"lines":[{"kind":"fixed","date":"2026-10-02","note":"Seat",
             "item_kind":"product","quantity_hundredths":1_000_001,"unit_price_minor":4000}],
@@ -5866,7 +5964,7 @@ async fn claim_rejects_duplicate_expense_ids() {
     let (_s, x) = json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(
             json!({"date":"2026-10-02","customer_id":cid,"amount_minor":2500,
                     "currency":"EUR","note":"taxi"}),
@@ -5876,7 +5974,7 @@ async fn claim_rejects_duplicate_expense_ids() {
     let (s, b) = json_req(
         &app,
         "POST",
-        "/claims",
+        "/api/claims",
         Some(json!({"title":"dup","expense_ids":[x["id"], x["id"]]})),
     )
     .await;
@@ -5902,13 +6000,18 @@ async fn oversized_project_budgets_rejected_without_persisting() {
         let (s, b) = json_req(
             &app,
             "PUT",
-            &format!("/customers/{cid}/projects/P1"),
+            &format!("/api/customers/{cid}/projects/P1"),
             Some(body),
         )
         .await;
         assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{field}: {b}");
-        let (_sr, got) =
-            json_req(&app, "GET", &format!("/customers/{cid}/projects/P1"), None).await;
+        let (_sr, got) = json_req(
+            &app,
+            "GET",
+            &format!("/api/customers/{cid}/projects/P1"),
+            None,
+        )
+        .await;
         assert_eq!(
             got["budget_hours"], 5000,
             "{field} rejection persisted nothing"
@@ -5923,15 +6026,15 @@ async fn second_retainer_close_is_409_not_500() {
     // retainer answered 500. Typed errors make every mutation 409.
     let (app, _d) = app().await;
     let rid = seed_retainer(&app, 10_000).await;
-    let (s1, b1) = json_req(&app, "POST", &format!("/retainers/{rid}"), None).await;
+    let (s1, b1) = json_req(&app, "POST", &format!("/api/retainers/{rid}"), None).await;
     assert_eq!(s1, StatusCode::OK, "{b1}");
-    let (s2, b2) = json_req(&app, "POST", &format!("/retainers/{rid}"), None).await;
+    let (s2, b2) = json_req(&app, "POST", &format!("/api/retainers/{rid}"), None).await;
     assert_eq!(s2, StatusCode::CONFLICT, "second close: {b2}");
     // A draw on the closed retainer is the same 409 class, not a 500.
     let (s3, b3) = json_req(
         &app,
         "POST",
-        &format!("/retainers/{rid}/draw"),
+        &format!("/api/retainers/{rid}/draw"),
         Some(json!({"amount_minor": 100, "reason": "late draw"})),
     )
     .await;
@@ -5950,7 +6053,7 @@ async fn expense_on_partly_paid_invoice_stays_locked() {
     let (_s, x) = json_req(
         &app,
         "POST",
-        "/expenses",
+        "/api/expenses",
         Some(
             json!({"date":"2026-10-02","customer_id":cid,"project_code":"P1",
                     "amount_minor":5000,"currency":"EUR","billable":true,"note":"parts"}),
@@ -5961,23 +6064,23 @@ async fn expense_on_partly_paid_invoice_stays_locked() {
     let (_s2, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-07"})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap().to_string();
     assert_eq!(inv["total_minor"], 5000, "expense-only invoice: {inv}");
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     // Partial payment: issued -> partly_paid.
     let (_sp, paid) = json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"amount_minor": 2000, "reference": "wire-1"})),
     )
     .await;
     assert_eq!(paid["status"], "partly_paid", "{paid}");
-    let (s_del, b_del) = json_req(&app, "DELETE", &format!("/expenses/{xid}"), None).await;
+    let (s_del, b_del) = json_req(&app, "DELETE", &format!("/api/expenses/{xid}"), None).await;
     assert_eq!(
         s_del,
         StatusCode::CONFLICT,
@@ -5995,11 +6098,11 @@ async fn expense_on_partly_paid_invoice_stays_locked() {
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"amount_minor": 3000, "reference": "wire-2"})),
     )
     .await;
-    let (s_after, b_after) = json_req(&app, "DELETE", &format!("/expenses/{xid}"), None).await;
+    let (s_after, b_after) = json_req(&app, "DELETE", &format!("/api/expenses/{xid}"), None).await;
     assert_eq!(s_after, StatusCode::NO_CONTENT, "paid releases: {b_after}");
 }
 
@@ -6020,7 +6123,7 @@ async fn store_fault_during_entry_validation_is_500_not_422() {
     let (s, b) = json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(entry_body(&cid, "P1", json!(1), "2026-10-02")),
     )
     .await;
@@ -6046,7 +6149,7 @@ async fn invoice_preview_projects_and_paid_exclusion() {
         json_req(
             &app,
             "POST",
-            "/entries",
+            "/api/entries",
             Some(json!({"date":day,"customer_id":cid.clone(),"project_code":proj,"hours":2})),
         )
         .await;
@@ -6055,7 +6158,7 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     let (sp, preview) = json_req(
         &app,
         "POST",
-        "/invoices/preview",
+        "/api/invoices/preview",
         Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-31","project_codes":["PA"]})),
     )
     .await;
@@ -6065,7 +6168,7 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0]["project_code"], "PA");
     assert_eq!(preview["total_minor"], 10000);
-    let (_s0, list) = json_req(&app, "GET", "/invoices", None).await;
+    let (_s0, list) = json_req(&app, "GET", "/api/invoices", None).await;
     assert!(
         list["invoices"].as_array().unwrap().is_empty(),
         "preview persists nothing"
@@ -6075,7 +6178,7 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     let (su, _) = json_req(
         &app,
         "POST",
-        "/invoices/preview",
+        "/api/invoices/preview",
         Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-31","project_codes":["NOPE"]})),
     )
     .await;
@@ -6086,23 +6189,23 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     let (_s1, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-31","project_codes":["PA"]})),
     )
     .await;
     let iid = inv["id"].as_str().unwrap();
-    json_req(&app, "POST", &format!("/invoices/{iid}/issue"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid}/issue"), None).await;
     json_req(
         &app,
         "POST",
-        &format!("/invoices/{iid}/pay"),
+        &format!("/api/invoices/{iid}/pay"),
         Some(json!({"reference":"x"})),
     )
     .await;
     let (s2, again) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid.clone(),"from":"2026-10-01","to":"2026-10-31"})),
     )
     .await;
@@ -6114,12 +6217,12 @@ async fn invoice_preview_projects_and_paid_exclusion() {
     // Issue that one too; with every line on a non-draft invoice the period
     // is exhausted -> NothingToInvoice 409.
     let iid2 = again["id"].as_str().unwrap();
-    json_req(&app, "POST", &format!("/invoices/{iid2}/issue"), None).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid2}/issue"), None).await;
     // And the fully-invoiced period repeats -> NothingToInvoice 409.
     let (s3, _b3) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-10-01","to":"2026-10-31"})),
     )
     .await;
@@ -6134,7 +6237,7 @@ async fn item_type_catalog_crud_and_editor_prefill_contract() {
     let (s, item) = json_req(
         &app,
         "POST",
-        "/admin/item-types",
+        "/api/admin/item-types",
         Some(
             json!({"name":"Support hour","kind":"service","description":"Extended support block",
                     "default_price_minor":9500,"currency":"EUR"}),
@@ -6148,15 +6251,15 @@ async fn item_type_catalog_crud_and_editor_prefill_contract() {
         json!({"name":"","kind":"service"}),
         json!({"name":"X","kind":"product","default_price_minor":100_000_001}),
     ] {
-        let (sb, _) = json_req(&app, "POST", "/admin/item-types", Some(bad)).await;
+        let (sb, _) = json_req(&app, "POST", "/api/admin/item-types", Some(bad)).await;
         assert_eq!(sb, StatusCode::UNPROCESSABLE_ENTITY);
     }
-    let (_sl, list) = json_req(&app, "GET", "/admin/item-types", None).await;
+    let (_sl, list) = json_req(&app, "GET", "/api/admin/item-types", None).await;
     assert_eq!(list["item_types"].as_array().unwrap().len(), 1);
     let (sa, archived) = json_req(
         &app,
         "PUT",
-        &format!("/admin/item-types/{tid}"),
+        &format!("/api/admin/item-types/{tid}"),
         Some(json!({"name":"Support hour","kind":"service","default_price_minor":9500,"currency":"EUR","active":false})),
     )
     .await;
@@ -6166,7 +6269,7 @@ async fn item_type_catalog_crud_and_editor_prefill_contract() {
     let (s4, _) = json_req(
         &app,
         "PUT",
-        "/admin/item-types/00000000-0000-0000-0000-000000000000",
+        "/api/admin/item-types/00000000-0000-0000-0000-000000000000",
         Some(json!({"name":"X","kind":"service"})),
     )
     .await;
@@ -6174,16 +6277,29 @@ async fn item_type_catalog_crud_and_editor_prefill_contract() {
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
         ),
     )
     .await;
     let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
-    let (sm, _, _) = raw(&app.router, "GET", "/admin/item-types", None, Some(&cookie)).await;
+    let (sm, _, _) = raw(
+        &app.router,
+        "GET",
+        "/api/admin/item-types",
+        None,
+        Some(&cookie),
+    )
+    .await;
     assert_eq!(sm, StatusCode::FORBIDDEN);
-    let (sd, _) = json_req(&app, "DELETE", &format!("/admin/item-types/{tid}"), None).await;
+    let (sd, _) = json_req(
+        &app,
+        "DELETE",
+        &format!("/api/admin/item-types/{tid}"),
+        None,
+    )
+    .await;
     assert_eq!(sd, StatusCode::NO_CONTENT);
 }
 
@@ -6193,7 +6309,7 @@ async fn document_labels_reach_the_pdf_and_validation_binds() {
     let (sb, _) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"","body":"","footer":"","labels":{"total":"a very long label that goes over the forty character bound"}})),
     )
     .await;
@@ -6201,7 +6317,7 @@ async fn document_labels_reach_the_pdf_and_validation_binds() {
     let (s, saved) = json_req(
         &app,
         "PUT",
-        "/admin/invoice-template",
+        "/api/admin/invoice-template",
         Some(json!({"subject":"","body":"","footer":"","labels":{"description":"Service delivered","total":"Amount due"}})),
     )
     .await;
@@ -6209,7 +6325,7 @@ async fn document_labels_reach_the_pdf_and_validation_binds() {
     assert_eq!(saved["labels"]["total"], "Amount due");
     let (issued, iid) = seed_issued_invoice(&app).await;
     assert_eq!(issued["status"], "issued");
-    let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_sp, _h, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     let joined: String = String::from_utf8_lossy(&pdf)
         .split('(')
         .skip(1)
@@ -6224,7 +6340,7 @@ async fn document_labels_reach_the_pdf_and_validation_binds() {
         joined.contains("Service delivered"),
         "custom description column label"
     );
-    let (_sg, got) = json_req(&app, "GET", "/admin/invoice-template", None).await;
+    let (_sg, got) = json_req(&app, "GET", "/api/admin/invoice-template", None).await;
     assert_eq!(
         got["template"]["labels"]["description"],
         "Service delivered"
@@ -6240,7 +6356,7 @@ async fn seed_retainer(app: &Client, opening: u64) -> String {
     let (s, r) = json_req(
         app,
         "POST",
-        "/retainers",
+        "/api/retainers",
         Some(json!({"customer_id": cid, "project_code": "WEB", "opening_amount_minor": opening})),
     )
     .await;
@@ -6252,7 +6368,7 @@ async fn seed_retainer(app: &Client, opening: u64) -> String {
 async fn retainer_ledger_reconciles_and_guarded_ops_persist_nothing() {
     let (app, dir) = app().await;
     let rid = seed_retainer(&app, 50_000).await;
-    let (_s, d) = json_req(&app, "GET", &format!("/retainers/{rid}"), None).await;
+    let (_s, d) = json_req(&app, "GET", &format!("/api/retainers/{rid}"), None).await;
     assert_eq!(d["balance_minor"], 50_000);
     assert_eq!(d["retainer"]["transactions"].as_array().unwrap().len(), 1);
 
@@ -6260,7 +6376,7 @@ async fn retainer_ledger_reconciles_and_guarded_ops_persist_nothing() {
     let (sc, cred) = json_req(
         &app,
         "POST",
-        &format!("/retainers/{rid}/credit"),
+        &format!("/api/retainers/{rid}/credit"),
         Some(json!({"amount_minor": 10_000, "reason": "top up", "idempotency_key": "k1"})),
     )
     .await;
@@ -6269,7 +6385,7 @@ async fn retainer_ledger_reconciles_and_guarded_ops_persist_nothing() {
     let (sd, drawn) = json_req(
         &app,
         "POST",
-        &format!("/retainers/{rid}/draw"),
+        &format!("/api/retainers/{rid}/draw"),
         Some(json!({"amount_minor": 25_000, "reason": "March work", "idempotency_key": "k2"})),
     )
     .await;
@@ -6289,19 +6405,19 @@ async fn retainer_ledger_reconciles_and_guarded_ops_persist_nothing() {
     let (sr, br) = json_req(
         &app,
         "POST",
-        &format!("/retainers/{rid}/credit"),
+        &format!("/api/retainers/{rid}/credit"),
         Some(json!({"amount_minor": 10_000, "reason": "double click", "idempotency_key": "k1"})),
     )
     .await;
     assert_eq!(sr, StatusCode::CONFLICT, "{br}");
-    let (_s3, d3) = json_req(&app, "GET", &format!("/retainers/{rid}"), None).await;
+    let (_s3, d3) = json_req(&app, "GET", &format!("/api/retainers/{rid}"), None).await;
     assert_eq!(d3["balance_minor"], 35_000, "replay did not move money");
 
     // Guards: zero amount 422; draw without reason 422; overdraw 409; wrong currency 422.
     let (s0, _) = json_req(
         &app,
         "POST",
-        &format!("/retainers/{rid}/credit"),
+        &format!("/api/retainers/{rid}/credit"),
         Some(json!({"amount_minor": 0})),
     )
     .await;
@@ -6309,7 +6425,7 @@ async fn retainer_ledger_reconciles_and_guarded_ops_persist_nothing() {
     let (srn, _) = json_req(
         &app,
         "POST",
-        &format!("/retainers/{rid}/draw"),
+        &format!("/api/retainers/{rid}/draw"),
         Some(json!({"amount_minor": 100})),
     )
     .await;
@@ -6317,7 +6433,7 @@ async fn retainer_ledger_reconciles_and_guarded_ops_persist_nothing() {
     let (sov, _) = json_req(
         &app,
         "POST",
-        &format!("/retainers/{rid}/draw"),
+        &format!("/api/retainers/{rid}/draw"),
         Some(json!({"amount_minor": 35_001, "reason": "greed"})),
     )
     .await;
@@ -6325,26 +6441,26 @@ async fn retainer_ledger_reconciles_and_guarded_ops_persist_nothing() {
     let (scur, _) = json_req(
         &app,
         "POST",
-        &format!("/retainers/{rid}/credit"),
+        &format!("/api/retainers/{rid}/credit"),
         Some(json!({"amount_minor": 100, "currency": "USD"})),
     )
     .await;
     assert_eq!(scur, StatusCode::UNPROCESSABLE_ENTITY);
-    let (_sv2, dv2) = json_req(&app, "GET", &format!("/retainers/{rid}"), None).await;
+    let (_sv2, dv2) = json_req(&app, "GET", &format!("/api/retainers/{rid}"), None).await;
     assert_eq!(dv2["balance_minor"], 35_000, "rejected ops changed nothing");
 
     // Close is final: further mutations 409; history stays readable.
-    let (scl, _) = json_req(&app, "POST", &format!("/retainers/{rid}"), None).await;
+    let (scl, _) = json_req(&app, "POST", &format!("/api/retainers/{rid}"), None).await;
     assert_eq!(scl, StatusCode::OK);
     let (scl2, _) = json_req(
         &app,
         "POST",
-        &format!("/retainers/{rid}/credit"),
+        &format!("/api/retainers/{rid}/credit"),
         Some(json!({"amount_minor": 100})),
     )
     .await;
     assert_eq!(scl2, StatusCode::CONFLICT);
-    let (_sl, dl) = json_req(&app, "GET", &format!("/retainers/{rid}"), None).await;
+    let (_sl, dl) = json_req(&app, "GET", &format!("/api/retainers/{rid}"), None).await;
     assert_eq!(dl["retainer"]["status"], "closed");
     assert_eq!(dl["retainer"]["transactions"].as_array().unwrap().len(), 3);
 
@@ -6352,19 +6468,19 @@ async fn retainer_ledger_reconciles_and_guarded_ops_persist_nothing() {
     json_req(
         &app,
         "POST",
-        "/users",
+        "/api/users",
         Some(
             json!({"name":"Eve","email":"eve@test.local","password":"evepass123","role":"member"}),
         ),
     )
     .await;
     let cookie = login_cookie(&app.router, "eve@test.local", "evepass123").await;
-    let (sm, _, _) = raw(&app.router, "GET", "/retainers", None, Some(&cookie)).await;
+    let (sm, _, _) = raw(&app.router, "GET", "/api/retainers", None, Some(&cookie)).await;
     assert_eq!(sm, StatusCode::FORBIDDEN);
     let (s404, _) = json_req(
         &app,
         "POST",
-        "/retainers/00000000-0000-0000-0000-000000000000/credit",
+        "/api/retainers/00000000-0000-0000-0000-000000000000/credit",
         Some(json!({"amount_minor": 1})),
     )
     .await;
@@ -6380,7 +6496,7 @@ async fn appearance_and_messages_are_honored_not_inert() {
     let (sb, _) = json_req(
         &app,
         "PUT",
-        "/admin/org",
+        "/api/admin/org",
         Some(json!({"name":"X","reply_to":"nope"})),
     )
     .await;
@@ -6388,19 +6504,19 @@ async fn appearance_and_messages_are_honored_not_inert() {
     let (sb2, _) = json_req(
         &app,
         "PUT",
-        "/admin/org",
+        "/api/admin/org",
         Some(json!({"name":"X","accent":"e95420"})),
     )
     .await;
     assert_eq!(sb2, StatusCode::UNPROCESSABLE_ENTITY);
-    let (_sv, before) = json_req(&app, "GET", "/admin/org", None).await;
+    let (_sv, before) = json_req(&app, "GET", "/api/admin/org", None).await;
     assert_eq!(before["name"], "", "rejections persisted nothing");
 
     // Valid save round-trips.
     let (s, saved) = json_req(
         &app,
         "PUT",
-        "/admin/org",
+        "/api/admin/org",
         Some(json!({"name":"Tucano BV","from_name":"Tucano Invoicing",
                     "reply_to":"billing@tucano.test","accent":"#E95420"})),
     )
@@ -6412,7 +6528,7 @@ async fn appearance_and_messages_are_honored_not_inert() {
     // message carries it and build_mime would render From/Reply-To.
     let (issued, iid) = seed_issued_invoice(&app).await;
     let _ = issued;
-    let (se, _b) = json_req(&app, "POST", &format!("/invoices/{iid}/email"), None).await;
+    let (se, _b) = json_req(&app, "POST", &format!("/api/invoices/{iid}/email"), None).await;
     assert_eq!(se, StatusCode::OK);
     let msg = &app.email.messages()[0];
     assert_eq!(msg.from_name.as_deref(), Some("Tucano Invoicing"));
@@ -6420,16 +6536,16 @@ async fn appearance_and_messages_are_honored_not_inert() {
 
     // The accent paints the newly issued document: color ops exist, and
     // re-rendering is byte-identical (the #113 determinism contract).
-    let (_s2, _h2, pdf) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_s2, _h2, pdf) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert!(pdf.windows(3).any(|w| w == b" rg"), "accent emitted");
-    let (_s3, _h3, pdf2) = raw_req(&app, "GET", &format!("/invoices/{iid}/pdf")).await;
+    let (_s3, _h3, pdf2) = raw_req(&app, "GET", &format!("/api/invoices/{iid}/pdf")).await;
     assert_eq!(pdf, pdf2, "accented bytes deterministic");
 
     // Clearing the accent restores the ink-only document (no color ops).
     json_req(
         &app,
         "PUT",
-        "/admin/org",
+        "/api/admin/org",
         Some(json!({"name":"Tucano BV","from_name":"","reply_to":"","accent":""})),
     )
     .await;
@@ -6439,20 +6555,20 @@ async fn appearance_and_messages_are_honored_not_inert() {
     json_req(
         &app,
         "POST",
-        "/entries",
+        "/api/entries",
         Some(json!({"date":"2026-11-02","customer_id":cid,"project_code":"PZ","hours":1})),
     )
     .await;
     let (_s4, inv) = json_req(
         &app,
         "POST",
-        "/invoices",
+        "/api/invoices",
         Some(json!({"customer_id":cid,"from":"2026-11-01","to":"2026-11-07"})),
     )
     .await;
     let iid2 = inv["id"].as_str().unwrap();
-    json_req(&app, "POST", &format!("/invoices/{iid2}/issue"), None).await;
-    let (_s5, _h5, plain) = raw_req(&app, "GET", &format!("/invoices/{iid2}/pdf")).await;
+    json_req(&app, "POST", &format!("/api/invoices/{iid2}/issue"), None).await;
+    let (_s5, _h5, plain) = raw_req(&app, "GET", &format!("/api/invoices/{iid2}/pdf")).await;
     assert!(
         !plain.windows(3).any(|w| w == b" rg"),
         "cleared accent = no color"
@@ -6466,9 +6582,9 @@ async fn customer_without_ever_having_projects_deletes_cleanly() {
     let (app, _d) = app().await;
     let c = new_customer(&app, "BARE", "EUR", 5000).await;
     let cid = c["id"].as_str().unwrap();
-    let (s, _, _) = raw_req(&app, "DELETE", &format!("/customers/{cid}")).await;
+    let (s, _, _) = raw_req(&app, "DELETE", &format!("/api/customers/{cid}")).await;
     assert_eq!(s, StatusCode::NO_CONTENT);
-    let (_sg, list) = json_req(&app, "GET", "/customers", None).await;
+    let (_sg, list) = json_req(&app, "GET", "/api/customers", None).await;
     assert!(
         list["customers"]
             .as_array()

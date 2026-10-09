@@ -8,7 +8,7 @@
 //! (keyed by provider + invoice; the same invoice maps to a stable remote
 //! reference), **retryable** (failures are recorded, a daily job re-pushes
 //! them), and **non-blocking** (a failed sync never fails the invoice flow —
-//! status is visible through `GET /sync/accounting`).
+//! status is visible through `GET /api/sync/accounting`).
 
 use std::sync::Arc;
 
@@ -330,7 +330,7 @@ pub fn record_sync(
     } = attempt;
     // #190: provider/transport error text can carry upstream URLs and
     // response bodies, and these records are echoed to clients by
-    // GET /sync/accounting. Log the detail server-side; persist a stable
+    // GET /api/sync/accounting. Log the detail server-side; persist a stable
     // short marker (status/attempts still drive the retry job).
     let error = if error.is_empty() {
         String::new()
