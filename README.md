@@ -15,7 +15,7 @@ suite — file-based (no database), one container, browser GUI.
 - **Reports** — totals grouped by customer, project or ISO week; **CSV export** (formula-injection safe).
 - **Invoices** — generate a draft from a period's billable work, snapshotting each entry's rate; issuing **locks** its entries, **archives a PDF** for download, email attachment (#113) and audited PDF copies to third parties such as the accountant (#112); record **full or partial payments** (#114, a per-invoice ledger with a partly-paid state) or **write off** uncollectable balances, and an **outstanding/overdue** dashboard tracks the balance still owed.
 - **Invoice overview** — open/paid tiles, a year-navigable monthly Open-vs-Paid chart, Open/All lists with search, customer/project/date filters, sortable columns and column visibility — row selection (click or keyboard) opens the document preview (#135).
-- **Tracked-work wizard** — a staged create-from-time flow (customer → period & projects with uninvoiced-hours per project → live review via `POST /invoices/preview`) that saves a draft only after the review; project-scoped generation excludes other projects' work (#134).
+- **Tracked-work wizard** — a staged create-from-time flow (customer → period & projects with uninvoiced-hours per project → live review via `POST /api/invoices/preview`) that saves a draft only after the review; project-scoped generation excludes other projects' work (#134).
 - **Retainers** — advance funds per customer/project as an append-only ledger: opening, add funds, draws with reason, closable; balances are always reconciled from transactions, never stored (#144).
 - **Appearance & messages** — invoice document accent (printed into the archived PDF) and sender display name / Reply-To, all honored by the real transports — no inert settings; credentials stay in the vault (#146).
 - **Catalog & labels** — reusable Product/Service line types prefill manual invoice lines (archive keeps history); field labels rename the document's wording without touching API names (#147).
@@ -33,6 +33,10 @@ docker run -d -p 8080:8080 -v tucanotime-data:/data --name tucanotime tucanotime
 ```
 
 Open <http://localhost:8080/> — the API docs are at <http://localhost:8080/docs>.
+The whole JSON API lives under `/api`, which leaves the top-level paths as
+bookmarkable GUI views — `/timesheets/day|week|calendar`, `/customers`,
+`/projects`, `/tasks`, `/invoices`, `/expenses`, `/approvals`, `/reports` and
+`/settings/security|users|invoices|catalog|expenses` (case-insensitive).
 All data lives in the mounted volume; back it up like any document folder.
 
 ## Persistence & upgrades (#94)
@@ -51,7 +55,7 @@ volume is the installation:
 
 Precedence everywhere is **explicit env → `config.json` → built-in
 default**, so you can pin values with env at the OS layer or persist them on
-the volume via `PUT /admin/config` / `GET /admin/config` (masked to the
+the volume via `PUT /api/admin/config` / `GET /api/admin/config` (masked to the
 non-secret whitelist by construction).
 
 Secret files (bind-mount / Docker secrets) work for both keys:
