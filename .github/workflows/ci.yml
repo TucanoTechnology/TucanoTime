@@ -52,7 +52,7 @@ jobs:
       # Log in to GHCR on main pushes; skip on PRs (no token needed for build-only).
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -64,7 +64,7 @@ jobs:
       #   • tucanotime:<sha>                   (PRs — local build check, never pushed)
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -72,7 +72,7 @@ jobs:
             type=sha,format=short
 
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           pull: true
