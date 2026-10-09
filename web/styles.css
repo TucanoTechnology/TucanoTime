@@ -214,9 +214,13 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chip-x { border: none; background: none; color: var(--danger); font-size: 1rem; line-height: 1; padding: 0 .1rem; cursor: pointer; }
 
 /* ---- auth ---- */
+/* First-admin sign-in is the twin of the first-run setup wizard (#229): a
+   Vanilla p-card with a ruled header, .65rem field rhythm and the full-width
+   primary action below. Vanilla owns the frame, header divider and buttons. */
 .auth-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 70%, var(--fg) 30%); padding: 1rem; }
-.auth-card { width: min(360px, 100%); }
-.auth-title { margin: 0 0 .25rem; font-size: 1.3rem; color: var(--brand); }
+.auth-card { width: min(360px, 100%); margin: 0; }
+.auth-title { margin: 0 0 .25rem; font-size: 1.3rem; font-weight: 400; color: var(--brand); }
+#auth-sub { margin: 0; }
 button.primary { width: 100%; }
 /* #145-alignment: the page-level "+" buttons share one size and sit at the
    right end of their header row (min-width fits the longest label). */
@@ -421,11 +425,23 @@ td.cell.locked .cell-input { opacity: .6; }
 #week-table .row-total { white-space: nowrap; }
 .week-controls select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
 
-/* First-run setup wizard (#111). */
-#wizard-dialog { max-width: 30rem; }
-#wizard-dialog .field { margin: 0 0 .7rem; }
+/* First-run setup wizard (#111) and first-admin sign-in (#229) are twins:
+   both are a Vanilla p-card with a ruled header, .65rem field rhythm and a
+   full-width primary action. The native dialog stays chromeless so the inner
+   p-card is the single frame, exactly as in the auth overlay. Ids are
+   unchanged, so the jsdom + wizard smoke checks drive the same elements. */
+#wizard-dialog { max-width: 30rem; padding: 0; border: 0; background: transparent; box-shadow: none; }
+#wizard-dialog .p-card { margin: 0; }
+#wizard-dialog h2 { margin: 0; font-size: 1.3rem !important; font-weight: 400; color: var(--brand); }
+#wizard-dialog .wz-step { min-width: 0; }
 #wizard-dialog .wz-step p:first-child { margin-top: 0; }
+#wizard-dialog .field { margin: 0 0 .65rem; }
+#wizard-dialog .field:last-child { margin-bottom: 0; }
 #wz-status { min-height: 1.2em; margin: .2rem 0 .4rem; }
+/* Same action rhythm as the auth window: the full-width primary submit
+   (button.primary is already 100%) sits below its secondary companions. */
+#wizard-dialog .dlg-actions { margin-top: 1rem; }
+#wizard-dialog .dlg-actions .secondary { flex: 1 1 0; }
 .tab-sep { height: 1px; background: var(--line); margin: .45rem .5rem .35rem; }
 /* The wizard entry sits among the tabs but is an action, not a tab (#111):
    same chrome as .tabs [role="tab"], minus the selected state; #125 pins it

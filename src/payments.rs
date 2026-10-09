@@ -122,7 +122,7 @@ impl StripeProvider {
 }
 
 /// Demo-mode webhook verification bypass: **env-only** (never config.json, so
-/// `PUT /admin/config` cannot turn it on remotely) and never honoured when a
+/// `PUT /api/admin/config` cannot turn it on remotely) and never honoured when a
 /// real webhook secret is configured or `TUCANO_ENV=production` (review A3).
 fn demo_flag(env: &str, has_real_secret: bool) -> bool {
     if std::env::var(env).is_err() {

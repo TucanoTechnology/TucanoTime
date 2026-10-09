@@ -1661,7 +1661,7 @@ impl Store {
     /// leaves the timer intact rather than double-logging on retry.
     ///
     /// #214: the timer's existence is verified INSIDE the same lock, before
-    /// the entry is written. Two concurrent `POST /timer/stop` calls both read
+    /// the entry is written. Two concurrent `POST /api/timer/stop` calls both read
     /// the timer earlier (that read is unlocked); the loser used to still write
     /// its own entry and merely skip the timer delete, double-logging the
     /// time. Now the loser finds no timer under the lock and 404s instead.
@@ -2291,7 +2291,7 @@ mod index_tests {
 
 #[cfg(test)]
 mod timer_finish_tests {
-    // #214: two concurrent POST /timer/stop calls must not both log time.
+    // #214: two concurrent POST /api/timer/stop calls must not both log time.
     use super::*;
     use crate::domain::{Entry, Hours, ProjectCode, Source};
     use chrono::{TimeZone, Utc};

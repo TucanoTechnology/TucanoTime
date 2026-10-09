@@ -48,12 +48,16 @@ struct Assets;
 const OPENAPI: &str = include_str!("../openapi.json");
 
 pub fn build_router(state: AppState) -> Router {
-    // Public: liveness, the contract + docs, and the auth endpoints. The GUI
-    // assets (fallback) are public so the login screen can load.
-    let public = Router::new()
+    // Server meta and the GUI shell stay at the root; every JSON endpoint lives
+    // under `/api` so the top-level paths are free for GUI page routes (e.g.
+    // `/timesheets/week`, `/settings/users`). The GUI assets (fallback) are
+    // public so the login screen can load.
+    let meta = Router::new()
         .route("/healthz", get(api::healthz))
         .route("/openapi.json", get(openapi))
-        .route("/docs", get(docs))
+        .route("/docs", get(docs));
+
+    let public = Router::new()
         .route("/auth/bootstrap", axum::routing::post(api::bootstrap))
         .route("/auth/login", axum::routing::post(api::login))
         .route("/auth/logout", axum::routing::post(api::logout))
@@ -288,9 +292,7 @@ pub fn build_router(state: AppState) -> Router {
             api::require_admin,
         ));
 
-    public
-        .merge(protected)
-        .merge(admin)
+    meta.nest("/api", public.merge(protected).merge(admin))
         // Dev-mode live reload (SSE): active only when TUCANO_WEB_DIR is set.
         // In production the watcher is None and the endpoint returns 404.
         .route(
@@ -350,10 +352,10 @@ async fn csrf_guard(
     );
     // Login/bootstrap are pre-session; payment webhooks are authenticated by
     // provider signature instead of the cookie+CSRF pair (#34).
-    let exempt = path == "/auth/login"
-        || path == "/auth/bootstrap"
-        || path == "/auth/sso/assertion" // pre-session; the assertion is its own proof (review A6)
-        || path.starts_with("/payments/webhook/");
+    let exempt = path == "/api/auth/login"
+        || path == "/api/auth/bootstrap"
+        || path == "/api/auth/sso/assertion" // pre-session; the assertion is its own proof (review A6)
+        || path.starts_with("/api/payments/webhook/");
     if mutating && !exempt {
         let ok = req
             .headers()
@@ -391,6 +393,34 @@ async fn docs() -> Response {
     }
 }
 
+/// The GUI's bookmarkable page routes (#TBD). Each maps to the same
+/// single-page shell; the client router reads `location.pathname` and selects
+/// the matching tab/segment/panel. Matched case-insensitively with any
+/// trailing slash ignored. Keep this in sync with `ROUTES` in `web/app.js`.
+fn spa_page(path: &str) -> bool {
+    let p = path.trim_end_matches('/').to_ascii_lowercase();
+    matches!(
+        p.as_str(),
+        "" | "/timesheets"
+            | "/timesheets/day"
+            | "/timesheets/week"
+            | "/timesheets/calendar"
+            | "/customers"
+            | "/projects"
+            | "/tasks"
+            | "/invoices"
+            | "/expenses"
+            | "/approvals"
+            | "/reports"
+            | "/settings"
+            | "/settings/security"
+            | "/settings/users"
+            | "/settings/invoices"
+            | "/settings/catalog"
+            | "/settings/expenses"
+    )
+}
+
 /// Serves the GUI.
 ///
 /// **Production** (no `TUCANO_WEB_DIR`): files are read from the embedded
@@ -406,9 +436,14 @@ async fn docs() -> Response {
 /// Unknown non-API paths 404 with the JSON error shape so no path or asset
 /// enumeration leaks internals (production) or filesystem paths (dev).
 async fn static_assets(uri: axum::http::Uri) -> Response {
-    let rel = match uri.path() {
-        "/" => "index.html",
-        p => p.trim_start_matches('/'),
+    // GUI page routes (e.g. /timesheets/week, /settings/users) all serve the
+    // single-page shell so a screen can be bookmarked or referenced directly.
+    // Every other path is treated as a real asset and 404s if absent, so this
+    // stays an allowlist rather than a blanket catch-all.
+    let rel = if spa_page(uri.path()) {
+        "index.html"
+    } else {
+        uri.path().trim_start_matches('/')
     };
 
     // Dev mode: serve directly from the web dir on disk.
