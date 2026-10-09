@@ -61,8 +61,8 @@ const postJson = (path, body) =>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-await postJson(BASE + '/auth/bootstrap', { name: 'Admin', email: 'admin@test.local', password: 'supersecret1' });
-const loginRes = await postJson(BASE + '/auth/login', { email: 'admin@test.local', password: 'supersecret1' });
+await postJson(BASE + '/api/auth/bootstrap', { name: 'Admin', email: 'admin@test.local', password: 'supersecret1' });
+const loginRes = await postJson(BASE + '/api/auth/login', { email: 'admin@test.local', password: 'supersecret1' });
 SESSION_COOKIE = (loginRes.headers.get('set-cookie') || '').split(';')[0];
 // NOTE: no API seeding of customers/projects here — the first-run setup
 // wizard (#111) creates ACME + P-9 through the real UI below, exercising the
@@ -165,10 +165,10 @@ window.document.getElementById('wz-project-code').value = 'p-9';
 window.document.getElementById('wz-project-name').value = 'Portal';
 window.document.getElementById('wz-next').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(400);
-const custs111 = (await (await fetch(BASE + '/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
+const custs111 = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
 const acme111 = custs111.find((c) => c.name === 'ACME');
 const projs111 = acme111
-  ? (await (await fetch(`${BASE}/customers/${acme111.id}/projects`, { headers: { Cookie: SESSION_COOKIE } })).json()).projects
+  ? (await (await fetch(`${BASE}/api/customers/${acme111.id}/projects`, { headers: { Cookie: SESSION_COOKIE } })).json()).projects
   : [];
 check('wizard created customer + project through the real routes',
   !!acme111 && acme111.default_rate_minor === 6000
@@ -230,7 +230,7 @@ entryForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: 
 await tick(250);
 
 // ---- verify the entry actually reached the server through the form ----
-const day = await (await fetch(BASE + '/entries?date=2026-11-11')).json();
+const day = await (await fetch(BASE + '/api/entries?date=2026-11-11')).json();
 const made = day.entries.find((e) => e.hours === 4.25 && e.project_code === 'P-9');
 check('form submit created the entry via API', !!made);
 check('entry note stored as typed', made && made.note === 'gui-test entry');
@@ -263,11 +263,11 @@ check('aria-live region announced an add', /added|updated/i.test(live));
   check('Escape cancels and closes the dialog (#145)', !isOpen());
   check('cancel announces nothing was saved (#145)',
     /Entry cancelled . nothing was saved/i.test(window.document.getElementById('live-region').textContent));
-  const before = (await (await fetch(BASE + '/entries?date=2026-11-11', { headers: { Cookie: SESSION_COOKIE } })).json()).entries.length;
+  const before = (await (await fetch(BASE + '/api/entries?date=2026-11-11', { headers: { Cookie: SESSION_COOKIE } })).json()).entries.length;
   window.document.getElementById('entry-hours').value = '7';
   window.document.getElementById('entry-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(200);
-  const after = (await (await fetch(BASE + '/entries?date=2026-11-11', { headers: { Cookie: SESSION_COOKIE } })).json()).entries.length;
+  const after = (await (await fetch(BASE + '/api/entries?date=2026-11-11', { headers: { Cookie: SESSION_COOKIE } })).json()).entries.length;
   check('cancelling then not submitting saved nothing (#145)', after === before);
   // Edit opens the dialog pre-filled with the Update label.
   const editBtn = [...window.document.querySelectorAll('#day-table tbody button')].find((b) => /edit/i.test(b.textContent));
@@ -299,17 +299,17 @@ check(
 window.document.getElementById('dlg-cancel').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(120);
 check('dialog closes on cancel', !isOpen());
-const kept = await (await fetch(BASE + '/entries?date=2026-11-11')).json();
+const kept = await (await fetch(BASE + '/api/entries?date=2026-11-11')).json();
 check('cancel keeps the entry (nothing deleted)', kept.entries.some((e) => e.id === made.id));
 // Confirm path: same flow, OK accepts and the entry disappears.
 dlgDel.dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(120);
 window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(400);
-const gone = await (await fetch(BASE + '/entries?date=2026-11-11')).json();
+const gone = await (await fetch(BASE + '/api/entries?date=2026-11-11')).json();
 check('confirming in the dialog deletes the entry', !gone.entries.some((e) => e.id === made.id));
 // Restore the entry (later checks assert the 4.25h day) and re-render.
-await postJson('/entries', {
+await postJson('/api/entries', {
   date: '2026-11-11',
   customer_id: acmeOpt.value,
   project_code: 'P-9',
@@ -352,11 +352,11 @@ check('copy previous day lists the P-9 row', !!copyRow && copyRow.textContent.in
 copyRow.querySelector('input').value = '3';
 copyRow.querySelector('button').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(250);
-const day12 = await (await fetch(BASE + '/entries?date=2026-11-12')).json();
+const day12 = await (await fetch(BASE + '/api/entries?date=2026-11-12')).json();
 const copied = day12.entries.find((e) => e.project_code === 'P-9' && e.hours === 3);
 check('copied row saved through the API', !!copied);
 // Clean up so later week-view assertions stay at 4.25h.
-await fetch(`${BASE}/entries/${copied.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE } });
+await fetch(`${BASE}/api/entries/${copied.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE } });
 
 // ---- create a brand-new customer through the customers form ----
 const custForm = window.document.getElementById('customer-form');
@@ -379,7 +379,7 @@ window.document.getElementById('customer-rate').value = '45.50';
 custForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(250);
 
-const customers = (await (await fetch(BASE + '/customers')).json()).customers;
+const customers = (await (await fetch(BASE + '/api/customers')).json()).customers;
 const globex = customers.find((c) => c.name === 'Globex');
 check('customer form created Globex', !!globex);
 check('customer save closes the popup and restores focus',
@@ -433,7 +433,7 @@ const emptyCell = cellOf('2026-11-09');
 emptyCell.value = '2.5';
 emptyCell.dispatchEvent(new window.Event('focusout', { bubbles: true }));
 await tick(400);
-const sep9 = await (await fetch(BASE + '/entries?date=2026-11-09')).json();
+const sep9 = await (await fetch(BASE + '/api/entries?date=2026-11-09')).json();
 check('inline cell save created an entry via POST', sep9.entries.some((e) => e.hours === 2.5 && e.project_code === 'P-9'));
 check('row total updated to 6:45 after inline save', window.document.querySelector('#week-table tbody tr .row-total').textContent.trim() === '6:45');
 
@@ -450,7 +450,7 @@ check(
 );
 window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(400);
-const sep9b = await (await fetch(BASE + '/entries?date=2026-11-09')).json();
+const sep9b = await (await fetch(BASE + '/api/entries?date=2026-11-09')).json();
 check('clearing the cell deleted the entry', sep9b.entries.every((e) => e.hours !== 2.5));
 
 // #126: the note affordance edits IN the grid — dialog opens, cancel is safe.
@@ -534,7 +534,7 @@ window.document.getElementById('project-code').value = 'mkt-2';
 window.document.getElementById('project-rate').value = '95.00';
 window.document.getElementById('project-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(250);
-const projs = (await (await fetch(BASE + `/customers/${acmeOpt.value}/projects`)).json()).projects;
+const projs = (await (await fetch(BASE + `/api/customers/${acmeOpt.value}/projects`)).json()).projects;
 const mkt = projs.find((p) => p.code === 'MKT-2');
 check('project form created MKT-2 with prefilled EUR + override rate', mkt && mkt.currency === 'EUR' && mkt.rate_minor === 9500);
 check('project save closes popup and restores toolbar focus',
@@ -604,7 +604,7 @@ check('task popup has no rate or currency override controls',
   !window.document.getElementById('task-rate') && !window.document.getElementById('task-currency'));
 window.document.getElementById('task-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(250);
-const tasks = (await (await fetch(BASE + `/customers/${acmeOpt.value}/projects/MKT-2/tasks`)).json()).tasks;
+const tasks = (await (await fetch(BASE + `/api/customers/${acmeOpt.value}/projects/MKT-2/tasks`)).json()).tasks;
 const t1 = tasks.find((t) => t.code === 'T1');
 check('task created without billing override fields',
   t1 && !('rate_minor' in t1) && !('currency' in t1));
@@ -634,7 +634,7 @@ window.document.getElementById('entry-date').value = '2026-12-01';
 window.document.getElementById('entry-hours').value = '1';
 window.document.getElementById('entry-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(250);
-const dec = (await (await fetch(BASE + '/entries?date=2026-12-01')).json()).entries;
+const dec = (await (await fetch(BASE + '/api/entries?date=2026-12-01')).json()).entries;
 check('entry logged against task T1', dec.some((e) => e.task_code === 'T1'));
 
 // ---- INVOICES (#8): generate a draft for ACME's billable work, then issue ----
@@ -645,15 +645,15 @@ window.document.getElementById('invoice-from').value = '2026-12-01';
 window.document.getElementById('invoice-to').value = '2026-12-31';
 window.document.getElementById('invoice-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(300);
-const invs = (await (await fetch(BASE + '/invoices')).json()).invoices;
+const invs = (await (await fetch(BASE + '/api/invoices')).json()).invoices;
 const acmeInv = invs.find((i) => i.customer_id === acmeOpt.value);
 check('draft invoice generated', !!acmeInv && acmeInv.status === 'draft');
 check('invoice total reflects billable work (MKT-2 1h x 95 = 95.00)', acmeInv && acmeInv.total_minor === 9500);
 // Issue it via the API and confirm the invoiced entry is now locked.
-const issueRes = await fetch(`${BASE}/invoices/${acmeInv.id}/issue`, { method: 'POST', headers: { Cookie: SESSION_COOKIE } });
+const issueRes = await fetch(`${BASE}/api/invoices/${acmeInv.id}/issue`, { method: 'POST', headers: { Cookie: SESSION_COOKIE } });
 check('invoice issues', issueRes.status === 200);
 const invoicedEntryId = acmeInv.lines[0].entry_id;
-const editRes = await fetch(`${BASE}/entries/${invoicedEntryId}`, {
+const editRes = await fetch(`${BASE}/api/entries/${invoicedEntryId}`, {
   method: 'PUT',
   headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE },
   body: JSON.stringify({ date: '2026-12-01', customer_id: acmeOpt.value, project_code: 'MKT-2', hours: 1 }),
@@ -663,7 +663,7 @@ check('issuing locks the invoiced entry (edit -> 409)', editRes.status === 409);
 // ---- INVOICE PDF (#113): archived at issue, downloadable, hinted in JSON ----
 const issuedBody = await issueRes.clone().json();
 check('issue persists the pdf hint', issuedBody.pdf && /^INV-\d+\.pdf$/.test(issuedBody.pdf.filename) && issuedBody.pdf.sha256.length === 64 && issuedBody.pdf.bytes > 100);
-const pdfRes = await fetch(`${BASE}/invoices/${acmeInv.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } });
+const pdfRes = await fetch(`${BASE}/api/invoices/${acmeInv.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } });
 const pdfHead = new Uint8Array(await pdfRes.arrayBuffer().then((b) => b.slice(0, 8)));
 check(
   'GET /invoices/{id}/pdf serves the archived PDF',
@@ -700,12 +700,12 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('Escape closes the preview (#133)', panel.hidden === true);
   await showAllInvoices(); // #135 default Open tab hides drafts
   // A draft says "no document yet" instead of offering a 409 download.
-  await fetch(BASE + '/entries', {
+  await fetch(BASE + '/api/entries', {
     method: 'POST',
     headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
     body: JSON.stringify({ date: '2029-01-05', customer_id: acmeOpt.value, project_code: 'P-9', hours: 1 }),
   });
-  const draft = await (await fetch(BASE + '/invoices', {
+  const draft = await (await fetch(BASE + '/api/invoices', {
     method: 'POST',
     headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
     body: JSON.stringify({ customer_id: acmeOpt.value, from: '2029-01-01', to: '2029-01-31' }),
@@ -721,12 +721,12 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     && window.document.getElementById('ip-pdf-state').hidden === false
     && /Draft/.test(window.document.getElementById('ip-pdf-state').textContent));
   // cleanup: delete the draft so later checks see the expected list
-  await fetch(BASE + `/invoices/${draft.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' } });
+  await fetch(BASE + `/api/invoices/${draft.id}`, { method: 'DELETE', headers: { Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' } });
 }
 
 // ---- CALENDAR VIEW (#140): month grid of logged time ----
 {
-  await fetch(BASE + '/entries', {
+  await fetch(BASE + '/api/entries', {
     method: 'POST',
     headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
     body: JSON.stringify({ date: '2026-12-25', customer_id: acmeOpt.value, project_code: 'P-9', hours: 3.5, note: 'xmas call' }),
@@ -817,7 +817,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('user-cost-rate').value = '12.34';
   window.document.getElementById('user-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(500);
-  const usersResult = await (await fetch(BASE + '/users')).json();
+  const usersResult = await (await fetch(BASE + '/api/users')).json();
   const managed = usersResult.users.find((user) => user.email === 'managed-qa@test.local');
   check('user popup creates exact minor-unit rates and closes',
     managed && managed.default_rate_minor === 4567 && managed.cost_rate_minor === 1234 && !userDialog.open);
@@ -880,7 +880,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('item-price').value = '120.00';
   window.document.getElementById('item-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(400);
-  const cat = (await (await fetch(BASE + '/admin/item-types', { headers: { Cookie: SESSION_COOKIE } })).json()).item_types;
+  const cat = (await (await fetch(BASE + '/api/admin/item-types', { headers: { Cookie: SESSION_COOKIE } })).json()).item_types;
   check('catalog item created via the form (#147)', cat.length === 1 && cat[0].name === 'Site visit' && cat[0].default_price_minor === 12000);
   window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.Event('click', { bubbles: true }));
   check('Invoice documents tab shows template and field-label settings',
@@ -891,7 +891,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('lb-description').value = 'Work performed';
   window.document.getElementById('template-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(400);
-  const tpl = (await (await fetch(BASE + '/admin/invoice-template', { headers: { Cookie: SESSION_COOKIE } })).json()).template;
+  const tpl = (await (await fetch(BASE + '/api/admin/invoice-template', { headers: { Cookie: SESSION_COOKIE } })).json()).template;
   check('field labels persist with the template (#147)',
     tpl.labels.total === 'Amount due' && tpl.labels.description === 'Work performed');
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -943,14 +943,14 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     totalsTxt);
   window.document.getElementById('ed-save').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(500);
-  const mInvs = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices;
+  const mInvs = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices;
   const manual = mInvs.find((i) => i.total_minor === 16335 && i.status === 'draft');
   check('manual draft saved with server-computed totals (#143)', !!manual && manual.lines.length === 2
     && manual.lines[0].amount_minor === 10000 && manual.lines[1].item_kind === 'service');
   check('manual save announced and closed the editor (#143)',
     edPanel.hidden === true && /Draft INV-\d+ saved \(total 163\.35 EUR\)/.test(window.document.getElementById('live-region').textContent));
   check('manual draft locks nothing (entries untouched) (#143)',
-    !(await (await fetch(BASE + `/invoices/${manual.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } }))).ok);
+    !(await (await fetch(BASE + `/api/invoices/${manual.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } }))).ok);
   // Re-edit the draft through the Edit action and save unchanged.
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(350);
@@ -964,20 +964,20 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     && [...window.document.querySelectorAll('#ed-lines tbody input[type=text]')].some((x) => x.value === 'Office seat'));
   window.document.getElementById('ed-save').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(500);
-  const after = await (await fetch(BASE + `/invoices/${manual.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
+  const after = await (await fetch(BASE + `/api/invoices/${manual.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
   check('idempotent re-save keeps totals (#143)', after.total_minor === 16335 && after.lines.length === 2);
 }
 
 // ---- TRACKED-WORK INVOICE WIZARD (#134) ----
 {
   for (const [date, hours] of [['2027-03-03', 2], ['2027-03-04', 1]]) {
-    await fetch(BASE + '/entries', {
+    await fetch(BASE + '/api/entries', {
       method: 'POST',
       headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
       body: JSON.stringify({ date, customer_id: acmeOpt.value, project_code: 'MKT-2', hours }),
     });
   }
-  const invsBefore = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
+  const invsBefore = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
   window.document.getElementById('iw-customer').value = acmeOpt.value;
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(300);
@@ -1004,11 +1004,11 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   check('review is step 3 of the wizard (#134)',
     window.document.getElementById('iw-step3').hidden === false
     && window.document.getElementById('iw-save').hidden === false);
-  const invsMid = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
+  const invsMid = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.length;
   check('preview persisted nothing before Save (#134)', invsMid === invsBefore);
   window.document.getElementById('iw-save').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(500);
-  const invsAfter = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices;
+  const invsAfter = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices;
   const wizardDraft = invsAfter.find((i) => i.total_minor === 28500 && i.status === 'draft');
   check('Save creates exactly one draft from the selection (#134)',
     invsAfter.length === invsBefore + 1 && !!wizardDraft && wizardDraft.lines.length === 2);
@@ -1031,7 +1031,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('ret-opening').value = '500.00';
   window.document.getElementById('ret-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(450);
-  let rets = (await (await fetch(BASE + '/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
+  let rets = (await (await fetch(BASE + '/api/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
   check('retainer created with opening funds (#144)', rets.length === 1 && rets[0].balance_minor === 50000 && rets[0].status === 'open');
   const row = window.document.querySelector('#ret-table tbody tr');
   check('balance and status render from the ledger (#144)',
@@ -1053,7 +1053,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('dlg-input').value = '100.00';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(450);
-  rets = (await (await fetch(BASE + '/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
+  rets = (await (await fetch(BASE + '/api/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
   check('add funds credits the ledger (#144)', rets[0].balance_minor === 60000);
   // Draw with a reason.
   const row2 = window.document.querySelector('#ret-table tbody tr');
@@ -1067,7 +1067,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('dlg-input').value = 'advance against March work';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(450);
-  rets = (await (await fetch(BASE + '/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
+  rets = (await (await fetch(BASE + '/api/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
   check('draw reduces balance with reason (#144)', rets[0].balance_minor === 57500
     && /draw recorded/i.test(window.document.getElementById('live-region').textContent));
   // Over-draw is refused by the API and announced.
@@ -1081,7 +1081,7 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   window.document.getElementById('dlg-input').value = 'greed';
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(450);
-  rets = (await (await fetch(BASE + '/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
+  rets = (await (await fetch(BASE + '/api/retainers', { headers: { Cookie: SESSION_COOKIE } })).json()).retainers;
   check('overdraw refused, balance intact (#144)', rets[0].balance_minor === 57500
     && /Draw failed/i.test(window.document.getElementById('live-region').textContent));
 }
@@ -1098,19 +1098,19 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
     !window.document.getElementById('rec-error').hidden
     && /retainer/i.test(window.document.getElementById('rec-error').textContent));
   check('rejected schedule persisted nothing (#136)',
-    (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules.length === 0);
+    (await (await fetch(BASE + '/api/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules.length === 0);
   window.document.getElementById('rec-mode').value = 'time';
   window.document.getElementById('rec-cadence').value = 'quarterly';
   window.document.getElementById('rec-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(400);
-  const recs = (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules;
+  const recs = (await (await fetch(BASE + '/api/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules;
   check('schedule created via the form (#136)', recs.length === 1 && recs[0].cadence === 'quarterly' && recs[0].active === true);
   const pauseBtn = [...window.document.querySelectorAll('#rec-table tbody button')].find((b) => b.textContent === 'Pause');
   check('active schedule offers Pause (#136)', !!pauseBtn);
   pauseBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(400);
   check('pause persists and announces (#136)',
-    (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules[0].active === false
+    (await (await fetch(BASE + '/api/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules[0].active === false
     && /paused/i.test(window.document.getElementById('live-region').textContent));
   const row = window.document.querySelector('#rec-table tbody tr');
   check('paused badge + Last billed cursor render (#136)',
@@ -1119,14 +1119,14 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
   resumeBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(300);
   check('resume works (#136)',
-    (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules[0].active === true);
+    (await (await fetch(BASE + '/api/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules[0].active === true);
   const delBtn = [...window.document.querySelectorAll('#rec-table tbody button')].find((b) => b.textContent === 'Delete');
   delBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(200);
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(300);
   check('delete removes the schedule (#136)',
-    (await (await fetch(BASE + '/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules.length === 0
+    (await (await fetch(BASE + '/api/schedules', { headers: { Cookie: SESSION_COOKIE } })).json()).schedules.length === 0
     && !window.document.getElementById('rec-empty').hidden);
 }
 
@@ -1190,15 +1190,15 @@ check('PDF download names the file by invoice number', /filename="INV-\d+\.pdf"/
 }
 
 // ---- EMAIL (#35): set a billing email, then email the issued invoice ----
-const custObj = (await (await fetch(BASE + `/customers/${acmeOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
+const custObj = (await (await fetch(BASE + `/api/customers/${acmeOpt.value}`, { headers: { Cookie: SESSION_COOKIE } })).json());
 custObj.email = 'billing@acme.test';
-const putC = await fetch(`${BASE}/customers/${acmeOpt.value}`, {
+const putC = await fetch(`${BASE}/api/customers/${acmeOpt.value}`, {
   method: 'PUT',
   headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE },
   body: JSON.stringify({ name: custObj.name, currency: custObj.currency, default_rate_minor: custObj.default_rate_minor, active: custObj.active, email: 'billing@acme.test' }),
 });
 check('customer email round-trips via API', putC.status === 200 && (await putC.json()).email === 'billing@acme.test');
-const emailRes = await fetch(`${BASE}/invoices/${acmeInv.id}/email`, { method: 'POST', headers: { Cookie: SESSION_COOKIE } });
+const emailRes = await fetch(`${BASE}/api/invoices/${acmeInv.id}/email`, { method: 'POST', headers: { Cookie: SESSION_COOKIE } });
 const emailBody = await emailRes.json();
 check('invoice email endpoint sends to the billing address', emailRes.status === 200 && emailBody.sent_to === 'billing@acme.test');
 
@@ -1250,7 +1250,7 @@ if (copyBtn) {
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(400);
   check('Email copy announces honestly', /accountant@gui.test/.test(window.document.getElementById('live-region').textContent));
-  const audit = await (await fetch(BASE + '/audit', { headers: { Cookie: SESSION_COOKIE } })).json();
+  const audit = await (await fetch(BASE + '/api/audit', { headers: { Cookie: SESSION_COOKIE } })).json();
   check(
     'Email copy lands in the audit log with the recipient',
     audit.events.some((e) => e.event === 'invoice_email_copy' && e.subject.includes('accountant@gui.test')),
@@ -1265,16 +1265,16 @@ check('invoice rows no longer render a Pay link button (#129)', !rowBtns().inclu
 check('invoice rows no longer render a Sync button (#129)', !rowBtns().includes('Sync'));
 {
   // A signed webhook (fake-mode Stripe, signature ignored) marks the invoice paid.
-  const chk = await (await fetch(`${BASE}/invoices/${acmeInv.id}/checkout`, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: JSON.stringify({ provider: 'stripe' }) })).json();
+  const chk = await (await fetch(`${BASE}/api/invoices/${acmeInv.id}/checkout`, { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: JSON.stringify({ provider: 'stripe' }) })).json();
   const whBody = JSON.stringify({ type: 'checkout.session.completed', payment_status: 'paid', amount_minor: 9500, currency: 'EUR', client_reference_id: chk.reference, metadata: { invoice_number: acmeInv.number } });
-  const whRes = await fetch(`${BASE}/payments/webhook/stripe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: whBody });
+  const whRes = await fetch(`${BASE}/api/payments/webhook/stripe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: whBody });
   const whJson = await whRes.json();
   check('webhook marks the invoice paid', whRes.status === 200 && whJson.status === 'paid');
-  const afterInv = (await (await fetch(BASE + '/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.find((i) => i.id === acmeInv.id);
+  const afterInv = (await (await fetch(BASE + '/api/invoices', { headers: { Cookie: SESSION_COOKIE } })).json()).invoices.find((i) => i.id === acmeInv.id);
   check('invoice now paid with a provider reference', afterInv.status === 'paid' && /stripe:/.test(afterInv.payment_reference));
 
   // ---- ACCOUNTING SYNC (#33): the status endpoint stays live (API-only now) ----
-  const stRes = await fetch(BASE + '/sync/accounting', { headers: { Cookie: SESSION_COOKIE } });
+  const stRes = await fetch(BASE + '/api/sync/accounting', { headers: { Cookie: SESSION_COOKIE } });
   const stJson = await stRes.json();
   check('accounting status endpoint responds', stRes.status === 200 && Array.isArray(stJson.records));
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -1283,7 +1283,7 @@ check('invoice rows no longer render a Sync button (#129)', !rowBtns().includes(
     rowBtns().includes('PDF') && rowBtns().includes('Email copy'));
 
   // ---- SSO (#32): provider discovery endpoint (login screen advertises them) ----
-  const ssoRes = await fetch(BASE + '/auth/sso/providers');
+  const ssoRes = await fetch(BASE + '/api/auth/sso/providers');
   const ssoJson = await ssoRes.json();
   check('SSO providers endpoint responds pre-session', ssoRes.status === 200 && Array.isArray(ssoJson.providers));
   check('login screen hides SSO box with none configured', window.document.getElementById('sso-box').hidden === true);
@@ -1293,7 +1293,7 @@ check('invoice rows no longer render a Sync button (#129)', !rowBtns().includes(
 const tabExp = window.document.getElementById('tab-expenses');
 tabExp.dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(250);
-let cats = (await (await fetch(BASE + '/categories')).json()).categories;
+let cats = (await (await fetch(BASE + '/api/categories')).json()).categories;
 check('fresh installation seeds five common expense categories',
   ['Food', 'Travel', 'Lodging', 'Supplies', 'Software'].every((name) => cats.some((category) => category.name === name)));
 check('expense page has no inline record/category editor',
@@ -1312,7 +1312,7 @@ check('Add new category opens the quick-add popup', window.document.getElementBy
 window.document.getElementById('expense-category-name').value = 'Client Visit';
 window.document.getElementById('expense-category-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(250);
-cats = (await (await fetch(BASE + '/categories')).json()).categories;
+cats = (await (await fetch(BASE + '/api/categories')).json()).categories;
 const clientVisit = cats.find((category) => category.name === 'Client Visit');
 check('quick-added category is persisted and selected', !!clientVisit && catPicker.value === clientVisit.id);
 window.document.getElementById('expense-date').value = '2026-10-05';
@@ -1325,7 +1325,7 @@ window.document.getElementById('expense-currency').value = 'EUR';
 window.document.getElementById('expense-note').value = 'client visit flight';
 window.document.getElementById('expense-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(250);
-const exps = (await (await fetch(BASE + '/expenses')).json()).expenses;
+const exps = (await (await fetch(BASE + '/api/expenses')).json()).expenses;
 const ex = exps.find((e) => e.note === 'client visit flight');
 check('expense created via popup with category + amount', ex && ex.amount_minor === 12500 && ex.category_id === clientVisit.id);
 check('successful expense save closes popup', window.document.getElementById('expense-dialog').open === false);
@@ -1340,21 +1340,21 @@ editClientVisit.dispatchEvent(new window.Event('click', { bubbles: true }));
 window.document.getElementById('category-name').value = 'Client visit costs';
 window.document.getElementById('category-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(250);
-cats = (await (await fetch(BASE + '/categories')).json()).categories;
+cats = (await (await fetch(BASE + '/api/categories')).json()).categories;
 check('Settings category form updates existing category via PUT',
   cats.some((category) => category.id === clientVisit.id && category.name === 'Client visit costs'));
 
 // ---- SUBMISSIONS (#16): submit a fresh week via the GUI ----
-const fresh = await (await fetch(BASE + '/entries', { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ date: '2027-01-05', customer_id: acmeOpt.value, project_code: 'P-9', hours: 2 }) })).json();
+const fresh = await (await fetch(BASE + '/api/entries', { method: 'POST', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ date: '2027-01-05', customer_id: acmeOpt.value, project_code: 'P-9', hours: 2 }) })).json();
 const tabSub = window.document.getElementById('tab-submissions');
 tabSub.dispatchEvent(new window.Event('click', { bubbles: true }));
 window.document.getElementById('submission-week').value = '2027-01-04';
 window.document.getElementById('submission-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(250);
-const subs = (await (await fetch(BASE + '/submissions')).json()).submissions;
+const subs = (await (await fetch(BASE + '/api/submissions')).json()).submissions;
 const jan = subs.find((x) => x.week_start === '2027-01-04');
 check('submission created via GUI', jan && jan.state === 'submitted' && jan.entry_ids.includes(fresh.id));
-const lockRes = await fetch(`${BASE}/entries/${fresh.id}`, { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ date: '2027-01-05', customer_id: acmeOpt.value, project_code: 'P-9', hours: 3 }) });
+const lockRes = await fetch(`${BASE}/api/entries/${fresh.id}`, { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE }, body: JSON.stringify({ date: '2027-01-05', customer_id: acmeOpt.value, project_code: 'P-9', hours: 3 }) });
 check('submitted week locks its entries (edit -> 409)', lockRes.status === 409);
 
 // ---- WEEK GRID (#13): add row, copy last week, lock column ----
@@ -1432,7 +1432,7 @@ if (daysRow) {
   check('edit persists to config.json and source becomes file', after.cells[1].textContent === '12' && after.cells[2].textContent === 'file');
 }
 // Non-whitelisted keys cannot be written even via the API.
-const badCfg = await fetch(BASE + '/admin/config', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: '{"smtp.password":"nope"}' });
+const badCfg = await fetch(BASE + '/api/admin/config', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: '{"smtp.password":"nope"}' });
 check('secret-shaped config keys are refused', badCfg.status === 422);
 
 // ---- INVOICE TEMPLATE (#116): admin editor, cheat-sheet, rejection, preview ----
@@ -1456,14 +1456,14 @@ window.document.getElementById('settings-tab-invoice').dispatchEvent(new window.
   window.document.getElementById('org-name').value = 'Acme Invoice Co';
   window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(350);
-  const o = await (await fetch(BASE + '/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
+  const o = await (await fetch(BASE + '/api/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
   check('sender display name + reply-to + accent persist (#146)',
     o.from_name === 'Tucano Billing Desk' && o.reply_to === 'invoices@acme.test' && o.accent === '#e95420');
   // Invalid reply-to refuses with an inline error and stores nothing.
   set('org-reply', 'not-an-email');
   window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(300);
-  const o2 = await (await fetch(BASE + '/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
+  const o2 = await (await fetch(BASE + '/api/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
   check('invalid Reply-To shows inline error and persists nothing (#146)',
     !window.document.getElementById('org-error').hidden
     && /reply/i.test(window.document.getElementById('org-error').textContent)
@@ -1478,11 +1478,11 @@ check('company identity form saves and reloads (#138)', await (async () => {
   window.document.getElementById('org-country').value = 'IT';
   window.document.getElementById('org-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(350);
-  const o = await (await fetch(BASE + '/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
+  const o = await (await fetch(BASE + '/api/admin/org', { headers: { Cookie: SESSION_COOKIE } })).json();
   return o.name === 'Tucano SRL' && o.legal_id === 'BE0987654321' && o.address.country === 'IT'
     && !window.document.getElementById('org-error').hidden === false;
 })());
-const tplCleared = await fetch(BASE + '/admin/org', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: JSON.stringify({ name: '', legal_id: '', address: null }) });
+const tplCleared = await fetch(BASE + '/api/admin/org', { method: 'PUT', headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' }, body: JSON.stringify({ name: '', legal_id: '', address: null }) });
 check('empty org name restores the config fallback (#138)', tplCleared.status === 200);
 check('template editor renders the variable cheat-sheet from the server', varRows.length >= 12 && varRows.some((r) => r.textContent.includes('%invoice_issue_month%')));
 // Unknown variable: inline error, no save.
@@ -1504,7 +1504,7 @@ check('custom terms reveal the days input', !window.document.getElementById('tem
 window.document.getElementById('template-terms-days').value = '21';
 window.document.getElementById('template-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(300);
-const tpl = await (await fetch(BASE + '/admin/invoice-template', { headers: { Cookie: SESSION_COOKIE } })).json();
+const tpl = await (await fetch(BASE + '/api/admin/invoice-template', { headers: { Cookie: SESSION_COOKIE } })).json();
 check('template saved with custom terms', tpl.template.body.includes('%customer_name%') && tpl.template.payment_terms.kind === 'custom' && tpl.template.payment_terms.days === 21);
 check('template save announced', /template saved/i.test(window.document.getElementById('live-region').textContent));
 
@@ -1518,7 +1518,7 @@ window.document.getElementById('customer-subject').value = 'INV %invoice_number%
 window.document.getElementById('customer-notes').value = 'Please quote the invoice number.';
 window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await tick(400);
-const termCusts = (await (await fetch(BASE + '/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
+const termCusts = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
 const termy = termCusts.find((c) => c.name === 'Termy LLC');
 check('customer invoice fields persist via the form', !!termy && termy.payment_terms.kind === 'upon_receipt'
   && termy.invoice_subject.includes('%invoice_number%') && termy.invoice_notes.includes('quote the invoice'));
@@ -1543,7 +1543,7 @@ check('customer invoice fields persist via the form', !!termy && termy.payment_t
   }
   window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await tick(400);
-  const addrCusts = (await (await fetch(BASE + '/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
+  const addrCusts = (await (await fetch(BASE + '/api/customers', { headers: { Cookie: SESSION_COOKIE } })).json()).customers;
   const addrCo = addrCusts.find((x) => x.name === 'AddrCo');
   check('customer address + VAT persist via the form (#139)',
     !!addrCo && addrCo.address.country === 'BE' && addrCo.tax_hundredths === 2100);
@@ -1561,17 +1561,17 @@ check('preview body is plain text (textContent-only rule)', window.document.getE
   && window.document.getElementById('template-preview-body').textContent.includes('consulting work'));
 
 // ---- PARTIAL PAYMENTS & WRITE-OFF (#114): record payment + write off via GUI ----
-const paid2028 = await (await fetch(BASE + '/entries', {
+const paid2028 = await (await fetch(BASE + '/api/entries', {
   method: 'POST',
   headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
   body: JSON.stringify({ date: '2028-02-02', customer_id: acmeOpt.value, project_code: 'MKT-2', hours: 4 }),
 })).json();
-const inv114 = await (await fetch(BASE + '/invoices', {
+const inv114 = await (await fetch(BASE + '/api/invoices', {
   method: 'POST',
   headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
   body: JSON.stringify({ customer_id: acmeOpt.value, from: '2028-02-01', to: '2028-02-29' }),
 })).json();
-await fetch(`${BASE}/invoices/${inv114.id}/issue`, { method: 'POST', headers: { Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' } });
+await fetch(`${BASE}/api/invoices/${inv114.id}/issue`, { method: 'POST', headers: { Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' } });
 window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
 await tick(300);
 const balCells = [...window.document.querySelectorAll('#invoice-table tbody tr')]
@@ -1592,7 +1592,7 @@ if (recBtn) {
   await tick(200);
   window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true })); // reference step: empty ok
   await tick(400);
-  const after = await (await fetch(`${BASE}/invoices/${inv114.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
+  const after = await (await fetch(`${BASE}/api/invoices/${inv114.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
   check('partial payment recorded as partly_paid with a ledger line', after.status === 'partly_paid' && after.payments.length === 1 && after.payments[0].amount_minor === 1000);
   check('record payment announces remaining balance', /still outstanding/i.test(window.document.getElementById('live-region').textContent));
   // Write off the rest.
@@ -1607,7 +1607,7 @@ if (recBtn) {
     await tick(200);
     window.document.getElementById('dlg-ok').dispatchEvent(new window.Event('click', { bubbles: true })); // confirm step
     await tick(400);
-    const wo = await (await fetch(`${BASE}/invoices/${inv114.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
+    const wo = await (await fetch(`${BASE}/api/invoices/${inv114.id}`, { headers: { Cookie: SESSION_COOKIE } })).json();
     check('write-off finalizes with the reason', wo.status === 'written_off' && wo.write_off_reason === 'goodwill waiver');
     check('write-off announced', /written off/i.test(window.document.getElementById('live-region').textContent));
   }
@@ -1640,12 +1640,12 @@ if (recBtn) {
     window.document.getElementById('customer-rate').value = '90';
     window.document.getElementById('customer-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
     await tick(350);
-    return (await getJson('/customers')).customers.find((c) => c.name === name);
+    return (await getJson('/api/customers')).customers.find((c) => c.name === name);
   };
   const wfCust = await mkCustomer(`WF-${tag}`);
   const weCust = await mkCustomer(`WE-${tag}`);
-  await postJson(`/customers/${wfCust.id}/projects`, { code: 'W1', currency: 'EUR', rate_minor: 7000 });
-  await postJson(`/customers/${wfCust.id}/projects/W1/tasks`, { code: 'T1', name: 'Focus work' });
+  await postJson(`/api/customers/${wfCust.id}/projects`, { code: 'W1', currency: 'EUR', rate_minor: 7000 });
+  await postJson(`/api/customers/${wfCust.id}/projects/W1/tasks`, { code: 'T1', name: 'Focus work' });
 
   // ---- DAY: one billable entry with a note through the dialog (#145) ----
   window.document.getElementById('tab-timesheet').dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -1675,7 +1675,7 @@ if (recBtn) {
   await tick(450);
   wfDlg.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await tick(150);
-  const wfEntry = (await getJson('/entries?date=2031-04-11')).entries
+  const wfEntry = (await getJson('/api/entries?date=2031-04-11')).entries
     .find((e) => e.customer_id === wfCust.id && e.project_code === 'W1');
   check('day entry created on the task, billable, with note (#141)',
     !!wfEntry && wfEntry.hours === 3.25 && wfEntry.task_code === 'T1'
@@ -1710,7 +1710,7 @@ if (recBtn) {
   // ---- TRACKED INVOICE WIZARD (#134): review, then save DRAFT ----
   window.document.getElementById('tab-invoices').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(300);
-  const invsBefore = (await getJson('/invoices')).invoices.length;
+  const invsBefore = (await getJson('/api/invoices')).invoices.length;
   window.document.getElementById('iw-customer').value = wfCust.id;
   window.document.getElementById('iw-next').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(300);
@@ -1735,21 +1735,21 @@ if (recBtn) {
   check('review shows the exact line, currency and 227.50 EUR (#141)',
     /227\.50/.test(wfReview) && /EUR/.test(wfReview) && /W1/.test(wfReview));
   check('review is persisted nothing before Save (#141)',
-    (await getJson('/invoices')).invoices.length === invsBefore);
+    (await getJson('/api/invoices')).invoices.length === invsBefore);
   window.document.getElementById('iw-save').dispatchEvent(new window.Event('click', { bubbles: true }));
   await tick(550);
   check('save announced a draft with Issue still ahead (#141)',
     /Draft INV-\d+ created from 1 line/.test(window.document.getElementById('live-region').textContent));
-  const wfInv = (await getJson('/invoices')).invoices.find((i) => i.customer_id === wfCust.id);
+  const wfInv = (await getJson('/api/invoices')).invoices.find((i) => i.customer_id === wfCust.id);
   check('exactly one draft exists, locked nothing (#141)',
-    (await getJson('/invoices')).invoices.length === invsBefore + 1
+    (await getJson('/api/invoices')).invoices.length === invsBefore + 1
     && !!wfInv && wfInv.status === 'draft' && /^INV-/.test(wfInv.number));
   const wfLine = wfInv.lines[0];
   check('draft line is the reviewed entry with snapshot money (#141)',
     wfInv.lines.length === 1 && wfLine.entry_id === wfEntry.id && wfLine.task_code === 'T1'
     && wfLine.hours === 3.25 && wfLine.rate_minor === 7000 && wfLine.amount_minor === 22750);
-  const wfPdf = await fetch(`${BASE}/invoices/${wfInv.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } });
-  const wfPut = await fetch(`${BASE}/entries/${wfEntry.id}`, {
+  const wfPdf = await fetch(`${BASE}/api/invoices/${wfInv.id}/pdf`, { headers: { Cookie: SESSION_COOKIE } });
+  const wfPut = await fetch(`${BASE}/api/entries/${wfEntry.id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', Cookie: SESSION_COOKIE, 'X-CSRF-Protection': '1' },
     body: JSON.stringify({ date: '2031-04-11', customer_id: wfCust.id, project_code: 'W1', task_code: 'T1', hours: 3.25, note: 'wf: legal research', billable: true }),
@@ -1800,7 +1800,7 @@ if (recBtn) {
   const weErr = window.document.getElementById('iw-error');
   check('forcing an empty period errors inline and drafts nothing (#141)',
     weErr.hidden === false && /no billable|nothing/i.test(weErr.textContent)
-    && (await getJson('/invoices')).invoices.every((i) => i.customer_id !== weCust.id));
+    && (await getJson('/api/invoices')).invoices.every((i) => i.customer_id !== weCust.id));
 
   // ---- TEARDOWN: no fixture survives (#141) ----
   const del = async (path) => {
@@ -1808,15 +1808,15 @@ if (recBtn) {
     if (r.status >= 300) console.log(`TEARDOWN ${r.status} ${path} ${(await r.text()).slice(0, 120)}`);
     return r;
   };
-  await del(`/invoices/${wfInv.id}`);
-  await del(`/entries/${wfEntry.id}`);
-  await del(`/customers/${wfCust.id}/projects/W1/tasks/T1`);
-  await del(`/customers/${wfCust.id}/projects/W1`);
-  await del(`/customers/${wfCust.id}`);
-  await del(`/customers/${weCust.id}`);
-  const left = await getJson('/customers');
-  const leftInv = await getJson('/invoices');
-  const leftEnt = await getJson('/entries?date=2031-04-11');
+  await del(`/api/invoices/${wfInv.id}`);
+  await del(`/api/entries/${wfEntry.id}`);
+  await del(`/api/customers/${wfCust.id}/projects/W1/tasks/T1`);
+  await del(`/api/customers/${wfCust.id}/projects/W1`);
+  await del(`/api/customers/${wfCust.id}`);
+  await del(`/api/customers/${weCust.id}`);
+  const left = await getJson('/api/customers');
+  const leftInv = await getJson('/api/invoices');
+  const leftEnt = await getJson('/api/entries?date=2031-04-11');
   console.log('LEFT ' + JSON.stringify(left.customers.map((c) => [c.name, c.id.slice(0, 8)])));
   const goneCust = left.customers.every((c) => !c.name.startsWith(`WF-${tag}`) && !c.name.startsWith(`WE-${tag}`));
   const goneInv = leftInv.invoices.every((i) => i.id !== wfInv.id);

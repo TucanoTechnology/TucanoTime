@@ -5,6 +5,11 @@
 
 'use strict';
 
+// Every JSON endpoint lives under /api (page routing); the top-level paths are
+// GUI page routes (see the URL router near the boot section). One base keeps
+// all callers unchanged and stops the API shadowing page paths like /customers.
+const API_BASE = '/api';
+
 const api = {
   async request(method, url, body) {
     const opts = { method, headers: {} };
@@ -14,7 +19,7 @@ const api = {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
     }
-    const res = await fetch(url, opts);
+    const res = await fetch(API_BASE + url, opts);
     if (res.status === 204) return null;
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
@@ -30,7 +35,7 @@ const api = {
   // <a href> would also send the cookie, but we need to inspect the status
   // and map error JSON, so this mirrors request() for the non-JSON case.
   async getBlob(url) {
-    const res = await fetch(url, { method: 'GET', headers: {}, credentials: 'same-origin' });
+    const res = await fetch(API_BASE + url, { method: 'GET', headers: {}, credentials: 'same-origin' });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       let msg = `HTTP ${res.status}`;
@@ -295,7 +300,7 @@ function formatMoney(minor) {
 // ----------------------------------------------------------------- cache ---
 
 const state = {
-  isAdmin: false, // #188: set from /auth/me; gates admin-tier panel loads at boot
+  isAdmin: false, // #188: set from /api/auth/me; gates admin-tier panel loads at boot
   customers: [],           // Customer[]
   projectsByCustomer: {},  // id -> Project[]
   // #182: the Setup hierarchy is three sections with filter state instead of
@@ -394,6 +399,7 @@ function activateSeg(segId, refresh = true) {
     $(tab.getAttribute('aria-controls')).hidden = !on;
   }
   segActiveId = segId;
+  syncRoute();
   if (refresh) refreshTimesheetView();
 }
 
@@ -434,6 +440,7 @@ function initSettingsTabs() {
       if (panel) panel.hidden = !active;
     });
     if (moveFocus) tab.focus();
+    syncRoute();
   }
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => activate(tab, false));
@@ -464,6 +471,124 @@ function showTimesheet(segId) {
     suppressPanelRefresh = false;
   }
   activateSeg(segId, false);
+}
+
+// ------------------------------------------------------------- url router ---
+//
+// Every view has a stable, case-insensitive path (e.g. /timesheets/week,
+// /settings/users) so a screen can be bookmarked or referenced in a review.
+// The server serves the same shell for these paths (`spa_page` in lib.rs);
+// this router maps a path back to the tab/segment/panel and keeps the address
+// bar in step. Keep the route table in sync with `spa_page`.
+
+let routerReady = false;
+
+const DEFAULT_ROUTE = '/timesheets/day';
+const TAB_ROUTES = {
+  'tab-timesheet': {
+    'ts-day': '/timesheets/day',
+    'ts-week': '/timesheets/week',
+    'ts-cal': '/timesheets/calendar',
+  },
+  'tab-customers': '/customers',
+  'tab-projects': '/projects',
+  'tab-tasks': '/tasks',
+  'tab-invoices': '/invoices',
+  'tab-expenses': '/expenses',
+  'tab-submissions': '/approvals',
+  'tab-reports': '/reports',
+  'tab-settings': {
+    'settings-tab-security': '/settings/security',
+    'settings-tab-users': '/settings/users',
+    'settings-tab-invoice': '/settings/invoices',
+    'settings-tab-catalog': '/settings/catalog',
+    'settings-tab-expenses': '/settings/expenses',
+  },
+};
+const KNOWN_ROUTES = new Set(
+  Object.values(TAB_ROUTES).flatMap((routes) =>
+    (typeof routes === 'string' ? [routes] : Object.values(routes))),
+);
+
+function activeTabId(tablist) {
+  const tab = document.querySelector(`${tablist} [role="tab"][aria-selected="true"]`);
+  return tab ? tab.id : '';
+}
+
+/// The canonical path for the view currently shown.
+function currentRoute() {
+  const tab = activeTabId('#tabs');
+  const routes = TAB_ROUTES[tab];
+  if (typeof routes === 'string') return routes;
+  if (tab === 'tab-timesheet') return routes[segActiveId] || DEFAULT_ROUTE;
+  if (tab === 'tab-settings') return routes[activeTabId('#settings-tabs')] || '/settings/security';
+  return DEFAULT_ROUTE;
+}
+
+/// Reflect the current view in the address bar. Sub-navigation inside a
+/// section replaces the entry (so Back leaves the section, not each segment);
+/// moving to a different section pushes a new one.
+function syncRoute(forceReplace = false) {
+  if (!routerReady) return;
+  const path = currentRoute();
+  if (window.location.pathname === path) return;
+  const sameSection = window.location.pathname.split('/')[1] === path.split('/')[1];
+  const replace = forceReplace || sameSection;
+  history[replace ? 'replaceState' : 'pushState']({ path }, '', path);
+}
+
+/// Canonical route for a pathname, or null when it names no known view.
+function normaliseRoute(pathname) {
+  const p = (pathname || '/').split('?')[0].replace(/\/+$/, '').toLowerCase();
+  if (p === '' || p === '/') return DEFAULT_ROUTE;
+  if (p === '/timesheets') return '/timesheets/day';
+  if (p === '/settings') return '/settings/security';
+  return KNOWN_ROUTES.has(p) ? p : null;
+}
+
+/// Select the view named by `route` (already canonical). Returns false when
+/// the view is unavailable (e.g. an admin-only panel for a member).
+function applyRoute(route) {
+  const [, top, sub] = route.split('/');
+  const tabFor = {
+    timesheets: 'tab-timesheet',
+    customers: 'tab-customers',
+    projects: 'tab-projects',
+    tasks: 'tab-tasks',
+    invoices: 'tab-invoices',
+    expenses: 'tab-expenses',
+    approvals: 'tab-submissions',
+    reports: 'tab-reports',
+    settings: 'tab-settings',
+  }[top];
+  const tab = tabFor && $(tabFor);
+  if (!tab || tab.hidden) return false;
+  switchTab(tabFor);
+  if (tabFor === 'tab-timesheet') {
+    const seg = { day: 'ts-day', week: 'ts-week', calendar: 'ts-cal' }[sub || 'day'];
+    activateSeg(seg || 'ts-day', false);
+  } else if (tabFor === 'tab-settings') {
+    const settingsId = {
+      security: 'settings-tab-security',
+      users: 'settings-tab-users',
+      invoices: 'settings-tab-invoice',
+      catalog: 'settings-tab-catalog',
+      expenses: 'settings-tab-expenses',
+    }[sub || 'security'];
+    const target = $(settingsId || 'settings-tab-security');
+    if (target && !target.hidden) target.click();
+  }
+  return true;
+}
+
+/// Applies the initial URL (or the default view) and wires Back/Forward.
+function initRouter() {
+  routerReady = true;
+  applyRoute(normaliseRoute(window.location.pathname) || DEFAULT_ROUTE);
+  syncRoute(true); // canonicalise, e.g. '/' -> '/timesheets/day'
+  window.addEventListener('popstate', () => {
+    applyRoute(normaliseRoute(window.location.pathname) || DEFAULT_ROUTE);
+  });
 }
 
 // ------------------------------------------------------ calendar view ----
@@ -582,6 +707,7 @@ function initTabs() {
     const title = $('page-title');
     if (title) title.textContent = tab.textContent.trim();
     tab.focus();
+    syncRoute();
     // Re-pull the panel's data on show so it reflects changes made elsewhere
     // (e.g. an invoice issued via the API) without a full reload.
     refreshPanel(tab.id);
@@ -2004,7 +2130,7 @@ async function runReport(evt) {
   }
   $('report-total').textContent = `${summary.total_hours.toFixed(2)}  (billable ${summary.billable_hours.toFixed(2)} / non-billable ${summary.nonbillable_hours.toFixed(2)})`;
   const link = $('csv-link');
-  link.href = `/reports/export.csv?from=${from}&to=${to}`;
+  link.href = `${API_BASE}/reports/export.csv?from=${from}&to=${to}`;
   link.hidden = false;
   announce(`Report ready: ${summary.rows.length} rows.`);
 }
@@ -4663,6 +4789,7 @@ async function startApp() {
   document.querySelectorAll('button').forEach(decorateUbuntuButton);
   initSegTabs(); // Day | Week inside the Timesheets section (#107)
   initSettingsTabs();
+  initRouter(); // deep-link each view to a stable path (page routing)
   initWizard(); // first-run setup wizard (#111)
 
   wireDayAndCalendar();
@@ -4989,7 +5116,7 @@ async function loadSsoProviders() {
           on: {
             click: () => {
               announce(
-                `Point your ${name} IdP at POST /auth/sso/assertion (provider "${name}"). ` +
+                `Point your ${name} IdP at POST /api/auth/sso/assertion (provider "${name}"). ` +
                 'Local sign-in stays available.',
               );
             },
