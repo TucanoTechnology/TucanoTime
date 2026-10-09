@@ -77,22 +77,22 @@
       "presentation": { "reveal": "always", "panel": "dedicated" }
     },
     {
-      "label": "gui: open Simple Browser",
-      "command": "${input:openSimpleBrowser}",
+      "label": "gui: open browser",
+      "command": "${input:openDefaultBrowser}",
       "problemMatcher": []
     },
     {
-      "label": "gui: run (server + Simple Browser)",
-      "dependsOn": ["gui: server (background)", "gui: open Simple Browser"],
+      "label": "gui: run (server + browser)",
+      "dependsOn": ["gui: server (background)", "gui: open browser"],
       "dependsOrder": "sequence",
       "problemMatcher": []
     }
   ],
   "inputs": [
     {
-      "id": "openSimpleBrowser",
+      "id": "openDefaultBrowser",
       "type": "command",
-      "command": "simpleBrowser.show",
+      "command": "vscode.open",
       "args": ["http://127.0.0.1:8080"]
     }
   ]

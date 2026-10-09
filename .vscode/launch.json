@@ -17,7 +17,12 @@
         "TUCANO_PORT": "8080"
       },
       "sourceLanguages": ["rust"],
-      "preLaunchTask": "cargo build"
+      "preLaunchTask": "cargo build",
+      "serverReadyAction": {
+        "pattern": "listening on :(\\d+)",
+        "uriFormat": "http://127.0.0.1:%s",
+        "action": "openExternally"
+      }
     },
     {
       "name": "Debug unit tests (lib)",
