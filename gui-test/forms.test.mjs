@@ -113,8 +113,8 @@ test('every p-form__group pairs its label with its own control (#232 phase 2b)',
         paired += 1;
     }
     // 152: the Settings split's 141 plus the ten Document label rows (#354)
-    // and the template notes row.
-    assert.equal(paired, 160, 'all 160 label/control pairs were verified');
+    // and the template notes row; the Expense-categories dialog adds one.
+    assert.equal(paired, 161, 'all 161 label/control pairs were verified');
     assert.equal(composed.length, 8, 'eight composed rows have no label of their own');
     assert.equal(composed.filter((row) => row.tag === 'FIELDSET').length, 7, 'seven grouped fieldsets');
     assert.equal(composed.filter((row) => row.tag === 'DIV').length, 1, 'the Contacts row');
