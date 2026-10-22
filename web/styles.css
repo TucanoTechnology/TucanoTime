@@ -10,111 +10,194 @@
    (8.3:1); the orange focus ring meets the 3:1 UI-component minimum. */
 
 :root {
-  --bg: #f6f6f5;          /* warm grey 10% */
-  --surface: #ffffff;     /* white */
-  --fg: #333333;          /* cool grey — body copy */
-  --muted: #5e2750;       /* mid aubergine — secondary text (8.9:1 on white) */
-  --line: #d6d3cf;        /* warm grey 50% */
-  --brand: #e95420;       /* Ubuntu orange: primary action */
-  --brand-ink: #2c001e;   /* dark aubergine text on orange */
-  --brand-hover: #eb6536; /* orange 90% tint */
-  --accent: #e95420;      /* Ubuntu orange: active nav + today */
-  --accent-soft: #fdeee9; /* orange 10% tint */
-  --danger: #772953;      /* Canonical aubergine — destructive */
-  --brand-deep: #772953;  /* Canonical aubergine — wordmark + link text */
-  --field-bg: #ffffff;
-  --focus: #e95420;
-  --row-alt: #f6f6f5;     /* warm grey 10% */
-  --cell-active: #fdeee9; /* orange 10% */
-  --sidebar-bg: #ffffff;
-  --radius: 2px;
-  --shadow: 0 1px 2px rgba(44, 0, 30, .06), 0 1px 3px rgba(44, 0, 30, .10);
-  /* Shared filter-row rhythm (#F follow-up): the horizontal tool rows use one
+   --bg: #f6f6f5;
+   /* warm grey 10% */
+   --surface: #ffffff;
+   /* white */
+   --fg: #333333;
+   /* cool grey — body copy */
+   --muted: #5e2750;
+   /* mid aubergine — secondary text (8.9:1 on white) */
+   --line: #d6d3cf;
+   /* warm grey 50% */
+   --brand: #e95420;
+   /* Ubuntu orange: primary action */
+   --brand-ink: #2c001e;
+   /* dark aubergine text on orange */
+   --brand-hover: #eb6536;
+   /* orange 90% tint */
+   --accent: #e95420;
+   /* Ubuntu orange: active nav + today */
+   --accent-soft: #fdeee9;
+   /* orange 10% tint */
+   --danger: #772953;
+   /* Canonical aubergine — destructive */
+   --brand-deep: #772953;
+   /* Canonical aubergine — wordmark + link text */
+   --field-bg: #ffffff;
+   --focus: #e95420;
+   --row-alt: #f6f6f5;
+   /* warm grey 10% */
+   --cell-active: #fdeee9;
+   /* orange 10% */
+   --sidebar-bg: #ffffff;
+   --radius: 2px;
+   --shadow: 0 1px 2px rgba(44, 0, 30, .06), 0 1px 3px rgba(44, 0, 30, .10);
+   /* Shared filter-row rhythm (#F follow-up): the horizontal tool rows use one
      spacing scale and one control height instead of per-view magic numbers.
      The control height is Vanilla's underline control (1.5rem line + 2x.41rem
      padding + 1px rule = 2.26rem at the 16px root). The field rule and input
      fill mirror the vendored form control in each theme, so the segmented
      status toggle and a text field share the same boundary treatment. */
-  --space-2xs: .15rem;    /* 2.4px - label to its control */
-  --space-xs: .4rem;      /* 6.4px - tight inline group */
-  --space-sm: .5rem;      /* 8px - filter-row gap */
-  --space-md: .75rem;     /* 12px - heading-row gap */
-  --control-height: 2.26rem;
-  --field-rule: #707070;  /* Vanilla --vf-color-border-high-contrast, light */
-  --input-bg: #f5f5f5;    /* Vanilla --vf-color-background-inputs, light */
+   --space-2xs: .15rem;
+   /* 2.4px - label to its control */
+   --space-xs: .4rem;
+   /* 6.4px - tight inline group */
+   --space-sm: .5rem;
+   /* 8px - filter-row gap */
+   --space-md: .75rem;
+   /* 12px - heading-row gap */
+   --control-height: 2.26rem;
+   --field-rule: #707070;
+   /* Vanilla --vf-color-border-high-contrast, light */
+   --input-bg: #f5f5f5;
+   /* Vanilla --vf-color-background-inputs, light */
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #2c001e;          /* dark aubergine */
-    --surface: #411934;     /* dark aubergine 90% */
-    --fg: #f1e9ed;          /* canonical aubergine 10% — near-white */
-    --muted: #d6becb;       /* light aubergine 30% */
-    --line: #56334b;        /* dark aubergine 80% */
-    --brand: #e95420;
-    --brand-ink: #2c001e;
-    --brand-hover: #eb6536;
-    --accent: #f08763;      /* orange 70% — reads on dark surfaces */
-    --accent-soft: #56334b; /* dark plum fill */
-    --danger: #cfb4c2;      /* canonical aubergine 35% */
-    --brand-deep: #d6becb;  /* light aubergine 30% — links on dark */
-    --field-bg: #2c001e;
-    --focus: #f5b29b;       /* orange 45% */
-    --row-alt: #411934;
-    --cell-active: #56334b;
-    --sidebar-bg: #411934;
-    --shadow: none;
-    --field-rule: #939393;  /* Vanilla --vf-color-border-high-contrast, dark */
-    --input-bg: #2f2f2f;    /* Vanilla --vf-color-background-inputs, dark */
-  }
+   :root:not([data-theme="light"]) {
+      --bg: #2c001e;
+      /* dark aubergine */
+      --surface: #411934;
+      /* dark aubergine 90% */
+      --fg: #f1e9ed;
+      /* canonical aubergine 10% — near-white */
+      --muted: #d6becb;
+      /* light aubergine 30% */
+      --line: #56334b;
+      /* dark aubergine 80% */
+      --brand: #e95420;
+      --brand-ink: #2c001e;
+      --brand-hover: #eb6536;
+      --accent: #f08763;
+      /* orange 70% — reads on dark surfaces */
+      --accent-soft: #56334b;
+      /* dark plum fill */
+      --danger: #cfb4c2;
+      /* canonical aubergine 35% */
+      --brand-deep: #d6becb;
+      /* light aubergine 30% — links on dark */
+      --field-bg: #2c001e;
+      --focus: #f5b29b;
+      /* orange 45% */
+      --row-alt: #411934;
+      --cell-active: #56334b;
+      --sidebar-bg: #411934;
+      --shadow: none;
+      --field-rule: #939393;
+      /* Vanilla --vf-color-border-high-contrast, dark */
+      --input-bg: #2f2f2f;
+      /* Vanilla --vf-color-background-inputs, dark */
+   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #2c001e;
-  --surface: #411934;
-  --fg: #f1e9ed;
-  --muted: #d6becb;
-  --line: #56334b;
-  --brand: #e95420;
-  --brand-ink: #2c001e;
-  --brand-hover: #eb6536;
-  --accent: #f08763;
-  --accent-soft: #56334b;
-  --danger: #cfb4c2;
-  --brand-deep: #d6becb;
-  --field-bg: #2c001e;
-  --focus: #f5b29b;
-  --row-alt: #411934;
-  --cell-active: #56334b;
-  --sidebar-bg: #411934;
-  --shadow: none;
-  --field-rule: #939393;
-  --input-bg: #2f2f2f;
+   --bg: #2c001e;
+   --surface: #411934;
+   --fg: #f1e9ed;
+   --muted: #d6becb;
+   --line: #56334b;
+   --brand: #e95420;
+   --brand-ink: #2c001e;
+   --brand-hover: #eb6536;
+   --accent: #f08763;
+   --accent-soft: #56334b;
+   --danger: #cfb4c2;
+   --brand-deep: #d6becb;
+   --field-bg: #2c001e;
+   --focus: #f5b29b;
+   --row-alt: #411934;
+   --cell-active: #56334b;
+   --sidebar-bg: #411934;
+   --shadow: none;
+   --field-rule: #939393;
+   --input-bg: #2f2f2f;
 }
-.theme-switch { border: 0; border-top: 1px solid var(--line); padding: .75rem .5rem; margin: .75rem 0 0; background: none; overflow: visible; } /* Vanilla base `fieldset` (vf-b-forms) tints + clips fieldsets */
-.theme-switch legend { padding: 0 .25rem; font-size: .85rem; color: var(--muted); }
-.theme-switch label { display: inline-flex; align-items: center; gap: .3rem; margin-right: .65rem; font-weight: 400; cursor: pointer; }
-.theme-switch input { accent-color: var(--brand-deep); }
 
-* { box-sizing: border-box; }
+.theme-switch {
+   border: 0;
+   border-top: 1px solid var(--line);
+   padding: .75rem .5rem;
+   margin: .75rem 0 0;
+   background: none;
+   overflow: visible;
+}
+
+/* Vanilla base `fieldset` (vf-b-forms) tints + clips fieldsets */
+.theme-switch legend {
+   padding: 0 .25rem;
+   font-size: .85rem;
+   color: var(--muted);
+}
+
+.theme-switch label {
+   display: inline-flex;
+   align-items: center;
+   gap: .3rem;
+   margin-right: .65rem;
+   font-weight: 400;
+   cursor: pointer;
+}
+
+.theme-switch input {
+   accent-color: var(--brand-deep);
+}
+
+* {
+   box-sizing: border-box;
+}
 
 body {
-  margin: 0;
-  font: 1rem/1.5 "Ubuntu variable", "Segoe UI", sans-serif;
-  color: var(--fg);
-  background: var(--bg);
+   margin: 0;
+   font: 1rem/1.5 "Ubuntu variable", "Segoe UI", sans-serif;
+   color: var(--fg);
+   background: var(--bg);
 }
 
 /* ---- shell ---- */
-.app { display: flex; min-height: 100vh; }
-.sidebar {
-  width: 232px; flex: 0 0 232px;
-  background: var(--sidebar-bg); color: var(--fg);
-  border-right: 1px solid var(--line);
-  padding: 1rem .75rem; display: flex; flex-direction: column; gap: 1rem;
+.app {
+   display: flex;
+   min-height: 100vh;
 }
-.brand { font-size: 1.5rem; font-weight: 550; color: var(--brand-deep); padding: .25rem .5rem; letter-spacing: 0; }
-.sidebar nav { flex: 1; display: flex; flex-direction: column; gap: .15rem; } /* #191: the utility separator + wizard button are nav siblings of the tablist now */
+
+.sidebar {
+   width: 232px;
+   flex: 0 0 232px;
+   background: var(--sidebar-bg);
+   color: var(--fg);
+   border-right: 1px solid var(--line);
+   padding: 1rem .75rem;
+   display: flex;
+   flex-direction: column;
+   gap: 1rem;
+}
+
+.brand {
+   font-size: 1.5rem;
+   font-weight: 550;
+   color: var(--brand-deep);
+   padding: .25rem .5rem;
+   letter-spacing: 0;
+}
+
+.sidebar nav {
+   flex: 1;
+   display: flex;
+   flex-direction: column;
+   gap: .15rem;
+}
+
+/* #191: the utility separator + wizard button are nav siblings of the tablist now */
 /* ---- tablists: the official Vanilla p-tabs pattern (#232 increment 5) ----
    Every app tablist (the sidebar rail, Day|Week|Calendar, the settings bar)
    carries the official `p-tabs__list` / `p-tabs__item` / `p-tabs__link`
@@ -125,74 +208,210 @@ body {
    guarantees. App-owned here is geometry and the rail's ink, nothing else. */
 /* Keep the app's own focus ring (the one the contrast audit reads) on the tab
    links rather than Vanilla's in-box outline. */
-.p-tabs__link:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+.p-tabs__link:focus-visible {
+   outline: 3px solid var(--focus);
+   outline-offset: 1px;
+}
+
 /* Vanilla spaces a tab's icon with `gap`; the global icon margin would double it. */
-.p-tabs__link [class*="p-icon--"] { margin-right: 0; }
+.p-tabs__link [class*="p-icon--"] {
+   margin-right: 0;
+}
 
 /* The sidebar rail is the app's *vertical* tablist (#258 navigates it with
    Up/Down), so Vanilla's horizontal-strip box is unwound: no bottom rule, no
    horizontal scrolling, no trailing item margin. */
-.tabs { display: flex; flex-direction: column; gap: .15rem; }
-.sidebar #tabs.p-tabs__list { width: 100%; margin: 0; overflow: visible; white-space: normal; box-shadow: none; }
-.sidebar .p-tabs__item:last-child { margin-right: 0; }
+.tabs {
+   display: flex;
+   flex-direction: column;
+   gap: .15rem;
+}
+
+.sidebar #tabs.p-tabs__list {
+   width: 100%;
+   margin: 0;
+   overflow: visible;
+   white-space: normal;
+   box-shadow: none;
+}
+
+.sidebar .p-tabs__item:last-child {
+   margin-right: 0;
+}
+
 .sidebar .p-tabs__link {
-  width: 100%; height: auto; min-height: 2.75rem; margin: 0;
-  justify-content: flex-start; text-align: left; /* Vanilla centres a tab */
-  padding: .55rem .7rem;
-  /* the rail keeps the app ink (#333 / #f1e9ed) so it matches the wizard
+   width: 100%;
+   height: auto;
+   min-height: 2.75rem;
+   margin: 0;
+   justify-content: flex-start;
+   text-align: left;
+   /* Vanilla centres a tab */
+   padding: .55rem .7rem;
+   /* the rail keeps the app ink (#333 / #f1e9ed) so it matches the wizard
      entry and the colour-mode switch beside it, not Vanilla's #000/#fff strip
      ink; the selected pair (--brand-deep on --accent-soft) is pinned in
      gui-test/contrast.mjs */
-  color: var(--fg);
-  border-left: 3px solid transparent; border-radius: 0 var(--radius) var(--radius) 0;
+   color: var(--fg);
+   border-left: 3px solid transparent;
+   border-radius: 0 var(--radius) var(--radius) 0;
 }
+
 /* Vanilla's bottom highlight bar is a horizontal-strip affordance; the rail
    keeps the same "selected" cue on its left edge instead. */
 .sidebar .p-tabs__link::before,
-.sidebar .p-tabs__link:focus:not(:focus-visible)::before { content: none; }
-.sidebar .p-tabs__link:hover { background: var(--row-alt); }
+.sidebar .p-tabs__link:focus:not(:focus-visible)::before {
+   content: none;
+}
+
+.sidebar .p-tabs__link:hover {
+   background: var(--row-alt);
+}
+
 .sidebar .p-tabs__link[aria-selected="true"] {
-  background: var(--accent-soft); color: var(--brand-deep);
-  border-left-color: var(--accent); font-weight: 700;
+   background: var(--accent-soft);
+   color: var(--brand-deep);
+   border-left-color: var(--accent);
+   font-weight: 700;
 }
 
 /* The two in-view strips keep their heading-slot geometry (the official list
    hugs its tabs instead of filling the row) and #145's uniform segment widths,
    and drop Vanilla's trailing item margin. */
-.ts-head .p-tabs__list, .settings-head .p-tabs__list { width: auto; margin: 0; }
-#ts-seg .p-tabs__item:last-child, .settings-tabs .p-tabs__item:last-child { margin-right: 0; }
-#ts-seg .p-tabs__link { min-width: 8.5ch; }
-.settings-tabs .p-tabs__link { min-width: 7.5rem; }
-.account { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .5rem; border-top: 1px solid var(--line); color: var(--muted); }
-.account .who { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; }
-.more-tools-group { border-top: 1px solid var(--line); margin-top: .45rem; padding-top: .4rem; }
+.ts-head .p-tabs__list,
+.settings-head .p-tabs__list {
+   width: auto;
+   margin: 0;
+}
+
+#ts-seg .p-tabs__item:last-child,
+.settings-tabs .p-tabs__item:last-child {
+   margin-right: 0;
+}
+
+#ts-seg .p-tabs__link {
+   min-width: 8.5ch;
+}
+
+.settings-tabs .p-tabs__link {
+   min-width: 7.5rem;
+}
+
+.account {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: .5rem;
+   padding: .5rem;
+   border-top: 1px solid var(--line);
+   color: var(--muted);
+}
+
+.account .who {
+   font-size: .85rem;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+
+.more-tools-group {
+   border-top: 1px solid var(--line);
+   margin-top: .45rem;
+   padding-top: .4rem;
+}
+
 /* #349: `.invoice-trends` is no longer a <details> (the promoted top section
    is a plain section + p-card), so only the still-collapsible disclosures keep
    the summary skin. */
-.advanced-billing > summary, .customer-extra-details > summary {
-  cursor: pointer; color: var(--muted); font-weight: 700; padding: .45rem .65rem;
-  border-radius: var(--radius); list-style-position: inside;
+.advanced-billing>summary,
+.customer-extra-details>summary {
+   cursor: pointer;
+   color: var(--muted);
+   font-weight: 700;
+   padding: .45rem .65rem;
+   border-radius: var(--radius);
+   list-style-position: inside;
 }
-.advanced-billing > summary:hover, .customer-extra-details > summary:hover { background: var(--row-alt); color: var(--fg); }
-.advanced-billing[open] > summary, .customer-extra-details[open] > summary { margin-bottom: .45rem; }
 
-.content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.masthead { padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--line); background: var(--surface); }
-.masthead h1 { margin: 0; font-size: 2rem; line-height: 1.25; font-weight: 550; }
+.advanced-billing>summary:hover,
+.customer-extra-details>summary:hover {
+   background: var(--row-alt);
+   color: var(--fg);
+}
+
+.advanced-billing[open]>summary,
+.customer-extra-details[open]>summary {
+   margin-bottom: .45rem;
+}
+
+.content {
+   flex: 1;
+   display: flex;
+   flex-direction: column;
+   min-width: 0;
+}
+
+.masthead {
+   padding: 1.1rem 1.5rem;
+   border-bottom: 1px solid var(--line);
+   background: var(--surface);
+}
+
+.masthead h1 {
+   margin: 0;
+   font-size: 2rem;
+   line-height: 1.25;
+   font-weight: 550;
+}
+
 /* The amount an expense was entered in, beside the value it is billed as: only
    the provenance line of a converted expense, so it stays quiet. */
-.fx-original { color: var(--muted); }
+.fx-original {
+   color: var(--muted);
+}
 
 /* Receipt preview (#23): the document takes the dialog's width and never grows
    past the viewport, so a tall scan scrolls inside the frame instead of pushing
    Download and Close off the screen. */
-.receipt-preview { max-height: 60vh; overflow: auto; }
-.receipt-preview img { display: block; max-width: 100%; max-height: 60vh; margin: 0 auto; }
-.receipt-preview iframe { display: block; width: 100%; min-height: 60vh; border: 0; }
-#expense-converted { min-height: 1.25rem; }
-main { padding: 1.5rem; flex: 1; max-width: 1440px; width: 100%; }
-section[role="tabpanel"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-h2 { font-size: 1.5rem; margin: 1.5rem 0 .75rem; font-weight: 400; }
+.receipt-preview {
+   max-height: 60vh;
+   overflow: auto;
+}
+
+.receipt-preview img {
+   display: block;
+   max-width: 100%;
+   max-height: 60vh;
+   margin: 0 auto;
+}
+
+.receipt-preview iframe {
+   display: block;
+   width: 100%;
+   min-height: 60vh;
+   border: 0;
+}
+
+#expense-converted {
+   min-height: 1.25rem;
+}
+
+main {
+   padding: 1.5rem;
+   flex: 1;
+   max-width: 1440px;
+   width: 100%;
+}
+
+section[role="tabpanel"]:focus-visible {
+   outline: 2px solid var(--focus);
+   outline-offset: 2px;
+}
+
+h2 {
+   font-size: 1.5rem;
+   margin: 1.5rem 0 .75rem;
+   font-weight: 400;
+}
 
 /* ---- controls ---- */
 /* #232 increment 1 (auth + form controls): the official label/input/select/
@@ -202,27 +421,80 @@ h2 { font-size: 1.5rem; margin: 1.5rem 0 .75rem; font-weight: 400; }
    keeps the visible focus ring (the contrast audit reads this sheet) and the
    link/danger affordances. Unconverted `.secondary` buttons keep their existing
    skin until their own increment. */
-button { font: inherit; cursor: pointer; }
-input:focus-visible, select:focus-visible, textarea:focus-visible,
-button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
-button.secondary { background: var(--surface); color: var(--fg); border-color: var(--line); }
-button.secondary:hover { background: var(--row-alt); }
-button.link { background: none; border: none; color: var(--brand-deep); padding: .2rem .35rem; text-decoration: underline; font-weight: 500; }
-button.danger { background: none; border: none; color: var(--danger); padding: .2rem .35rem; text-decoration: underline; font-weight: 500; }
+button {
+   font: inherit;
+   cursor: pointer;
+}
 
-.bar { display: flex; gap: .6rem; align-items: end; flex-wrap: wrap; margin-bottom: .9rem; }
-.bar label { margin-bottom: 0; }
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+   outline: 3px solid var(--focus);
+   outline-offset: 1px;
+}
+
+button.secondary {
+   background: var(--surface);
+   color: var(--fg);
+   border-color: var(--line);
+}
+
+button.secondary:hover {
+   background: var(--row-alt);
+}
+
+button.link {
+   background: none;
+   border: none;
+   color: var(--brand-deep);
+   padding: .2rem .35rem;
+   text-decoration: underline;
+   font-weight: 500;
+}
+
+button.danger {
+   background: none;
+   border: none;
+   color: var(--danger);
+   padding: .2rem .35rem;
+   text-decoration: underline;
+   font-weight: 500;
+}
+
+.bar {
+   display: flex;
+   gap: .6rem;
+   align-items: end;
+   flex-wrap: wrap;
+   margin-bottom: .9rem;
+}
+
+.bar label {
+   margin-bottom: 0;
+}
+
 /* #232 increment 1: Vanilla base forms set width:100% (stacked-form default);
    the app's horizontal filter/tool bars keep intrinsic control widths. */
-.bar input:not([type="checkbox"]):not([type="radio"]), .bar select, .bar textarea,
-.timerbar select, .copy-bar select,
-.accent-row input { width: auto; }
+.bar input:not([type="checkbox"]):not([type="radio"]),
+.bar select,
+.bar textarea,
+.timerbar select,
+.copy-bar select,
+.accent-row input {
+   width: auto;
+}
+
 /* #232 phase 2b (forms): the bespoke `.field` wrapper retires for the official
    `p-form__group`. The .65rem row rhythm the old rule really rendered stays on
    the official class: Vanilla spaces stacked groups only inside
    `.p-form--stacked`, and only at >= 1036px. `.field.checkbox label
    { font-weight: 400 }` was a no-op — the base `label` rule sets no weight. */
-.p-form__group { margin-bottom: .65rem; }
+.p-form__group {
+   margin-bottom: .65rem;
+}
+
 /* Vanilla's `.p-form-help-text` pulls up (margin-top: -.5rem) to hug the input
    above it; the app also uses the class for panel/dialog copy that follows a
    heading or a card edge (and panel copy such as the calendar footer note), so it keeps the
@@ -235,33 +507,104 @@ button.danger { background: none; border: none; color: var(--danger); padding: .
    card body was pulled -.5rem up into the `p-card__header` border — the
    Company intro text overlapped the divider while the Users filters bar (a
    div, not a p) sat correctly below it. The one shared answer is below. */
-.p-form-help-text { margin: revert; }
+.p-form-help-text {
+   margin: revert;
+}
+
 /* Card-body lead: answer the Vanilla first-child pull-up once, at the same
    (0,3,1) specificity (this sheet loads after the bundle, so it wins), for
    every card body — no per-view margin. A lead paragraph starts 1rem below
    the header rule, the same rhythm the Users `.user-filters` row already had,
    so text sits below the divider in every settings card. Non-<p> first blocks
    were never affected (the Vanilla rule only targets p). */
-.p-card__content > p:not([class*="p-heading--"]):first-child { margin-top: 1rem; }
+.p-card__content>p:not([class*="p-heading--"]):first-child {
+   margin-top: 1rem;
+}
+
 /* Tick boxes keep the pre-migration 1rem box (the base width:100% rule does not
    cover checkboxes); `.theme-switch` keeps its own sizing too. */
-.p-form__group input[type="checkbox"], .theme-switch input { min-height: 0; width: 1rem; height: 1rem; }
-button [class*="p-icon--"] { flex: 0 0 1rem; vertical-align: -.15rem; margin-right: .5rem; }
-.day-nav button [class*="p-icon--"] { margin: 0; }
-button.p-button, button.p-button--positive { margin-bottom: 0; }
-button { margin-right: 0; margin-bottom: 0; }
-dialog input:not([type="checkbox"]), dialog select, dialog textarea { width: 100%; }
-button.note-flag { min-height: 1.75rem; min-width: 1.75rem; }
-button.note-flag [class*="p-icon--"] { margin-right: 0; }
-.ws-clock [class*="p-icon--"], .wk-clock [class*="p-icon--"] { width: .875rem; height: .875rem; }
-.lock [class*="p-icon--"] { vertical-align: -.15rem; }
-.bar > * { min-width: 0; }
-.table-scroll { max-width: 100%; }
-button.link, button.danger { min-height: 2rem; }
-input[type="checkbox"], input[type="radio"] { min-height: 0; accent-color: var(--brand-deep); }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+.p-form__group input[type="checkbox"],
+.theme-switch input {
+   min-height: 0;
+   width: 1rem;
+   height: 1rem;
 }
+
+button [class*="p-icon--"] {
+   flex: 0 0 1rem;
+   vertical-align: -.15rem;
+   margin-right: .5rem;
+}
+
+.day-nav button [class*="p-icon--"] {
+   margin: 0;
+}
+
+button.p-button,
+button.p-button--positive {
+   margin-bottom: 0;
+}
+
+button {
+   margin-right: 0;
+   margin-bottom: 0;
+}
+
+dialog input:not([type="checkbox"]),
+dialog select,
+dialog textarea {
+   width: 100%;
+}
+
+button.note-flag {
+   min-height: 1.75rem;
+   min-width: 1.75rem;
+}
+
+button.note-flag [class*="p-icon--"] {
+   margin-right: 0;
+}
+
+.ws-clock [class*="p-icon--"],
+.wk-clock [class*="p-icon--"] {
+   width: .875rem;
+   height: .875rem;
+}
+
+.lock [class*="p-icon--"] {
+   vertical-align: -.15rem;
+}
+
+.bar>* {
+   min-width: 0;
+}
+
+.table-scroll {
+   max-width: 100%;
+}
+
+button.link,
+button.danger {
+   min-height: 2rem;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+   min-height: 0;
+   accent-color: var(--brand-deep);
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+   *,
+   *::before,
+   *::after {
+      animation-duration: .01ms !important;
+      transition-duration: .01ms !important;
+      scroll-behavior: auto !important;
+   }
+}
+
 /* #232 phase 2c: the bespoke `.card` skin is retired — every former `.card`
    element is now the official Vanilla `p-card` (the invoice wizard/editor/
    preview regions, the retainer ledger, the template preview and every
@@ -269,19 +612,62 @@ input[type="checkbox"], input[type="radio"] { min-height: 0; accent-color: var(-
    border. The bespoke max-width caps that only trimmed that skin
    (`.settings-panel > .card`, `.advanced-billing-section .card`) retire with
    it: the 2a registers were already full-width `p-card`s. */
-.buttons { display: flex; gap: .6rem; }
+.buttons {
+   display: flex;
+   gap: .6rem;
+}
 
 /* ---- tables ---- (#232 phase 2f: the vendored base `table` rule owns `border-collapse` + `width`) */
-table { margin-top: .5rem; }
-caption { text-align: left; color: var(--muted); }
-th, td { text-align: left; padding: .5rem .65rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-thead th { border-bottom: 2px solid var(--line); }
-tbody tr:nth-child(odd) { background: var(--row-alt); }
-tfoot th, tfoot td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; }
-td.num, th.num, .ws-total.num { text-align: right; font-variant-numeric: tabular-nums; }
+table {
+   margin-top: .5rem;
+}
+
+caption {
+   text-align: left;
+   color: var(--muted);
+}
+
+th,
+td {
+   text-align: left;
+   padding: .5rem .65rem;
+   border-bottom: 1px solid var(--line);
+   vertical-align: top;
+}
+
+thead th {
+   border-bottom: 2px solid var(--line);
+}
+
+tbody tr:nth-child(odd) {
+   background: var(--row-alt);
+}
+
+tfoot th,
+tfoot td {
+   font-weight: 700;
+   border-top: 2px solid var(--line);
+   border-bottom: none;
+}
+
+td.num,
+th.num,
+.ws-total.num {
+   text-align: right;
+   font-variant-numeric: tabular-nums;
+}
+
 /* Three 44px icon actions, two 4px gaps and the cell padding fit 10.5rem. */
-.actions-col { width: 10.5rem; }
-td[data-icon-actions="1"] { white-space: nowrap; overflow: visible; text-overflow: clip; }
+.actions-col {
+   width: 10.5rem;
+}
+
+td[data-icon-actions="1"] {
+   white-space: nowrap;
+   overflow: visible;
+   text-overflow: clip;
+}
+
 button.icon-action {
    display: inline-flex;
    align-items: center;
@@ -295,8 +681,18 @@ button.icon-action {
    vertical-align: middle;
    text-decoration: none;
 }
-button.icon-action > [class*="p-icon--"] { margin: 0; width: 20px; height: 20px; flex-basis: 20px; }
-button.icon-action.is-tooltip-dismissed > .p-tooltip__message { display: none; }
+
+button.icon-action>[class*="p-icon--"] {
+   margin: 0;
+   width: 20px;
+   height: 20px;
+   flex-basis: 20px;
+}
+
+button.icon-action.is-tooltip-dismissed>.p-tooltip__message {
+   display: none;
+}
+
 /* Actions cell content: one wrapping row. The cell keeps `overflow: visible`
    so its tooltips are not clipped, which also means anything that spills past
    the cell widens the register's scroll area — the trailing icon margin did
@@ -304,87 +700,319 @@ button.icon-action.is-tooltip-dismissed > .p-tooltip__message { display: none; }
    the row's `gap` now, so the last icon ends flush with the cell edge, and a
    crowded register (an issued invoice offers six actions) breaks over a
    second line instead of pushing the buttons out of the column. */
-.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
-.row-actions > button { margin: 0; }
+.row-actions {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: .25rem;
+}
+
+.row-actions>button {
+   margin: 0;
+}
+
 /* The Users register offers four actions; 4 x 44px + three 4px gaps + the cell
    padding is 13.25rem, so its row stays on one line instead of breaking 3 + 1. */
-#user-table .actions-col { width: 13.25rem; }
+#user-table .actions-col {
+   width: 13.25rem;
+}
+
 /* #232 increment 3: status/rate pills are the official Vanilla chip
    (`p-chip` + `p-chip__value`, built by `statusChip` in web/js/dom.js). The
    bespoke `.badge` skin is retired — `p-status-label` is deprecated upstream
    ("merged into the Chip component"), so `p-chip` is the official successor. */
 
-.table-scroll { overflow-x: auto; }
-.table-scroll:focus-visible, .invoice-table-scroll:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-#week-table td.cell { min-width: 5.5rem; }
-#week-table td.cell.has { background: var(--cell-active); font-weight: 600; }
-#week-table td.cell button { white-space: normal; background: none; border: none; color: var(--brand-deep); text-decoration: underline; font-weight: 600; padding: 0; }
+.table-scroll {
+   overflow-x: auto;
+}
+
+.table-scroll:focus-visible,
+.invoice-table-scroll:focus-visible {
+   outline: 3px solid var(--focus);
+   outline-offset: 2px;
+}
+
+#week-table td.cell {
+   min-width: 5.5rem;
+}
+
+#week-table td.cell.has {
+   background: var(--cell-active);
+   font-weight: 600;
+}
+
+#week-table td.cell button {
+   white-space: normal;
+   background: none;
+   border: none;
+   color: var(--brand-deep);
+   text-decoration: underline;
+   font-weight: 600;
+   padding: 0;
+}
 
 /* #232 increment 2 + phase 2a (registers): the customer/project/task/expense/
    report and user/submission/secret/config/item/template-vars/rec/ret registers
    are Vanilla p-card shells — the card owns the frame and header rule, so the
    heading slot (and submit/report bars) drops its bottom margin; dense registers
    use p-table--mobile-card (data-heading) and summaries keep a plain table. */
-#report-form.bar, #submission-form.bar { margin-bottom: 0; }
+#report-form.bar,
+#submission-form.bar {
+   margin-bottom: 0;
+}
 
 /* #232 phase 2b: errors are the official `p-form-validation__message` (inside a
    `p-form-validation is-error` wrapper) and hints are `p-form-help-text`, so the
    `.form-error`/`.hint` skins retired. Only the footer keeps this app ink. */
-.foot { color: var(--muted); font-size: .9rem; padding: 1rem 1.5rem; border-top: 1px solid var(--line); }
-.button-link { display: inline-block; text-decoration: none; background: var(--brand); color: var(--brand-ink); padding: .5rem .9rem; border-radius: var(--radius); font-weight: 600; }
-.skip-link { position: absolute; left: -9999px; }
-.skip-link:focus { left: 1rem; top: .5rem; z-index: 60; background: var(--brand); color: var(--brand-ink); padding: .4rem .8rem; border-radius: var(--radius); }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-[hidden] { display: none !important; }
+.foot {
+   color: var(--muted);
+   font-size: .9rem;
+   padding: 1rem 1.5rem;
+   border-top: 1px solid var(--line);
+}
+
+.button-link {
+   display: inline-block;
+   text-decoration: none;
+   background: var(--brand);
+   color: var(--brand-ink);
+   padding: .5rem .9rem;
+   border-radius: var(--radius);
+   font-weight: 600;
+}
+
+.skip-link {
+   position: absolute;
+   left: -9999px;
+}
+
+.skip-link:focus {
+   left: 1rem;
+   top: .5rem;
+   z-index: 60;
+   background: var(--brand);
+   color: var(--brand-ink);
+   padding: .4rem .8rem;
+   border-radius: var(--radius);
+}
+
+.sr-only {
+   position: absolute;
+   width: 1px;
+   height: 1px;
+   padding: 0;
+   margin: -1px;
+   overflow: hidden;
+   clip: rect(0, 0, 0, 0);
+   white-space: nowrap;
+   border: 0;
+}
+
+[hidden] {
+   display: none !important;
+}
 
 /* ---- chips ---- */
 /* #232 increment 3: editable category chips are official Vanilla `p-chip`s
    (`p-chip__value` + `p-chip__dismiss`). Only the list layout and the
    app-owned "Edit" affordance (Vanilla ships no in-chip edit) stay app-local. */
-.chips { list-style: none; display: flex; flex-wrap: wrap; gap: .4rem; padding: 0; margin: .25rem 0 1rem; }
+.chips {
+   list-style: none;
+   display: flex;
+   flex-wrap: wrap;
+   gap: .4rem;
+   padding: 0;
+   margin: .25rem 0 1rem;
+}
 
 /* ---- auth ---- */
 /* First-admin sign-in is the twin of the first-run setup wizard (#229): a
    Vanilla p-card with a ruled header, .65rem field rhythm and the full-width
    primary action below. Vanilla owns the frame, header divider and buttons. */
-.auth-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 70%, var(--fg) 30%); padding: 1rem; }
-.auth-card { width: min(360px, 100%); margin: 0; }
-.auth-title { margin: 0 0 .25rem; font-size: 1.3rem; font-weight: 400; color: var(--brand-deep); } /* #257: brand orange failed AA (3.65:1 light / 4.07:1 dark) at this size; --brand-deep is 9.4:1 / 8.6:1 */
-#auth-sub { margin: 0; }
-#auth-submit { width: 100%; }
-/* #145-alignment: the page-level "+" buttons share one size and sit at the
-   right end of their header row (min-width fits the longest label). */
-#day-add, #customer-new, #project-new, #task-new, #expense-new, #user-new {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: auto; min-width: 11.5rem;
+.auth-overlay {
+   position: fixed;
+   inset: 0;
+   z-index: 50;
+   display: grid;
+   place-items: center;
+   background: color-mix(in srgb, var(--bg) 70%, var(--fg) 30%);
+   padding: 1rem;
 }
 
-.timerbar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; padding: .6rem .8rem; margin-bottom: 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
-.timer-display { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.1rem; color: var(--brand-deep); }
+.auth-card {
+   width: min(360px, 100%);
+   margin: 0;
+}
 
-.beta { display: inline-block; font-size: .75rem; font-weight: 500; letter-spacing: 0; text-transform: uppercase; color: var(--fg); background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius); padding: .05rem .4rem; vertical-align: middle; margin-left: .35rem; }
+.auth-title {
+   margin: 0 0 .25rem;
+   font-size: 1.3rem;
+   font-weight: 400;
+   color: var(--brand-deep);
+}
 
-.cal-events { list-style: none; padding: 0; margin: 0 0 1rem; }
-.cal-event { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: .35rem; background: var(--surface); }
+/* #257: brand orange failed AA (3.65:1 light / 4.07:1 dark) at this size; --brand-deep is 9.4:1 / 8.6:1 */
+#auth-sub {
+   margin: 0;
+}
+
+#auth-submit {
+   width: 100%;
+}
+
+/* #145-alignment: the page-level "+" buttons share one size and sit at the
+   right end of their header row (min-width fits the longest label). */
+#day-add,
+#customer-new,
+#project-new,
+#task-new,
+#expense-new,
+#user-new {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   width: auto;
+   min-width: 11.5rem;
+}
+
+.timerbar {
+   display: flex;
+   align-items: center;
+   gap: .5rem;
+   flex-wrap: wrap;
+   padding: .6rem .8rem;
+   margin-bottom: 1rem;
+   background: var(--surface);
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
+}
+
+.timer-display {
+   font-variant-numeric: tabular-nums;
+   font-weight: 700;
+   font-size: 1.1rem;
+   color: var(--brand-deep);
+}
+
+.beta {
+   display: inline-block;
+   font-size: .75rem;
+   font-weight: 500;
+   letter-spacing: 0;
+   text-transform: uppercase;
+   color: var(--fg);
+   background: var(--accent-soft);
+   border: 1px solid var(--accent);
+   border-radius: var(--radius);
+   padding: .05rem .4rem;
+   vertical-align: middle;
+   margin-left: .35rem;
+}
+
+.cal-events {
+   list-style: none;
+   padding: 0;
+   margin: 0 0 1rem;
+}
+
+.cal-event {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: .75rem;
+   padding: .4rem .6rem;
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
+   margin-bottom: .35rem;
+   background: var(--surface);
+}
 
 /* #232 increment 3: notifications are official `p-notification` markup (see
    web/js/notifications.js); what remains here is the list/header layout only. */
-.notif-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin: .5rem 0 .25rem; }
-.notifs { list-style: none; padding: 0; margin: 0 0 1rem; }
+.notif-head {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   font-weight: 700;
+   margin: .5rem 0 .25rem;
+}
+
+.notifs {
+   list-style: none;
+   padding: 0;
+   margin: 0 0 1rem;
+}
 
 /* Day view redesign (#12) */
-.day-bar.p-card { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: .7rem 1rem; margin: 0 0 .75rem; padding: .65rem .8rem; }
-.day-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; min-width: 0; }
-.day-nav { display: flex; align-items: center; gap: .75rem; padding-inline: .25rem; }
-.day-nav > .day-label { text-align: center; }
-.day-bar > .day-nav { grid-column: 2; }
-.day-end { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: .75rem; }
-.day-nav button { display: inline-grid; place-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); width: 2.5rem; height: 2.5rem; padding: 0; font-size: 1rem; line-height: 1; cursor: pointer; }
-.day-nav button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--brand-deep); }
+.day-bar.p-card {
+   display: grid;
+   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+   align-items: center;
+   gap: .7rem 1rem;
+   margin: 0 0 .75rem;
+   padding: .65rem .8rem;
+}
+
+.day-actions {
+   display: flex;
+   align-items: center;
+   gap: .5rem;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+.day-nav {
+   display: flex;
+   align-items: center;
+   gap: .75rem;
+   padding-inline: .25rem;
+}
+
+.day-nav>.day-label {
+   text-align: center;
+}
+
+.day-bar>.day-nav {
+   grid-column: 2;
+}
+
+.day-end {
+   grid-column: 3;
+   justify-self: end;
+   display: flex;
+   align-items: center;
+   gap: .75rem;
+}
+
+.day-nav button {
+   display: inline-grid;
+   place-items: center;
+   border: 1px solid var(--line);
+   background: var(--surface);
+   border-radius: var(--radius);
+   width: 2.5rem;
+   height: 2.5rem;
+   padding: 0;
+   font-size: 1rem;
+   line-height: 1;
+   cursor: pointer;
+}
+
+.day-nav button:hover {
+   border-color: var(--accent);
+   background: var(--accent-soft);
+   color: var(--brand-deep);
+}
+
 /* Pin the date box to the widest label the format renders (a 9-letter
    weekday, ", DD" and a 3-letter month) so the day arrows stay equally
    spaced around a centred date — 17ch. */
-.day-label { font-weight: 700; font-size: 1.1rem; min-width: 17ch; }
+.day-label {
+   font-weight: 700;
+   font-size: 1.1rem;
+   min-width: 17ch;
+}
+
 /* Week strip — .ws-day uses Vanilla p-card as its shell; all rules here are
    layout overrides (inner grid, margin/padding reset, accent border-bottom)
    and interactive states that Vanilla cards do not provide. The day box is
@@ -393,28 +1021,139 @@ button.icon-action.is-tooltip-dismissed > .p-tooltip__message { display: none; }
    .ws-total bottom-right; row-gap is 0 so an icon-less box gains no empty
    line, and .ws-total's `num` is activated by the `td.num, th.num,
    .ws-total.num` utility above. */
-.week-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .5rem; margin-bottom: 1rem; }
-.ws-day.p-card { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-content: center; gap: 0 .4rem; min-width: 0; min-height: 4.5rem; margin: 0; padding: .55rem .65rem; border-bottom: 3px solid transparent; cursor: pointer; text-align: left; transition: border-color .12s, background-color .12s, box-shadow .12s; }
-.ws-day:hover { border-color: var(--accent); background: var(--accent-soft); }
-.ws-day:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.ws-day.selected { border-bottom-color: var(--accent); background: var(--accent-soft); }
-.ws-name { grid-column: 1; grid-row: 2; color: var(--muted); font-size: .8rem; font-weight: 500; line-height: 1.2; }
-.ws-date { grid-column: 1; grid-row: 1; color: var(--muted); font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-.ws-day.selected .ws-name, .ws-day.selected .ws-date { color: var(--brand-deep); font-weight: 700; }
-.ws-total { grid-column: 2; grid-row: 2; justify-self: end; font-weight: 600; line-height: 1.25; }
-.ws-clock { position: static; grid-column: 2; grid-row: 1; justify-self: end; align-self: start; color: var(--muted); line-height: 1; }
-.ws-week { grid-column: 1 / -1; justify-self: end; padding: .15rem 0 0; color: var(--muted); font-size: .9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
-.entry-main { padding: .65rem .75rem; }
-.entry-project { font-weight: 600; }
-.entry-customer { margin-top: .1rem; color: var(--muted); font-size: .875rem; }
-#day-table td.entry-note { padding: .65rem .75rem; color: var(--fg); font-size: .875rem;
-  min-width: 0; max-width: 46ch; }
-.entry-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#day-table td.entry-note .p-chip { margin-left: .35rem; }
-.entry-hours { font-variant-numeric: tabular-nums; font-weight: 600; }
+.week-strip {
+   display: grid;
+   grid-template-columns: repeat(7, minmax(0, 1fr));
+   gap: .5rem;
+   margin-bottom: 1rem;
+}
+
+.ws-day.p-card {
+   display: grid;
+   grid-template-columns: 1fr auto;
+   grid-template-rows: auto auto;
+   align-content: center;
+   gap: 0 .4rem;
+   min-width: 0;
+   min-height: 4.5rem;
+   margin: 0;
+   padding: .55rem .65rem;
+   border-bottom: 3px solid transparent;
+   cursor: pointer;
+   text-align: left;
+   transition: border-color .12s, background-color .12s, box-shadow .12s;
+}
+
+.ws-day:hover {
+   border-color: var(--accent);
+   background: var(--accent-soft);
+}
+
+.ws-day:focus-visible {
+   outline: 2px solid var(--focus);
+   outline-offset: 2px;
+}
+
+.ws-day.selected {
+   border-bottom-color: var(--accent);
+   background: var(--accent-soft);
+}
+
+.ws-name {
+   grid-column: 1;
+   grid-row: 2;
+   color: var(--muted);
+   font-size: .8rem;
+   font-weight: 500;
+   line-height: 1.2;
+}
+
+.ws-date {
+   grid-column: 1;
+   grid-row: 1;
+   color: var(--muted);
+   font-size: 1.1rem;
+   font-variant-numeric: tabular-nums;
+}
+
+.ws-day.selected .ws-name,
+.ws-day.selected .ws-date {
+   color: var(--brand-deep);
+   font-weight: 700;
+}
+
+.ws-total {
+   grid-column: 2;
+   grid-row: 2;
+   justify-self: end;
+   font-weight: 600;
+   line-height: 1.25;
+}
+
+.ws-clock {
+   position: static;
+   grid-column: 2;
+   grid-row: 1;
+   justify-self: end;
+   align-self: start;
+   color: var(--muted);
+   line-height: 1;
+}
+
+.ws-week {
+   grid-column: 1 / -1;
+   justify-self: end;
+   padding: .15rem 0 0;
+   color: var(--muted);
+   font-size: .9rem;
+   font-weight: 600;
+   font-variant-numeric: tabular-nums;
+}
+
+.entry-main {
+   padding: .65rem .75rem;
+}
+
+.entry-project {
+   font-weight: 600;
+}
+
+.entry-customer {
+   margin-top: .1rem;
+   color: var(--muted);
+   font-size: .875rem;
+}
+
+#day-table td.entry-note {
+   padding: .65rem .75rem;
+   color: var(--fg);
+   font-size: .875rem;
+   min-width: 0;
+   max-width: 46ch;
+}
+
+.entry-note {
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+
+#day-table td.entry-note .p-chip {
+   margin-left: .35rem;
+}
+
+.entry-hours {
+   font-variant-numeric: tabular-nums;
+   font-weight: 600;
+}
+
 /* Day table Hours column (#107): centred inside its own track — right-
    aligned it hugged the Actions column it sits beside. */
-#day-table th.num, #day-table td.num { text-align: center; }
+#day-table th.num,
+#day-table td.num {
+   text-align: center;
+}
+
 /* Aligned with the day table: same vertical rhythm as the row gaps
    (.45rem border-spacing) and the same content inset as .entry-main
    (.75rem), so the box and its button sit on the grid, not beside it.
@@ -422,54 +1161,246 @@ button.icon-action.is-tooltip-dismissed > .p-tooltip__message { display: none; }
    vertically against the copied rows it fills instead of pinning it to
    the top of the card, and lets the rows wrap back under the button when
    they no longer fit beside it (narrow screens keep the old layout). */
-.copy-bar.p-card { margin-top: .45rem; padding: .65rem .75rem; display: flex; flex-wrap: wrap; align-items: center; gap: .55rem .75rem; }
-.copy-bar .secondary { align-self: center; flex: 0 0 auto; }
-.copy-rows { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .35rem; flex: 1 1 24rem; min-width: 0; }
-.copy-row { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.copy-label { font-weight: 600; min-width: 22ch; }
-.copy-hours { width: 6.5rem; min-width: 0; }
-#day-table tfoot th { text-align: left; }
-#day-table tfoot td { font-variant-numeric: tabular-nums; font-weight: 700; }
+.copy-bar.p-card {
+   margin-top: .45rem;
+   padding: .65rem .75rem;
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: .55rem .75rem;
+}
+
+.copy-bar .secondary {
+   align-self: center;
+   flex: 0 0 auto;
+}
+
+.copy-rows {
+   list-style: none;
+   padding: 0;
+   margin: 0;
+   display: flex;
+   flex-direction: column;
+   gap: .35rem;
+   flex: 1 1 24rem;
+   min-width: 0;
+}
+
+.copy-row {
+   display: flex;
+   align-items: center;
+   gap: .6rem;
+   padding: .45rem .6rem;
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
+   background: var(--surface);
+}
+
+.copy-label {
+   font-weight: 600;
+   min-width: 22ch;
+}
+
+.copy-hours {
+   width: 6.5rem;
+   min-width: 0;
+}
+
+#day-table tfoot th {
+   text-align: left;
+}
+
+#day-table tfoot td {
+   font-variant-numeric: tabular-nums;
+   font-weight: 700;
+}
 
 /* Week grid (#13). #232 phase 2f: the `#week-table.grid` border-collapse/width pair duplicated the base `table` rule — deleted (#day-table's `separate` still overrides). */
-#week-table.grid th, #week-table.grid td { border: 1px solid var(--line); padding: 0; text-align: left; }
-#week-table.grid thead th { padding: .35rem .5rem; font-size: .85rem; white-space: nowrap; }
-#week-table.grid thead th.today { color: var(--brand-deep); border-bottom: 3px solid var(--accent); }
-#week-table.grid .week-empty-notice { padding: 2rem 1rem; text-align: center; }
-.week-empty-notice p { margin: .35rem 0 0; color: var(--muted); }
-#week-table.grid .row-band { padding: .4rem .6rem; min-width: 15rem; }
-.cell-input { width: 5.4rem; min-width: 0; margin: 0; border: 0; background: transparent; text-align: right; font: inherit; padding: .45rem .5rem; }
-.cell-input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--surface); }
-td.cell.has { background: var(--accent-soft); }
-td.cell.locked { background: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(174, 167, 159, .18) 6px, rgba(174, 167, 159, .18) 12px); }
-td.cell.locked .cell-input { opacity: .6; }
-.note-flag { border: 0; background: none; color: var(--brand-deep); cursor: pointer; padding: 0 .35rem; font-weight: 700; }
-.note-flag.note-empty { color: var(--muted); opacity: 0.7; } /* faint add-note (#126); #191 lifted 0.55→0.7 — it marks an interactive cell and 0.55 faded below a usable affordance */
-.row-total { font-weight: 700; padding: .4rem .6rem; white-space: nowrap; }
-#week-table tfoot th, #week-table tfoot td { padding: .45rem .6rem; font-weight: 700; border-top: 2px solid var(--line); font-variant-numeric: tabular-nums; }
-.week-controls { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; flex-wrap: wrap; }
+#week-table.grid th,
+#week-table.grid td {
+   border: 1px solid var(--line);
+   padding: 0;
+   text-align: left;
+}
+
+#week-table.grid thead th {
+   padding: .35rem .5rem;
+   font-size: .85rem;
+   white-space: nowrap;
+}
+
+#week-table.grid thead th.today {
+   color: var(--brand-deep);
+   border-bottom: 3px solid var(--accent);
+}
+
+#week-table.grid .week-empty-notice {
+   padding: 2rem 1rem;
+   text-align: center;
+}
+
+.week-empty-notice p {
+   margin: .35rem 0 0;
+   color: var(--muted);
+}
+
+#week-table.grid .row-band {
+   padding: .4rem .6rem;
+   min-width: 15rem;
+}
+
+.cell-input {
+   width: 5.4rem;
+   min-width: 0;
+   margin: 0;
+   border: 0;
+   background: transparent;
+   text-align: right;
+   font: inherit;
+   padding: .45rem .5rem;
+}
+
+.cell-input:focus {
+   outline: 2px solid var(--accent);
+   outline-offset: -2px;
+   background: var(--surface);
+}
+
+td.cell.has {
+   background: var(--accent-soft);
+}
+
+td.cell.locked {
+   background: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(174, 167, 159, .18) 6px, rgba(174, 167, 159, .18) 12px);
+}
+
+td.cell.locked .cell-input {
+   opacity: .6;
+}
+
+.note-flag {
+   border: 0;
+   background: none;
+   color: var(--brand-deep);
+   cursor: pointer;
+   padding: 0 .35rem;
+   font-weight: 700;
+}
+
+.note-flag.note-empty {
+   color: var(--muted);
+   opacity: 0.7;
+}
+
+/* faint add-note (#126); #191 lifted 0.55→0.7 — it marks an interactive cell and 0.55 faded below a usable affordance */
+.row-total {
+   font-weight: 700;
+   padding: .4rem .6rem;
+   white-space: nowrap;
+}
+
+#week-table tfoot th,
+#week-table tfoot td {
+   padding: .45rem .6rem;
+   font-weight: 700;
+   border-top: 2px solid var(--line);
+   font-variant-numeric: tabular-nums;
+}
+
+.week-controls {
+   display: flex;
+   gap: .5rem;
+   align-items: center;
+   margin-top: .75rem;
+   flex-wrap: wrap;
+}
+
 /* #12 parity: the copy-from-previous-week toolbar sits in the same muted card
    as the Day view's copy bar. */
-.week-controls.p-card { margin-top: .75rem; padding: .65rem .75rem; }
-
-.sidebar-heading { display: flex; align-items: center; justify-content: space-between; }
-.navigation-control { display: none; }
-.navigation-drawer:not([open]) { display: none; }
-.navigation-drawer {
-   position: fixed; inset: 0 auto 0 0; margin: 0; padding: 0; border: 0;
-   width: min(20rem, calc(100% - 3rem)); max-width: none;
-   height: 100dvh; max-height: 100dvh; color: var(--fg); background: var(--sidebar-bg);
+.week-controls.p-card {
+   margin-top: .75rem;
+   padding: .65rem .75rem;
 }
-.navigation-drawer::backdrop { background: rgb(0 0 0 / .45); }
-.navigation-drawer .sidebar { width: 100%; min-height: 100%; border: 0; }
-body:has(#navigation-drawer[open]) { overflow: hidden; }
+
+.sidebar-heading {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+}
+
+.navigation-control {
+   display: none;
+}
+
+.navigation-drawer:not([open]) {
+   display: none;
+}
+
+.navigation-drawer {
+   position: fixed;
+   inset: 0 auto 0 0;
+   margin: 0;
+   padding: 0;
+   border: 0;
+   width: min(20rem, calc(100% - 3rem));
+   max-width: none;
+   height: 100dvh;
+   max-height: 100dvh;
+   color: var(--fg);
+   background: var(--sidebar-bg);
+}
+
+.navigation-drawer::backdrop {
+   background: rgb(0 0 0 / .45);
+}
+
+.navigation-drawer .sidebar {
+   width: 100%;
+   min-height: 100%;
+   border: 0;
+}
+
+body:has(#navigation-drawer[open]) {
+   overflow: hidden;
+}
+
 @media (width < 1036px) {
-   .masthead { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; }
-   .masthead h1 { font-size: 1.5rem; overflow-wrap: anywhere; }
-   .navigation-control { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 2.75rem; width: 2.75rem; height: 2.75rem; padding: .5rem; margin: 0; }
-   .navigation-control [class*="p-icon--"] { margin: 0; }
-   .sidebar .nav-group { flex-direction: column; flex-wrap: nowrap; }
-   .sidebar .nav-label { width: auto; padding-left: .7rem; }
+   .masthead {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      padding: .75rem 1rem;
+   }
+
+   .masthead h1 {
+      font-size: 1.5rem;
+      overflow-wrap: anywhere;
+   }
+
+   .navigation-control {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 2.75rem;
+      width: 2.75rem;
+      height: 2.75rem;
+      padding: .5rem;
+      margin: 0;
+   }
+
+   .navigation-control [class*="p-icon--"] {
+      margin: 0;
+   }
+
+   .sidebar .nav-group {
+      flex-direction: column;
+      flex-wrap: nowrap;
+   }
+
+   .sidebar .nav-label {
+      width: auto;
+      padding-left: .7rem;
+   }
 }
 
 /* --------------------- dialogs: official Vanilla p-modal pattern ------- */
@@ -480,7 +1411,12 @@ body:has(#navigation-drawer[open]) { overflow: hidden; }
    the native element adds (border + max sizes) is neutralised; the chrome,
    colours and scrolling come from the vendored component classes. The overlay
    paints its own dim, so the native ::backdrop is cleared. */
-dialog.p-modal { border: 0; max-width: none; max-height: none; }
+dialog.p-modal {
+   border: 0;
+   max-width: none;
+   max-height: none;
+}
+
 /* Closed-state guard (regression fix, #232 increment 4): that reset neutralises
    the UA *box* but not the state that matters — the vendored `.p-modal
    { display: flex }` is an AUTHOR declaration, and the cascade compares a
@@ -493,50 +1429,190 @@ dialog.p-modal { border: 0; max-width: none; max-height: none; }
    (`showModal()`), the guard stops matching, and the vendored overlay — top
    layer, ::backdrop, inert background, focus trap — takes over unchanged.
    Pinned by gui-test/dialog-display.test.mjs. */
-dialog.p-modal:not([open]) { display: none; }
-dialog.p-modal::backdrop { background: transparent; }
+dialog.p-modal:not([open]) {
+   display: none;
+}
+
+dialog.p-modal::backdrop {
+   background: transparent;
+}
+
 /* Per-dialog widths stay app-owned (the pattern caps at 80rem — far too wide
    for these focused forms). */
-#app-dialog .p-modal__dialog { max-width: 26rem; }
-#entry-dialog .p-modal__dialog { max-width: 28rem; }
-#week-row-dialog .p-modal__dialog { max-width: 26rem; }
-#expense-dialog .p-modal__dialog { max-width: 36rem; }
-#invoice-editor .p-modal__dialog { max-width: 80rem; }
-.invoice-document-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 2rem; }
-.invoice-document-fields > *, #ed-lines td { min-width: 0; }
-#ed-lines { min-width: 42rem; table-layout: fixed; }
-#ed-lines th:first-child { width: auto; }
-#ed-lines th:nth-child(2) { width: 6.5rem; }
-#ed-lines th:nth-child(3) { width: 7.5rem; }
-#ed-lines th:nth-child(4) { width: 8rem; }
-#ed-lines input[type="text"], #ed-lines select { width: 100%; min-width: 0; }
-#invoice-editor .invoice-filter-trigger { width: 100%; min-width: 0; }
-#ed-lines .actions-col { width: 8rem; }
-#ed-lines .actions-col button { padding: .25rem; }
-@media (width < 620px) {
-   .invoice-document-fields { grid-template-columns: minmax(0, 1fr); }
+#app-dialog .p-modal__dialog {
+   max-width: 26rem;
 }
-#expense-category-dialog .p-modal__dialog { max-width: 28rem; }
-#customer-dialog .p-modal__dialog { max-width: 38rem; }
-#project-dialog .p-modal__dialog, #task-dialog .p-modal__dialog { max-width: 32rem; }
-#user-dialog .p-modal__dialog, #user-password-dialog .p-modal__dialog { max-width: 34rem; }
-#admin-wizard .p-modal__dialog { max-width: 34rem; }
-#admin-wizard form { margin: 0; }
-#admin-wizard .aw-review { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .25rem .75rem; margin: 0 0 1rem; }
-#admin-wizard .aw-review dt { color: var(--muted); }
-#admin-wizard .aw-review dd { margin: 0; }
-#aw-prompt { margin: 0 0 1rem; }
-#aw-prompt p { margin: 0 0 .5rem; }
-#customer-dialog form { margin: 0; }
-#user-dialog form, #user-password-dialog form { margin: 0; }
-#user-dialog input:not([type="checkbox"]), #user-dialog select, #user-password-dialog input { width: 100%; }
-.user-filters { margin-top: 1rem; }
-.user-filters > div { min-width: 0; }
-#project-dialog form, #task-dialog form { margin: 0; }
-.hierarchy-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+#entry-dialog .p-modal__dialog {
+   max-width: 28rem;
+}
+
+#week-row-dialog .p-modal__dialog {
+   max-width: 26rem;
+}
+
+#expense-dialog .p-modal__dialog {
+   max-width: 36rem;
+}
+
+#invoice-editor .p-modal__dialog {
+   max-width: 80rem;
+}
+
+.invoice-document-fields {
+   display: grid;
+   grid-template-columns: repeat(2, minmax(0, 1fr));
+   gap: 0 2rem;
+}
+
+.invoice-document-fields>*,
+#ed-lines td {
+   min-width: 0;
+}
+
+#ed-lines {
+   min-width: 42rem;
+   table-layout: fixed;
+}
+
+#ed-lines th:first-child {
+   width: auto;
+}
+
+#ed-lines th:nth-child(2) {
+   width: 6.5rem;
+}
+
+#ed-lines th:nth-child(3) {
+   width: 7.5rem;
+}
+
+#ed-lines th:nth-child(4) {
+   width: 8rem;
+}
+
+#ed-lines input[type="text"],
+#ed-lines select {
+   width: 100%;
+   min-width: 0;
+}
+
+#invoice-editor .invoice-filter-trigger {
+   width: 100%;
+   min-width: 0;
+}
+
+#ed-lines .actions-col {
+   width: 8rem;
+}
+
+#ed-lines .actions-col button {
+   padding: .25rem;
+}
+
+@media (width < 620px) {
+   .invoice-document-fields {
+      grid-template-columns: minmax(0, 1fr);
+   }
+}
+
+#expense-category-dialog .p-modal__dialog {
+   max-width: 28rem;
+}
+
+#customer-dialog .p-modal__dialog {
+   max-width: 38rem;
+}
+
+#project-dialog .p-modal__dialog,
+#task-dialog .p-modal__dialog {
+   max-width: 32rem;
+}
+
+#user-dialog .p-modal__dialog,
+#user-password-dialog .p-modal__dialog {
+   max-width: 34rem;
+}
+
+#admin-wizard .p-modal__dialog {
+   max-width: 34rem;
+}
+
+#admin-wizard form {
+   margin: 0;
+}
+
+#admin-wizard .aw-review {
+   display: grid;
+   grid-template-columns: max-content minmax(0, 1fr);
+   gap: .25rem .75rem;
+   margin: 0 0 1rem;
+}
+
+#admin-wizard .aw-review dt {
+   color: var(--muted);
+}
+
+#admin-wizard .aw-review dd {
+   margin: 0;
+}
+
+#aw-prompt {
+   margin: 0 0 1rem;
+}
+
+#aw-prompt p {
+   margin: 0 0 .5rem;
+}
+
+#customer-dialog form {
+   margin: 0;
+}
+
+#user-dialog form,
+#user-password-dialog form {
+   margin: 0;
+}
+
+#user-dialog input:not([type="checkbox"]),
+#user-dialog select,
+#user-password-dialog input {
+   width: 100%;
+}
+
+.user-filters {
+   margin-top: 1rem;
+}
+
+.user-filters>div {
+   min-width: 0;
+}
+
+#project-dialog form,
+#task-dialog form {
+   margin: 0;
+}
+
+.hierarchy-actions {
+   display: flex;
+   align-items: center;
+   gap: .5rem;
+   flex-wrap: wrap;
+}
+
 /* #182: hierarchy-section filter controls + scope label */
-.filter-field { display: flex; flex-direction: column; gap: var(--space-2xs); font-size: .8rem; min-width: 0; }
-.filter-field select { min-width: 11rem; }
+.filter-field {
+   display: flex;
+   flex-direction: column;
+   gap: var(--space-2xs);
+   font-size: .8rem;
+   min-width: 0;
+}
+
+.filter-field select {
+   min-width: 11rem;
+}
+
 /* #182 follow-up: a section's filter row lines up with its creation action, and
    the filters agree with each other. Vanilla's base `select { width: 100% }`
    stretched them (the actions are 184px = 11.5rem at the 16px root; the filters
@@ -547,28 +1623,61 @@ dialog.p-modal::backdrop { background: transparent; }
    bottom edge (the label sits above its control inside `.filter-field`), and
    one token owns the gap so a new row cannot drift. */
 .filter-row,
-.hierarchy-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-sm); }
-.filter-row > * { min-width: 0; }
+.hierarchy-filters {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: flex-end;
+   gap: var(--space-sm);
+}
+
+.filter-row>* {
+   min-width: 0;
+}
+
 /* A vendor base form control carries a stacked-form bottom margin. In a
    horizontal row that margin leaves the control floating above the baseline
    while a non-input sibling (the Columns disclosure) sits on it, so the row
    owns the rhythm instead. */
-.filter-row .filter-field > input,
-.filter-row .filter-field > select,
-.filter-row .filter-field > textarea,
-.filter-row .filter-field > .seg { margin-bottom: 0; }
+.filter-row .filter-field>input,
+.filter-row .filter-field>select,
+.filter-row .filter-field>textarea,
+.filter-row .filter-field>.seg {
+   margin-bottom: 0;
+}
+
 /* Intrinsic widths: the row fits the register column on one line at
    >= 1280px and wraps on the same 8px rhythm below that. */
-.filter-row .filter-field input[type="search"] { width: 10.5rem; }
-.filter-row .filter-field select { min-width: 0; width: 9.25rem; text-overflow: ellipsis; }
-.filter-row .filter-field input[type="date"] { width: 8.5rem; }
+.filter-row .filter-field input[type="search"] {
+   width: 10.5rem;
+}
+
+.filter-row .filter-field select {
+   min-width: 0;
+   width: 9.25rem;
+   text-overflow: ellipsis;
+}
+
+.filter-row .filter-field input[type="date"] {
+   width: 8.5rem;
+}
+
 #panel-projects #project-new,
 #panel-tasks #task-new,
-.hierarchy-filters select { width: 11.5rem; }
-.hierarchy-filters select { text-overflow: ellipsis; }
+.hierarchy-filters select {
+   width: 11.5rem;
+}
+
+.hierarchy-filters select {
+   text-overflow: ellipsis;
+}
+
 /* Section H2s duplicate the masthead H1, so panels now lead with their
    creation action / filters in the heading slot, top-left. */
-#expense-dialog form, #expense-category-dialog form { margin: 0; }
+#expense-dialog form,
+#expense-category-dialog form {
+   margin: 0;
+}
+
 /* #232 phase 2b: a byte-identical duplicate of the retired
    `.field { margin-bottom: .65rem }`; the `.p-form__group` rhythm covers it. */
 /* #232 phase 2c: `#expense-dialog input` (1,0,1) out-specified the tick-box
@@ -576,37 +1685,89 @@ dialog.p-modal::backdrop { background: transparent; }
    #expense-billable checkbox painted 100% wide. Scope the width rule away
    from checkbox/radio (mirroring `dialog input:not([type="checkbox"])`). */
 #expense-dialog input:not([type="checkbox"]):not([type="radio"]),
-#expense-dialog select, #expense-dialog textarea,
-#expense-category-dialog input:not([type="checkbox"]):not([type="radio"]) { width: 100%; }
-#dlg-message { margin: 0 0 .8rem; white-space: pre-line; }
-#dlg-input-wrap { display: block; margin: 0 0 .9rem; }
-#dlg-input-wrap[hidden] { display: none; }
-#dlg-input-wrap span { display: block; margin-bottom: .3rem; font-size: .85rem; }
+#expense-dialog select,
+#expense-dialog textarea,
+#expense-category-dialog input:not([type="checkbox"]):not([type="radio"]) {
+   width: 100%;
+}
+
+#dlg-message {
+   margin: 0 0 .8rem;
+   white-space: pre-line;
+}
+
+#dlg-input-wrap {
+   display: block;
+   margin: 0 0 .9rem;
+}
+
+#dlg-input-wrap[hidden] {
+   display: none;
+}
+
+#dlg-input-wrap span {
+   display: block;
+   margin-bottom: .3rem;
+   font-size: .85rem;
+}
+
 /* #232 phase 2f: `#dlg-input` is a plain text control like every other
    form field, so it wears the same official Vanilla skin. The bespoke
    border / radius / background / colour is retired — it was the reason the
    prompt field looked different from the fields beside it. */
-#dlg-input { width: 100%; }
-.dlg-actions { display: flex; justify-content: flex-end; gap: .5rem; }
+#dlg-input {
+   width: 100%;
+}
+
+.dlg-actions {
+   display: flex;
+   justify-content: flex-end;
+   gap: .5rem;
+}
 
 /* --------------------------------- timesheet section + Day|Week segment -- #107 */
 .ts-head {
-  /* Heading slot: the section's create action sits left, the view segments
+   /* Heading slot: the section's create action sits left, the view segments
      right — one Track time for Day/Week/Calendar alike. Items are pinned to the
      TOP of the slot: the Day|Week|Calendar segments are taller than the button,
      and centring them pushed Track time ~6px below the + buttons in the other
      sections, whose rows hold nothing but the action. */
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 1rem; margin: 0 0 1.1rem; flex-wrap: wrap;
+   display: flex;
+   align-items: flex-start;
+   justify-content: space-between;
+   gap: 1rem;
+   margin: 0 0 1.1rem;
+   flex-wrap: wrap;
 }
-.settings-head { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: .9rem; }
-.settings-tabs { flex-wrap: wrap; }
-.settings-panel { min-width: 0; }
+
+.settings-head {
+   display: flex;
+   align-items: center;
+   justify-content: flex-start;
+   gap: 1rem;
+   flex-wrap: wrap;
+   margin-bottom: .9rem;
+}
+
+.settings-tabs {
+   flex-wrap: wrap;
+}
+
+.settings-panel {
+   min-width: 0;
+}
+
 .seg {
-  display: inline-flex; align-items: stretch; height: var(--control-height);
-  border: 0; border-bottom: 1px solid var(--field-rule); border-radius: 0;
-  background: var(--input-bg); box-shadow: none;
+   display: inline-flex;
+   align-items: stretch;
+   height: var(--control-height);
+   border: 0;
+   border-bottom: 1px solid var(--field-rule);
+   border-radius: 0;
+   background: var(--input-bg);
+   box-shadow: none;
 }
+
 /* #232 increment 5 / #F follow-up: the only remaining `.seg` consumer is the
    invoice Open|All filter — a role="group" of aria-pressed toggle buttons,
    not a tablist — so it keeps that semantics while wearing the same underline
@@ -614,19 +1775,73 @@ dialog.p-modal::backdrop { background: transparent; }
    the group must never clip the focus ring. */
 
 /* ------------------------------------------- day view refresh (#108) ---- */
-#day-table { border-collapse: separate; border-spacing: 0 .45rem; }
-#day-table tbody tr { background: var(--row-alt); }
-#day-table tbody td { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-block: .6rem; }
-#day-table tbody td:first-child { border-left: 1px solid var(--line); border-radius: var(--radius) 0 0 var(--radius); }
-#day-table tbody td:last-child { border-right: 1px solid var(--line); border-radius: 0 var(--radius) var(--radius) 0; }
-#day-table .entry-hours { white-space: nowrap; }
-.lock { margin-left: .45rem; font-size: .95rem; opacity: .75; }
-.day-total-cell { text-align: right; font-weight: 700; }
-.day-notifications { margin: .35rem 0 .65rem; }
-.day-notifications .notif-head { margin: 0 0 .4rem; }
-.day-notifications .notifs { display: grid; gap: .4rem; margin: 0; }
-.day-notifications .p-notification { margin-bottom: 0; }
-.copy-bar select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
+#day-table {
+   border-collapse: separate;
+   border-spacing: 0 .45rem;
+}
+
+#day-table tbody tr {
+   background: var(--row-alt);
+}
+
+#day-table tbody td {
+   border-top: 1px solid var(--line);
+   border-bottom: 1px solid var(--line);
+   padding-block: .6rem;
+}
+
+#day-table tbody td:first-child {
+   border-left: 1px solid var(--line);
+   border-radius: var(--radius) 0 0 var(--radius);
+}
+
+#day-table tbody td:last-child {
+   border-right: 1px solid var(--line);
+   border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+#day-table .entry-hours {
+   white-space: nowrap;
+}
+
+.lock {
+   margin-left: .45rem;
+   font-size: .95rem;
+   opacity: .75;
+}
+
+.day-total-cell {
+   text-align: right;
+   font-weight: 700;
+}
+
+.day-notifications {
+   margin: .35rem 0 .65rem;
+}
+
+.day-notifications .notif-head {
+   margin: 0 0 .4rem;
+}
+
+.day-notifications .notifs {
+   display: grid;
+   gap: .4rem;
+   margin: 0;
+}
+
+.day-notifications .p-notification {
+   margin-bottom: 0;
+}
+
+.copy-bar select {
+   padding: .45rem .6rem;
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
+   background: var(--surface);
+   color: var(--fg);
+   font: inherit;
+   cursor: pointer;
+}
 
 /* ------------------------------------------- week view refresh (#109) ---- */
 /* #12/#108 parity: each day column header is the same 2×2 box as the Day
@@ -639,12 +1854,50 @@ dialog.p-modal::backdrop { background: transparent; }
    column — the titles stop lining up with their day columns. jsdom computes no
    layout, so this was invisible there; measured in Firefox and pinned by
    css-tokens.test.mjs and browser-smoke.py. */
-#week-table.grid thead th .wk-head { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: start; gap: 0 .3rem; }
-#week-table.grid thead th .wk-date { grid-column: 1; grid-row: 1; font-weight: 400; font-size: .8rem; opacity: .8; }
-#week-table.grid thead th .wk-clock { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; color: var(--muted); line-height: 1; }
-#week-table.grid thead th .wk-dow { grid-column: 1; grid-row: 2; font-weight: 700; }
-#week-table .row-band { border-left: 3px solid var(--accent); }
-.week-controls select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
+#week-table.grid thead th .wk-head {
+   display: grid;
+   grid-template-columns: 1fr auto;
+   grid-template-rows: auto auto;
+   align-items: start;
+   gap: 0 .3rem;
+}
+
+#week-table.grid thead th .wk-date {
+   grid-column: 1;
+   grid-row: 1;
+   font-weight: 400;
+   font-size: .8rem;
+   opacity: .8;
+}
+
+#week-table.grid thead th .wk-clock {
+   grid-column: 2;
+   grid-row: 1;
+   justify-self: end;
+   align-self: start;
+   color: var(--muted);
+   line-height: 1;
+}
+
+#week-table.grid thead th .wk-dow {
+   grid-column: 1;
+   grid-row: 2;
+   font-weight: 700;
+}
+
+#week-table .row-band {
+   border-left: 3px solid var(--accent);
+}
+
+.week-controls select {
+   padding: .45rem .6rem;
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
+   background: var(--surface);
+   color: var(--fg);
+   font: inherit;
+   cursor: pointer;
+}
 
 /* First-run setup wizard (#111) and first-admin sign-in (#229) are twins:
    both are a Vanilla p-card with a ruled header, .65rem field rhythm and a
@@ -652,307 +1905,1052 @@ dialog.p-modal::backdrop { background: transparent; }
    official `p-modal` overlay, so the inner p-card is the single frame exactly
    as in the auth overlay. Ids are unchanged, so the jsdom + wizard smoke
    checks drive the same elements. */
-#wizard-dialog .p-card { width: 100%; max-width: 30rem; margin: 0; max-height: calc(100dvh - 2rem); overflow-y: auto; }
-#wizard-dialog h2 { margin: 0; font-size: 1.3rem !important; font-weight: 400; color: var(--brand-deep); } /* #257: see .auth-title — same AA fix */
-#wizard-dialog .wz-step { min-width: 0; }
-#wizard-dialog .wz-step p:first-child { margin-top: 0; }
+#wizard-dialog .p-card {
+   width: 100%;
+   max-width: 30rem;
+   margin: 0;
+   max-height: calc(100dvh - 2rem);
+   overflow-y: auto;
+}
+
+#wizard-dialog h2 {
+   margin: 0;
+   font-size: 1.3rem !important;
+   font-weight: 400;
+   color: var(--brand-deep);
+}
+
+/* #257: see .auth-title — same AA fix */
+#wizard-dialog .wz-step {
+   min-width: 0;
+}
+
+#wizard-dialog .wz-step p:first-child {
+   margin-top: 0;
+}
+
 /* #232 phase 2b: that margin duplicated the retired base rule and its
    `margin-top: 0` was a no-op; only the "no gap before the action row" stays. */
-#wizard-dialog .p-form__group:last-child { margin-bottom: 0; }
-#wz-status { min-height: 1.2em; margin: .2rem 0 .4rem; }
+#wizard-dialog .p-form__group:last-child {
+   margin-bottom: 0;
+}
+
+#wz-status {
+   min-height: 1.2em;
+   margin: .2rem 0 .4rem;
+}
+
 /* Same action rhythm as the auth window: the full-width primary submit
    (button.primary is already 100%) sits below its secondary companions. */
-#wizard-dialog .dlg-actions { margin-top: 1rem; }
-#wizard-dialog .dlg-actions .secondary { flex: 1 1 0; }
-.tab-sep { height: 1px; background: var(--line); margin: .45rem .5rem .35rem; }
+#wizard-dialog .dlg-actions {
+   margin-top: 1rem;
+}
+
+#wizard-dialog .dlg-actions .secondary {
+   flex: 1 1 0;
+}
+
+.tab-sep {
+   height: 1px;
+   background: var(--line);
+   margin: .45rem .5rem .35rem;
+}
+
 /* The wizard entry sits among the tabs but is an action, not a tab (#111):
    same chrome as a rail tab (.p-tabs__link), minus the selected state; #125
    pins it to the bottom of the rail behind a separator. */
 #wizard-open {
-  font: inherit; text-align: left; cursor: pointer; width: 100%;
-  padding: .55rem .7rem; border: none; border-left: 3px solid transparent;
-  background: transparent; color: var(--fg); border-radius: 0 var(--radius) var(--radius) 0;
+   font: inherit;
+   text-align: left;
+   cursor: pointer;
+   width: 100%;
+   padding: .55rem .7rem;
+   border: none;
+   border-left: 3px solid transparent;
+   background: transparent;
+   color: var(--fg);
+   border-radius: 0 var(--radius) var(--radius) 0;
 }
-#wizard-open:hover, #wizard-open:focus-visible { background: var(--row-alt); }
+
+#wizard-open:hover,
+#wizard-open:focus-visible {
+   background: var(--row-alt);
+}
 
 /* ---- invoice document preview (#133) ---- */
-#invoice-preview { margin-top: .8rem; }
-.ip-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
-.ip-title-wrap { min-width: 0; }
-.ip-title { margin: 0 0 .5rem; font-size: 1.05rem; }
+#invoice-preview {
+   margin-top: .8rem;
+}
+
+.ip-head {
+   display: flex;
+   align-items: baseline;
+   justify-content: space-between;
+   gap: 1rem;
+}
+
+.ip-title-wrap {
+   min-width: 0;
+}
+
+.ip-title {
+   margin: 0 0 .5rem;
+   font-size: 1.05rem;
+}
+
 /* The frozen subject (#354) reads as the document's subtitle: plain text from
    Invoice.subject, quiet enough not to compete with the document itself. */
-.ip-subject { margin: -.35rem 0 .5rem; color: var(--muted); font-weight: 600; overflow-wrap: anywhere; }
-#ip-document-note { margin: .2rem 0 .5rem; }
-.ip-facts { display: grid; grid-template-columns: auto 1fr; gap: .15rem .9rem; margin: .3rem 0 .7rem; }
-.ip-facts dt { color: var(--muted); font-weight: 600; }
-.ip-facts dd { margin: 0; }
+.ip-subject {
+   margin: -.35rem 0 .5rem;
+   color: var(--muted);
+   font-weight: 600;
+   overflow-wrap: anywhere;
+}
+
+#ip-document-note {
+   margin: .2rem 0 .5rem;
+}
+
+.ip-facts {
+   display: grid;
+   grid-template-columns: auto 1fr;
+   gap: .15rem .9rem;
+   margin: .3rem 0 .7rem;
+}
+
+.ip-facts dt {
+   color: var(--muted);
+   font-weight: 600;
+}
+
+.ip-facts dd {
+   margin: 0;
+}
+
 /* #349: the preview region frames the rendered PDF; the activity history
    beneath it is a plain ordered list. The .ip-letter rule still paints the
    Get paid instructions (upstream #357). */
-.ip-pdf { margin: .4rem 0 .6rem; }
-.pdf-toolbar, .pdf-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
-.pdf-toolbar select { width: auto; margin: 0; }
-.invoice-status-row { border-bottom: 1px solid var(--line); padding-block: .5rem; margin-bottom: .75rem; }
-#inv-filter-row { align-items: center; }
-.invoice-filter-native { display: none !important; }
-.select-trigger { width: 100%; }
-.filter-row .select-trigger { width: 9.25rem; }
-.hierarchy-filters .select-trigger { width: 11.5rem; }
-.bar .select-trigger, .timerbar .select-trigger, .copy-bar .select-trigger { width: auto; min-width: 8rem; max-width: 100%; }
-.select-trigger[hidden] { display: none; }
-.select-validation { display: block; color: var(--danger); }
-.invoice-filter-trigger { display: flex; align-items: center; gap: .5rem; width: 100%; height: var(--control-height); padding: .3rem .6rem; margin: 0; text-align: left; }
-.invoice-filter-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.invoice-filter-trigger .p-icon--chevron-down { order: 2; margin: 0; }
-.invoice-filter-menu { position: fixed; inset: auto; margin: 0; padding: .25rem; overflow-y: auto; z-index: 100; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
-.invoice-filter-menu[hidden] { display: none; }
-.invoice-filter-option { display: block; width: 100%; margin: 0; padding: .5rem .65rem; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; background: transparent; color: var(--fg); }
-.invoice-filter-option[aria-selected="true"], .invoice-filter-option:hover { background: var(--accent-soft); color: var(--brand-deep); }
-.invoice-period-nav { display: flex; align-items: center; gap: .5rem; min-width: 0; }
-.invoice-period-nav[hidden] { display: none; }
-.invoice-period-nav button { width: 2.75rem; height: 2.75rem; padding: .5rem; }
-.invoice-period-nav button i { margin: 0; }
-.pdf-pages { max-height: 80dvh; overflow: auto; background: #e5e5e5; padding: .25rem; }
-.pdf-pages canvas { display: block; background: white; }
-.pdf-pages:focus-visible { outline: 3px solid var(--focus); }
-.ip-pdf iframe { display: block; width: 100%; min-height: 60vh; border: 0; background: var(--surface); }
-.ip-letter { white-space: pre-line; color: var(--fg); margin: .3rem 0 .6rem; }
-.ip-history h3 { margin: 1rem 0 .3rem; font-size: 1rem; }
-.ip-timeline { margin: 0; padding-left: 1.2rem; }
-.ip-tl-item + .ip-tl-item { margin-top: .7rem; }
-.ip-tl-desc { margin: 0; font-weight: 600; }
-.ip-tl-actor, .ip-tl-when { margin: 0; color: var(--muted); }
-#invoice-table tbody tr { cursor: default; }
-#invoice-table tbody tr[tabindex="0"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ip-pdf {
+   margin: .4rem 0 .6rem;
+}
+
+.pdf-toolbar,
+.pdf-actions {
+   display: flex;
+   align-items: center;
+   flex-wrap: wrap;
+   gap: .5rem;
+   margin-block: .5rem;
+}
+
+.pdf-toolbar select {
+   width: auto;
+   margin: 0;
+}
+
+.invoice-status-row {
+   border-bottom: 1px solid var(--line);
+   padding-block: .5rem;
+   margin-bottom: .75rem;
+}
+
+#inv-filter-row {
+   align-items: center;
+}
+
+.invoice-filter-native {
+   display: none !important;
+}
+
+.select-trigger {
+   width: 100%;
+}
+
+.filter-row .select-trigger {
+   width: 9.25rem;
+}
+
+.hierarchy-filters .select-trigger {
+   width: 11.5rem;
+}
+
+.bar .select-trigger,
+.timerbar .select-trigger,
+.copy-bar .select-trigger {
+   width: auto;
+   min-width: 8rem;
+   max-width: 100%;
+}
+
+.select-trigger[hidden] {
+   display: none;
+}
+
+.select-validation {
+   display: block;
+   color: var(--danger);
+}
+
+.invoice-filter-trigger {
+   display: flex;
+   align-items: center;
+   gap: .5rem;
+   width: 100%;
+   height: var(--control-height);
+   padding: .3rem .6rem;
+   margin: 0;
+   text-align: left;
+}
+
+.invoice-filter-label {
+   flex: 1;
+   min-width: 0;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+}
+
+.invoice-filter-trigger .p-icon--chevron-down {
+   order: 2;
+   margin: 0;
+}
+
+.invoice-filter-menu {
+   position: fixed;
+   inset: auto;
+   margin: 0;
+   padding: .25rem;
+   overflow-y: auto;
+   z-index: 100;
+   background: var(--surface);
+   color: var(--fg);
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
+   box-shadow: var(--shadow);
+}
+
+.invoice-filter-menu[hidden] {
+   display: none;
+}
+
+.invoice-filter-option {
+   display: block;
+   width: 100%;
+   margin: 0;
+   padding: .5rem .65rem;
+   border: 0;
+   text-align: left;
+   white-space: normal;
+   overflow-wrap: anywhere;
+   background: transparent;
+   color: var(--fg);
+}
+
+.invoice-filter-option[aria-selected="true"],
+.invoice-filter-option:hover {
+   background: var(--accent-soft);
+   color: var(--brand-deep);
+}
+
+.invoice-period-nav {
+   display: flex;
+   align-items: center;
+   gap: .5rem;
+   min-width: 0;
+}
+
+.invoice-period-nav[hidden] {
+   display: none;
+}
+
+.invoice-period-nav button {
+   width: 2.75rem;
+   height: 2.75rem;
+   padding: .5rem;
+}
+
+.invoice-period-nav button i {
+   margin: 0;
+}
+
+.pdf-pages {
+   max-height: 80dvh;
+   overflow: auto;
+   background: #e5e5e5;
+   padding: .25rem;
+}
+
+.pdf-pages canvas {
+   display: block;
+   background: white;
+}
+
+.pdf-pages:focus-visible {
+   outline: 3px solid var(--focus);
+}
+
+.ip-pdf iframe {
+   display: block;
+   width: 100%;
+   min-height: 60vh;
+   border: 0;
+   background: var(--surface);
+}
+
+.ip-letter {
+   white-space: pre-line;
+   color: var(--fg);
+   margin: .3rem 0 .6rem;
+}
+
+.ip-history h3 {
+   margin: 1rem 0 .3rem;
+   font-size: 1rem;
+}
+
+.ip-timeline {
+   margin: 0;
+   padding-left: 1.2rem;
+}
+
+.ip-tl-item+.ip-tl-item {
+   margin-top: .7rem;
+}
+
+.ip-tl-desc {
+   margin: 0;
+   font-weight: 600;
+}
+
+.ip-tl-actor,
+.ip-tl-when {
+   margin: 0;
+   color: var(--muted);
+}
+
+#invoice-table tbody tr {
+   cursor: default;
+}
+
+#invoice-table tbody tr[tabindex="0"]:focus-visible {
+   outline: 2px solid var(--accent);
+   outline-offset: -2px;
+}
+
 /* The frozen subject under the invoice number (#354): a quiet subtitle in the
    Number cell, never a new sortable column. */
-.inv-row-subject { display: block; color: var(--muted); font-size: .8rem; font-weight: 400; overflow-wrap: anywhere; }
+.inv-row-subject {
+   display: block;
+   color: var(--muted);
+   font-size: .8rem;
+   font-weight: 400;
+   overflow-wrap: anywhere;
+}
 
 /* ---- live invoice-template preview ---- */
 /* The frame gets a fixed, viewport-bounded height so the toolbar stays on
    screen while a tall document scrolls inside the PDF viewer. Tokens only;
    no new colours are introduced. */
-.template-preview-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .4rem 0; }
-.template-preview-toolbar .p-form-help-text { margin: 0; }
+.template-preview-toolbar {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: .5rem;
+   margin: .4rem 0;
+}
+
+.template-preview-toolbar .p-form-help-text {
+   margin: 0;
+}
+
 .template-preview-frame {
-  display: block; width: 100%; height: 40rem; max-height: 70vh;
-  border: 1px solid var(--line); background: var(--surface);
+   display: block;
+   width: 100%;
+   height: 40rem;
+   max-height: 70vh;
+   border: 1px solid var(--line);
+   background: var(--surface);
 }
 
 /* #232 phase 2b/2c: the .7rem Day-entry row rhythm folds into the unified
    .65rem one; the entry form dropped the retired `.card` class outright —
    the `p-modal__dialog` is the frame, so no reset is needed. */
 /* ---- grouped MVP rail (#142) ---- */
-.nav-group { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .45rem; }
+.nav-group {
+   display: flex;
+   flex-direction: column;
+   gap: .15rem;
+   margin-bottom: .45rem;
+}
+
 /* The rail's tablist grows so its last group (Settings) sits at the bottom, just
    above the separator, the colour switch and the account block. */
-.sidebar #tabs { flex: 1 1 auto; }
-.nav-bottom { margin-top: auto; }
+.sidebar #tabs {
+   flex: 1 1 auto;
+}
+
+.nav-bottom {
+   margin-top: auto;
+}
+
 /* More tools is a native disclosure, so its open/closed state is announced and
    keyboard-operable for free. It must not inherit `.nav-group`'s flex column (a
    flex display boxes a details' summary and content side by side), and the app
    paints its own chevron because the group label is a summary, not a tab. */
-.more-tools-group { display: block; }
-.more-tools-group > summary { display: flex; align-items: center; cursor: pointer; list-style: none; }
-.more-tools-group > summary::-webkit-details-marker { display: none; }
-.more-tools-group > summary::after { content: '\25B8'; margin-left: .35rem; font-size: .8rem; line-height: 1; }
-.more-tools-group[open] > summary::after { content: '\25BE'; }
-.more-tools-group > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
-.more-tools-group .nav-action { width: 100%; margin-top: .3rem; }
-.nav-label { font-size: .75rem; letter-spacing: 0; text-transform: uppercase;
-  color: var(--muted); padding: .1rem .7rem 0; font-weight: 700; }
+.more-tools-group {
+   display: block;
+}
+
+.more-tools-group>summary {
+   display: flex;
+   align-items: center;
+   cursor: pointer;
+   list-style: none;
+}
+
+.more-tools-group>summary::-webkit-details-marker {
+   display: none;
+}
+
+.more-tools-group>summary::after {
+   content: '\25B8';
+   margin-left: .35rem;
+   font-size: .8rem;
+   line-height: 1;
+}
+
+.more-tools-group[open]>summary::after {
+   content: '\25BE';
+}
+
+.more-tools-group>summary:focus-visible {
+   outline: 3px solid var(--focus);
+   outline-offset: 1px;
+}
+
+.more-tools-group .nav-action {
+   width: 100%;
+   margin-top: .3rem;
+}
+
+.nav-label {
+   font-size: .75rem;
+   letter-spacing: 0;
+   text-transform: uppercase;
+   color: var(--muted);
+   padding: .1rem .7rem 0;
+   font-weight: 700;
+}
+
 /* ---- calendar timesheet view (#140) ---- */
 /* The month bar IS the Day/Week `.day-bar` (card, centred label, quiet trailing
    action), so the month arrows need no rules of their own: they are ordinary
    `.day-nav button`s once the markup mirrors the day and week bars. */
-.cal-total-label { color: var(--muted); font-size: .85rem; }
-.cal-total-value { font-weight: 600; font-variant-numeric: tabular-nums; }
-#cal-grid { width: 100%; table-layout: fixed; border-collapse: collapse; }
-#cal-grid th { font-size: .75rem; color: var(--muted); padding: .3rem 0; text-align: left; }
-#cal-grid td.cal-cell { border: 1px solid var(--line); vertical-align: top; height: 5.2rem;
-  padding: 0; transition: background .12s; }
-#cal-grid td.cal-out { border: 1px dashed var(--line); opacity: .4; }
-#cal-grid td.cal-cell.today { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cal-total-label {
+   color: var(--muted);
+   font-size: .85rem;
+}
+
+.cal-total-value {
+   font-weight: 600;
+   font-variant-numeric: tabular-nums;
+}
+
+#cal-grid {
+   width: 100%;
+   table-layout: fixed;
+   border-collapse: collapse;
+}
+
+#cal-grid th {
+   font-size: .75rem;
+   color: var(--muted);
+   padding: .3rem 0;
+   text-align: left;
+}
+
+#cal-grid td.cal-cell {
+   border: 1px solid var(--line);
+   vertical-align: top;
+   height: 5.2rem;
+   padding: 0;
+   transition: background .12s;
+}
+
+#cal-grid td.cal-out {
+   border: 1px dashed var(--line);
+   opacity: .4;
+}
+
+#cal-grid td.cal-cell.today {
+   outline: 2px solid var(--accent);
+   outline-offset: -2px;
+}
+
 /* A logged day is a <button> (keyboard-activatable) and an empty day is a plain
    <div>. Vanilla's base button rule sets `justify-content: center`, which centred
    the button's content vertically while the div top-aligned — the date number and
    the status icon then sat lower on exactly the days that had time. Pin both to
    the top so every cell's head row sits on the same line. */
-.cal-day { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
-  gap: .15rem; width: 100%;
-  height: 100%; padding: .3rem .4rem; background: none; border: 0; font: inherit; color: inherit;
-  cursor: pointer; text-align: left; }
-.cal-day.cal-plain { cursor: default; }
-.cal-cell.has:hover { background: var(--row-alt); }
+.cal-day {
+   display: flex;
+   flex-direction: column;
+   align-items: flex-start;
+   justify-content: flex-start;
+   gap: .15rem;
+   width: 100%;
+   height: 100%;
+   padding: .3rem .4rem;
+   background: none;
+   border: 0;
+   font: inherit;
+   color: inherit;
+   cursor: pointer;
+   text-align: left;
+}
+
+.cal-day.cal-plain {
+   cursor: default;
+}
+
+.cal-cell.has:hover {
+   background: var(--row-alt);
+}
+
 /* #108 parity: the date number top-left and the per-day status icon top-right
    inside the cell (success when the day has an entry, history when it is empty). */
-.cal-head { display: flex; align-items: flex-start; justify-content: space-between;
-  gap: .3rem; width: 100%; min-width: 0; }
-.cal-status { color: var(--muted); line-height: 1; }
-.cal-status [class*="p-icon--"] { width: .8rem; height: .8rem; }
-.cal-num { font-weight: 700; }
+.cal-head {
+   display: flex;
+   align-items: flex-start;
+   justify-content: space-between;
+   gap: .3rem;
+   width: 100%;
+   min-width: 0;
+}
+
+.cal-status {
+   color: var(--muted);
+   line-height: 1;
+}
+
+.cal-status [class*="p-icon--"] {
+   width: .8rem;
+   height: .8rem;
+}
+
+.cal-num {
+   font-weight: 700;
+}
+
 /* The day total is the whole content of a logged cell (#140) — no per-entry
    list — so it reads at a glance. */
-.cal-hours { font-size: .85rem; font-weight: 600; color: var(--brand-deep);
-  font-variant-numeric: tabular-nums; }
-.cal-cell:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cal-hours {
+   font-size: .85rem;
+   font-weight: 600;
+   color: var(--brand-deep);
+   font-variant-numeric: tabular-nums;
+}
+
+.cal-cell:focus-within {
+   outline: 2px solid var(--accent);
+   outline-offset: -2px;
+}
 
 /* ---- shared alignment pass (#131): reusable rhythm, no component changes ---- */
 /* #232 phase 2b: these fieldsets are `p-form__group`s now; the frame stays
    app-owned because the base `fieldset` rule (vf-b-forms) tints and clips. */
 fieldset.p-form__group {
-  border: 1px solid var(--line); border-radius: var(--radius);
-  padding: .6rem .75rem .15rem; margin: 0 0 .65rem;
-  overflow: visible; /* Vanilla base `fieldset` (vf-b-forms) sets overflow:auto */
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
+   padding: .6rem .75rem .15rem;
+   margin: 0 0 .65rem;
+   overflow: visible;
+   /* Vanilla base `fieldset` (vf-b-forms) sets overflow:auto */
 }
-fieldset.p-form__group > legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
-.buttons { flex-wrap: wrap; }
-.dlg-actions { gap: .6rem; }
-h3 { font-size: 1.02rem; margin: 1.1rem 0 .4rem; }
-caption { padding-bottom: .35rem; }
+
+fieldset.p-form__group>legend {
+   font-weight: 600;
+   font-size: .85rem;
+   padding: 0 .3rem;
+}
+
+.buttons {
+   flex-wrap: wrap;
+}
+
+.dlg-actions {
+   gap: .6rem;
+}
+
+h3 {
+   font-size: 1.02rem;
+   margin: 1.1rem 0 .4rem;
+}
+
+caption {
+   padding-bottom: .35rem;
+}
+
 .contact-row {
-  display: grid; grid-template-columns: 1.2fr 1fr 1.4fr auto auto;
-  gap: .4rem; align-items: center; margin-bottom: .35rem;
+   display: grid;
+   grid-template-columns: 1.2fr 1fr 1.4fr auto auto;
+   gap: .4rem;
+   align-items: center;
+   margin-bottom: .35rem;
 }
-.contact-row input[type=checkbox] { margin: 0; }
+
+.contact-row input[type=checkbox] {
+   margin: 0;
+}
+
 @media (max-width: 720px) {
-  .contact-row { grid-template-columns: 1fr 1fr; }
-  .contact-row > .link, .contact-row label { grid-column: auto; }
+   .contact-row {
+      grid-template-columns: 1fr 1fr;
+   }
+
+   .contact-row>.link,
+   .contact-row label {
+      grid-column: auto;
+   }
 }
 
 /* Invoice register (#219 removed the dead customer-workspace rules — Setup
    became three plain sections in #182; #349 retired the creation workspace). */
-.invoice-register-column { min-width: 0; }
-.workspace-empty { margin: .35rem 0 .75rem; padding: .75rem .9rem; color: var(--muted);
-  border: 1px dashed var(--line); border-radius: var(--radius); background: var(--surface); }
-.invoice-table-scroll { display: block; max-width: 100%; overflow-x: auto; }
-.customer-extra-details { margin: .25rem 0 .8rem; border-top: 1px solid var(--line); }
-.customer-extra-details fieldset.p-form__group { margin-top: .5rem; }
+.invoice-register-column {
+   min-width: 0;
+}
+
+.workspace-empty {
+   margin: .35rem 0 .75rem;
+   padding: .75rem .9rem;
+   color: var(--muted);
+   border: 1px dashed var(--line);
+   border-radius: var(--radius);
+   background: var(--surface);
+}
+
+.invoice-table-scroll {
+   display: block;
+   max-width: 100%;
+   overflow-x: auto;
+}
+
+.customer-extra-details {
+   margin: .25rem 0 .8rem;
+   border-top: 1px solid var(--line);
+}
+
+.customer-extra-details fieldset.p-form__group {
+   margin-top: .5rem;
+}
+
 /* One multi-currency payment rail (#354). The row is a fieldset so its legend
    names the group for assistive technology; the frame only separates it from
    the flat default account above. */
 .payment-rail {
-  margin: 0 0 .65rem; padding: .55rem .7rem .15rem;
-  border: 1px solid var(--line); border-radius: var(--radius);
+   margin: 0 0 .65rem;
+   padding: .55rem .7rem .15rem;
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
 }
-.payment-rail > legend { padding: 0 .25rem; font-weight: 700; color: var(--muted); }
-.chip-edit { border: 0; background: transparent; color: var(--brand-deep); padding: .1rem .25rem; font-size: .8rem; }
-.chip-edit:hover { text-decoration: underline; }
+
+.payment-rail>legend {
+   padding: 0 .25rem;
+   font-weight: 700;
+   color: var(--muted);
+}
+
+.chip-edit {
+   border: 0;
+   background: transparent;
+   color: var(--brand-deep);
+   padding: .1rem .25rem;
+   font-size: .8rem;
+}
+
+.chip-edit:hover {
+   text-decoration: underline;
+}
 
 /* #349: the wizard is now a p-modal dialog and the legacy direct draft
    generator is gone, so the old two-column `.invoice-workspace` grid and the
    create column it held are retired and the register is full width.
    #invoice-summary (#135) stands on its own full-width row under the .ts-head
    action row; it stays written by refreshInvoiceSummary() and announced. */
-#invoice-summary { margin: 0 0 .75rem; }
-.invoice-editor-adjustments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
-.invoice-register-column #invoice-table { width: 100%; min-width: 0; table-layout: fixed; font-size: .84rem; }
-.invoice-register-column #invoice-preview { max-width: none; }
-.invoice-register-column #invoice-table th:nth-child(1) { width: 8%; }
-.invoice-register-column #invoice-table th:nth-child(2) { width: 14%; }
-.invoice-register-column #invoice-table th:nth-child(3) { width: 16%; }
+#invoice-summary {
+   margin: 0 0 .75rem;
+}
+
+.invoice-editor-adjustments {
+   display: grid;
+   grid-template-columns: repeat(2, minmax(0, 1fr));
+   gap: .75rem;
+}
+
+.invoice-register-column #invoice-table {
+   width: 100%;
+   min-width: 0;
+   table-layout: fixed;
+   font-size: .84rem;
+}
+
+.invoice-register-column #invoice-preview {
+   max-width: none;
+}
+
+.invoice-register-column #invoice-table th:nth-child(1) {
+   width: 8%;
+}
+
+.invoice-register-column #invoice-table th:nth-child(2) {
+   width: 14%;
+}
+
+.invoice-register-column #invoice-table th:nth-child(3) {
+   width: 16%;
+}
+
 .invoice-register-column #invoice-table th:nth-child(4),
-.invoice-register-column #invoice-table th:nth-child(5) { width: 10%; }
-.invoice-register-column #invoice-table th:nth-child(6) { width: 10%; }
-.invoice-register-column #invoice-table .actions-col { width: 32%; }
-.invoice-register-column #invoice-table td { overflow-wrap: anywhere; }
+.invoice-register-column #invoice-table th:nth-child(5) {
+   width: 10%;
+}
+
+.invoice-register-column #invoice-table th:nth-child(6) {
+   width: 10%;
+}
+
+.invoice-register-column #invoice-table .actions-col {
+   width: 32%;
+}
+
+.invoice-register-column #invoice-table td {
+   overflow-wrap: anywhere;
+}
+
 /* The invoice actions are the shared 44px icon buttons now: their margin and
    padding come from `.icon-action`/`.row-actions`, so the old compact
    text-button override (margin .1rem, padding .2rem .35rem) is retired. It
    added 1.6px around every icon and made the six-action row wrap early. */
 /* #349: the wizard is a p-modal dialog; it follows the app's per-dialog width
    convention (dialog.p-modal itself is uncapped, web/styles.css above). */
-#invoice-wizard .p-modal__dialog { max-width: 44rem; }
+#invoice-wizard .p-modal__dialog {
+   max-width: 44rem;
+}
+
 /* Recipient picker (#139 follow-up): one labelled checkbox row per on-file
    address, the address itself as supporting text. The dialog stays narrower
    than the wizard because its content is a short list. */
-#send-email-dialog .p-modal__dialog { max-width: 34rem; }
-#send-email-recipients { display: grid; gap: .25rem; margin: .25rem 0 .5rem; }
-#send-email-recipients label { display: flex; align-items: flex-start; gap: .45rem; }
-#send-email-recipients input[type="checkbox"] { min-height: 0; width: 1rem; height: 1rem; margin-top: .15rem; }
-#send-email-recipients .send-email-contact-meta { opacity: .75; }
-#send-email-invoice { margin-top: 0; }
-#iw-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .2rem .75rem; }
+#send-email-dialog .p-modal__dialog {
+   max-width: 34rem;
+}
+
+#send-email-recipients {
+   display: grid;
+   gap: .25rem;
+   margin: .25rem 0 .5rem;
+}
+
+#send-email-recipients label {
+   display: flex;
+   align-items: flex-start;
+   gap: .45rem;
+}
+
+#send-email-recipients input[type="checkbox"] {
+   min-height: 0;
+   width: 1rem;
+   height: 1rem;
+   margin-top: .15rem;
+}
+
+#send-email-recipients .send-email-contact-meta {
+   opacity: .75;
+}
+
+#send-email-invoice {
+   margin-top: 0;
+}
+
+#iw-projects {
+   display: grid;
+   grid-template-columns: repeat(2, minmax(0, 1fr));
+   gap: .2rem .75rem;
+}
+
 /* #F: the year stepper (.day-nav), the chart and its one-line note are a
    single column, so the caption and the rate line stay aligned with the chart
    in both themes. */
-#inv-chart-wrap { min-height: 8rem; min-width: 0; display: flex; flex-direction: column; }
+#inv-chart-wrap {
+   min-height: 8rem;
+   min-width: 0;
+   display: flex;
+   flex-direction: column;
+}
+
 /* #349: trends is the page's top content section — a plain section wrapping a
    p-card, no longer a collapsed <details>. The card supplies the frame, so the
    section itself only keeps its layout constraints. */
-.invoice-trends { min-width: 0; margin: 0; }
+.invoice-trends {
+   min-width: 0;
+   margin: 0;
+}
+
 /* Advanced billing tools (recurring schedules and retainers) are not finished:
    the shell ships `data-advanced-billing="off"` on <html> and this rule keeps
    the whole block out of rendering, the accessibility tree and the tab order.
    Turning that single attribute to "on" in web/index.html brings it back. */
-html[data-advanced-billing="off"] #advanced-billing { display: none; }
-.advanced-billing { margin-top: 1rem; border: 1px solid var(--line); border-radius: var(--radius); padding: .35rem .55rem; background: var(--surface); }
-.advanced-billing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
-.advanced-billing-section { min-width: 0; }
-.advanced-billing-section h2:first-child { margin-top: .25rem; }
-.day-bar { display: grid; grid-template-columns: auto minmax(12rem, 1fr) auto; align-items: center; }
-.day-actions { grid-column: 1; }
-.day-nav { justify-self: center; }
-#day-today { justify-self: end; }
+html[data-advanced-billing="off"] #advanced-billing {
+   display: none;
+}
+
+.advanced-billing {
+   margin-top: 1rem;
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
+   padding: .35rem .55rem;
+   background: var(--surface);
+}
+
+.advanced-billing-grid {
+   display: grid;
+   grid-template-columns: repeat(2, minmax(0, 1fr));
+   gap: 1rem;
+   align-items: start;
+}
+
+.advanced-billing-section {
+   min-width: 0;
+}
+
+.advanced-billing-section h2:first-child {
+   margin-top: .25rem;
+}
+
+.day-bar {
+   display: grid;
+   grid-template-columns: auto minmax(12rem, 1fr) auto;
+   align-items: center;
+}
+
+.day-actions {
+   grid-column: 1;
+}
+
+.day-nav {
+   justify-self: center;
+}
+
+#day-today {
+   justify-self: end;
+}
 
 @media (max-width: 1000px) {
-  .advanced-billing-grid { grid-template-columns: minmax(0, 1fr); }
+   .advanced-billing-grid {
+      grid-template-columns: minmax(0, 1fr);
+   }
 }
-@media (max-width: 720px) {
-  #iw-projects { grid-template-columns: minmax(0, 1fr); }
-  .invoice-editor-adjustments { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .day-bar.p-card { grid-template-columns: minmax(0, 1fr) auto; gap: .55rem; margin: 0 0 .65rem; padding: .55rem; }
-   .day-bar > .day-nav { grid-column: 1 / -1; grid-row: 1; justify-self: stretch; justify-content: center; min-width: 0; gap: .5rem; }
-   .day-bar .day-nav > .day-label { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-   .day-bar .day-nav > button { flex: 0 0 2.75rem; height: 2.75rem; }
-  .day-actions { grid-column: 1 / -1; grid-row: 2; }
-   .day-end { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; display: flex; align-items: center; justify-content: space-between; gap: .55rem; flex-wrap: wrap; min-width: 0; }
-  .day-actions > .primary { flex: 1 1 auto; }
-  #day-table { table-layout: fixed; }
-  #day-table thead th:nth-child(3), #day-table tbody td:nth-child(3) { width: 4.5rem; }
-  #day-table thead th:last-child, #day-table tbody td:last-child { width: 7.75rem; }
-  #day-table tbody td:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
 
-  #day-table .entry-main { min-width: 0; overflow-wrap: anywhere; }
-  #day-table td.entry-note { max-width: none; }
-  .entry-note { white-space: normal; overflow-wrap: anywhere; }
-  #day-table .actions-col { white-space: normal; }
-  .invoice-register-column #invoice-table { min-width: 38rem; table-layout: auto; }
+@media (max-width: 720px) {
+   #iw-projects {
+      grid-template-columns: minmax(0, 1fr);
+   }
+
+   .invoice-editor-adjustments {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
+   }
+
+   .day-bar.p-card {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: .55rem;
+      margin: 0 0 .65rem;
+      padding: .55rem;
+   }
+
+   .day-bar>.day-nav {
+      grid-column: 1 / -1;
+      grid-row: 1;
+      justify-self: stretch;
+      justify-content: center;
+      min-width: 0;
+      gap: .5rem;
+   }
+
+   .day-bar .day-nav>.day-label {
+      min-width: 0;
+      flex: 1;
+      overflow-wrap: anywhere;
+   }
+
+   .day-bar .day-nav>button {
+      flex: 0 0 2.75rem;
+      height: 2.75rem;
+   }
+
+   .day-actions {
+      grid-column: 1 / -1;
+      grid-row: 2;
+   }
+
+   .day-end {
+      grid-column: 1 / -1;
+      grid-row: 3;
+      justify-self: stretch;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .55rem;
+      flex-wrap: wrap;
+      min-width: 0;
+   }
+
+   .day-actions>.primary {
+      flex: 1 1 auto;
+   }
+
+   #day-table {
+      table-layout: fixed;
+   }
+
+   #day-table thead th:nth-child(3),
+   #day-table tbody td:nth-child(3) {
+      width: 4.5rem;
+   }
+
+   #day-table thead th:last-child,
+   #day-table tbody td:last-child {
+      width: 7.75rem;
+   }
+
+   #day-table tbody td:last-child {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .25rem;
+   }
+
+   #day-table .entry-main {
+      min-width: 0;
+      overflow-wrap: anywhere;
+   }
+
+   #day-table td.entry-note {
+      max-width: none;
+   }
+
+   .entry-note {
+      white-space: normal;
+      overflow-wrap: anywhere;
+   }
+
+   #day-table .actions-col {
+      white-space: normal;
+   }
+
+   .invoice-register-column #invoice-table {
+      min-width: 38rem;
+      table-layout: auto;
+   }
 }
+
 /* ---- invoice trends + register (#135, #349) ---- */
 /* The Total open / Paid in tiles and the .inv-overview grid they needed are
    retired (#349). The promoted Trends section carries the chart and the
    relocated year label, and lines up with the action row (.ts-head above it) and
    with the invoice list, because every block is a full-width child of the panel.
    The chart wrapper drops its own frame — the enclosing p-card is the frame. */
-.invoice-trends h2 { margin: 0; font-size: 1.15rem; }
-.invoice-trends-year { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em;
-  color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; }
+.invoice-trends h2 {
+   margin: 0;
+   font-size: 1.15rem;
+}
+
+.invoice-trends-year {
+   font-size: .8rem;
+   text-transform: uppercase;
+   letter-spacing: .05em;
+   color: var(--muted);
+   font-weight: 700;
+   font-variant-numeric: tabular-nums;
+}
+
 /* #F: the year stepper is an ordinary `.day-nav` — the Day, Week and Calendar
    bars' own markup and skin — so it only needs centring here. The label it
    centres is a sentence ("Open vs paid (EUR) — 2026"), not a 9-letter date, so
    the nav's pinned date width is released for this one instance. */
-#inv-chart-wrap .day-nav { justify-content: center; margin-bottom: .35rem; }
-#inv-chart-wrap .day-nav > .day-label { min-width: 0; font-size: .9rem; }
-#inv-chart { display: flex; gap: .3rem; align-items: flex-end; min-height: 5.5rem; }
-.inv-col-chart { flex: 1; display: flex; flex-direction: column; align-items: center; gap: .2rem; }
-.inv-bars { display: flex; gap: 2px; align-items: flex-end; height: 58px; }
-.inv-bar { width: 8px; border-radius: 2px 2px 0 0; background: var(--muted); }
-.inv-bar.open { background: var(--accent); }
-.inv-clabel { font-size: .65rem; color: var(--muted); }
+#inv-chart-wrap .day-nav {
+   justify-content: center;
+   margin-bottom: .35rem;
+}
+
+#inv-chart-wrap .day-nav>.day-label {
+   min-width: 0;
+   font-size: .9rem;
+}
+
+#inv-chart {
+   display: flex;
+   gap: .3rem;
+   align-items: flex-end;
+   min-height: 5.5rem;
+}
+
+.inv-col-chart {
+   flex: 1;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   gap: .2rem;
+}
+
+.inv-bars {
+   display: flex;
+   gap: 2px;
+   align-items: flex-end;
+   height: 58px;
+}
+
+.inv-bar {
+   width: 8px;
+   border-radius: 2px 2px 0 0;
+   background: var(--muted);
+}
+
+.inv-bar.open {
+   background: var(--accent);
+}
+
+.inv-clabel {
+   font-size: .65rem;
+   color: var(--muted);
+}
+
 /* #F: the month axis reads Jan…Dec and collapses to a single letter on a
    narrow screen. Both variants are rendered and the media query below picks
    one, so the width is a CSS decision (no re-render on resize); the short
    variant is `aria-hidden`, so a screen reader is never read a month twice. */
-.inv-clabel-short { display: none; }
+.inv-clabel-short {
+   display: none;
+}
+
 /* #F: the one line under the chart — the rate that was applied, or why the
    currencies were left alone. Muted, centred on the same axis as the stepper,
    and silent when there is nothing to say. */
-#inv-chart-note { margin: .4rem 0 0; font-size: .75rem; color: var(--muted);
-  font-variant-numeric: tabular-nums; text-align: center; }
-#inv-chart-note:empty { display: none; }
-#inv-list-head { margin-bottom: var(--space-xs); }
+#inv-chart-note {
+   margin: .4rem 0 0;
+   font-size: .75rem;
+   color: var(--muted);
+   font-variant-numeric: tabular-nums;
+   text-align: center;
+}
+
+#inv-chart-note:empty {
+   display: none;
+}
+
+#inv-list-head {
+   margin-bottom: var(--space-xs);
+}
+
 /* #F: the Open|All filter stays a `.seg` group of aria-pressed toggle buttons
    — never a `p-tabs` tablist (docs/ubuntu-design.md, increment 5). It now
    shares the fields' underline control boundary and height. The pressed
@@ -960,12 +2958,35 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
    on --accent-soft, the pairing pinned in gui-test/contrast.mjs for both
    themes) plus a bottom indicator in the accent colour. Weight is unchanged
    between states so the segments keep a fixed width and the row never shifts. */
-.seg .seg-btn { border: 0; border-inline-start: 1px solid var(--line); border-radius: 0;
-  margin: 0; background: transparent; color: var(--fg); padding: 0 .75rem;
-  cursor: pointer; font: inherit; font-size: 1rem; line-height: 1.5rem; }
-.seg .seg-btn:first-child { border-inline-start: 0; }
-.seg .seg-btn:hover { background: var(--row-alt); color: var(--fg); }
-.seg .seg-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--brand-deep); box-shadow: inset 0 -3px 0 var(--accent); }
+.seg .seg-btn {
+   border: 0;
+   border-inline-start: 1px solid var(--line);
+   border-radius: 0;
+   margin: 0;
+   background: transparent;
+   color: var(--fg);
+   padding: 0 .75rem;
+   cursor: pointer;
+   font: inherit;
+   font-size: 1rem;
+   line-height: 1.5rem;
+}
+
+.seg .seg-btn:first-child {
+   border-inline-start: 0;
+}
+
+.seg .seg-btn:hover {
+   background: var(--row-alt);
+   color: var(--fg);
+}
+
+.seg .seg-btn[aria-pressed="true"] {
+   background: var(--accent-soft);
+   color: var(--brand-deep);
+   box-shadow: inset 0 -3px 0 var(--accent);
+}
+
 /* The Columns disclosure is a control too. Absolute-position its menu so
    opening it cannot move the row's shared bottom edge. */
 /* #232 phase 2d: the bespoke `.sort-th` skin is retired — the Invoices
@@ -973,20 +2994,49 @@ html[data-advanced-billing="off"] #advanced-billing { display: none; }
    plus `.p-table__sort-button`), which owns the cursor, hover ink and the
    chevron indicator. */
 @media (max-width: 720px) {
-  main { padding: 1rem; }
-  .inv-bar { width: 5px; }
+   main {
+      padding: 1rem;
+   }
+
+   .inv-bar {
+      width: 5px;
+   }
 }
+
 @media (max-width: 480px) {
-  .week-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .4rem; }
-  .ws-day.p-card { min-height: 4.25rem; padding: .45rem .5rem; }
-  /* #F: at this width 12 three-letter labels no longer fit; the chart's month
+   .week-strip {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: .4rem;
+   }
+
+   .ws-day.p-card {
+      min-height: 4.25rem;
+      padding: .45rem .5rem;
+   }
+
+   /* #F: at this width 12 three-letter labels no longer fit; the chart's month
      axis collapses to one letter (the full label is what AT reads). */
-  .inv-clabel-full { display: none; }
-  .inv-clabel-short { display: inline; }
+   .inv-clabel-full {
+      display: none;
+   }
+
+   .inv-clabel-short {
+      display: inline;
+   }
 }
 
 
 /* ---- appearance & messages settings (#146) ---- */
-.accent-row { display: flex; align-items: center; gap: .5rem; }
-.accent-swatch { width: 2rem; height: 1.4rem; border: 1px solid var(--line);
-  border-radius: calc(var(--radius) / 2); background: transparent; }
+.accent-row {
+   display: flex;
+   align-items: center;
+   gap: .5rem;
+}
+
+.accent-swatch {
+   width: 2rem;
+   height: 1.4rem;
+   border: 1px solid var(--line);
+   border-radius: calc(var(--radius) / 2);
+   background: transparent;
+}

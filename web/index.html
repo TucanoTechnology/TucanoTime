@@ -51,11 +51,14 @@
   </div>
 
   <div class="app">
-    <dialog id="navigation-drawer" class="navigation-drawer" aria-label="Application navigation" aria-modal="true"></dialog>
+    <dialog id="navigation-drawer" class="navigation-drawer" aria-label="Application navigation" aria-modal="true">
+    </dialog>
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-heading">
         <div class="brand">TucanoTime</div>
-        <button type="button" id="navigation-close" class="p-button--base navigation-control" aria-label="Close navigation" title="Close navigation" autofocus><i class="p-icon--close" aria-hidden="true"></i></button>
+        <button type="button" id="navigation-close" class="p-button--base navigation-control"
+          aria-label="Close navigation" title="Close navigation" autofocus><i class="p-icon--close"
+            aria-hidden="true"></i></button>
       </div>
       <nav aria-label="Sections">
         <!-- #232 increment 5: the rail is the official p-tabs__list markup
@@ -87,10 +90,10 @@
           <div class="nav-group" role="presentation">
             <span class="nav-label">Billing</span>
             <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-invoices"
-              aria-controls="panel-invoices" aria-selected="false" tabindex="-1"><i class="p-icon--credit-card"
+                aria-controls="panel-invoices" aria-selected="false" tabindex="-1"><i class="p-icon--credit-card"
                   aria-hidden="true"></i>Invoices</button></div>
             <div class="p-tabs__item"><button class="p-tabs__link" role="tab" id="tab-expenses"
-              aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--gift"
+                aria-controls="panel-expenses" aria-selected="false" tabindex="-1"><i class="p-icon--gift"
                   aria-hidden="true"></i>Expenses</button></div>
           </div>
           <!-- More tools is a disclosure, collapsed by default: the secondary
@@ -145,7 +148,9 @@
 
     <div class="content">
       <header class="masthead">
-        <button type="button" id="navigation-open" class="p-button--base navigation-control" aria-label="Open navigation" aria-controls="navigation-drawer" aria-expanded="false" title="Open navigation"><i class="p-icon--menu" aria-hidden="true"></i></button>
+        <button type="button" id="navigation-open" class="p-button--base navigation-control"
+          aria-label="Open navigation" aria-controls="navigation-drawer" aria-expanded="false"
+          title="Open navigation"><i class="p-icon--menu" aria-hidden="true"></i></button>
         <h1 id="page-title">Timesheet</h1>
       </header>
 
@@ -657,15 +662,19 @@
               <div class="filter-field">
                 <label class="sr-only" for="inv-f-period">Time filter</label>
                 <select id="inv-f-period">
-                  <option value="all">All time</option><option value="month">Month</option>
-                  <option value="quarter">Quarter</option><option value="year">Year</option>
+                  <option value="all">All time</option>
+                  <option value="month">Month</option>
+                  <option value="quarter">Quarter</option>
+                  <option value="year">Year</option>
                   <option value="custom">Custom range</option>
                 </select>
               </div>
               <nav class="invoice-period-nav" aria-label="Invoice date period" hidden>
-                <button type="button" id="inv-period-prev" class="p-button--base" aria-label="Previous invoice period" title="Previous invoice period"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
+                <button type="button" id="inv-period-prev" class="p-button--base" aria-label="Previous invoice period"
+                  title="Previous invoice period"><i class="p-icon--chevron-left" aria-hidden="true"></i></button>
                 <span id="inv-period-label" role="status" aria-live="polite"></span>
-                <button type="button" id="inv-period-next" class="p-button--base" aria-label="Next invoice period" title="Next invoice period"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
+                <button type="button" id="inv-period-next" class="p-button--base" aria-label="Next invoice period"
+                  title="Next invoice period"><i class="p-icon--chevron-right" aria-hidden="true"></i></button>
               </nav>
               <div class="filter-field inv-custom-period" hidden>
                 <label class="sr-only" for="inv-f-from">Period from</label>
@@ -933,15 +942,31 @@
                 <h2 class="p-modal__title" id="ed-title">Manual invoice</h2>
               </header>
               <div class="invoice-document-fields">
-                <div class="p-form__group"><label class="p-form__label" for="ed-number">Invoice number</label><input class="p-form__control" type="text" id="ed-number" readonly></div>
-                <div class="p-form__group"><label class="p-form__label" for="ed-customer">Invoice for</label><select class="p-form__control" id="ed-customer"></select></div>
-                <div class="p-form__group"><label class="p-form__label" for="ed-po">PO number</label><input class="p-form__control" type="text" id="ed-po" maxlength="120"></div>
-                <div class="p-form__group"><label class="p-form__label" for="ed-currency">Currency</label><input class="p-form__control" type="text" id="ed-currency" maxlength="3" pattern="[A-Z]{3}" value="EUR"></div>
-                <div class="p-form__group"><label class="p-form__label" for="ed-date">Issue date</label><input class="p-form__control" type="date" id="ed-date"></div>
-                <div class="p-form__group"><label class="p-form__label" for="ed-terms">Payment terms</label><select class="p-form__control" id="ed-terms"><option value="">Customer / template default</option><option value="upon_receipt">Upon receipt</option><option value="net_15">Net 15</option><option value="net_20">Net 20</option><option value="net_30">Net 30</option><option value="net_45">Net 45</option></select></div>
-                <div class="p-form__group"><label class="p-form__label" for="ed-due">Due date override</label><input class="p-form__control" type="date" id="ed-due"></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-number">Invoice number</label><input
+                    class="p-form__control" type="text" id="ed-number" readonly></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-customer">Invoice for</label><select
+                    class="p-form__control" id="ed-customer"></select></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-po">PO number</label><input
+                    class="p-form__control" type="text" id="ed-po" maxlength="120"></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-currency">Currency</label><input
+                    class="p-form__control" type="text" id="ed-currency" maxlength="3" pattern="[A-Z]{3}" value="EUR">
+                </div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-date">Issue date</label><input
+                    class="p-form__control" type="date" id="ed-date"></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-terms">Payment terms</label><select
+                    class="p-form__control" id="ed-terms">
+                    <option value="">Customer / template default</option>
+                    <option value="upon_receipt">Upon receipt</option>
+                    <option value="net_15">Net 15</option>
+                    <option value="net_20">Net 20</option>
+                    <option value="net_30">Net 30</option>
+                    <option value="net_45">Net 45</option>
+                  </select></div>
+                <div class="p-form__group"><label class="p-form__label" for="ed-due">Due date override</label><input
+                    class="p-form__control" type="date" id="ed-due"></div>
               </div>
-              <div class="p-form__group"><label class="p-form__label" for="ed-subject">Subject</label><input class="p-form__control" type="text" id="ed-subject" maxlength="120"></div>
+              <div class="p-form__group"><label class="p-form__label" for="ed-subject">Subject</label><input
+                  class="p-form__control" type="text" id="ed-subject" maxlength="120"></div>
               <div class="table-scroll">
                 <table id="ed-lines">
                   <caption class="sr-only">Invoice lines</caption>
@@ -957,8 +982,10 @@
                   <tbody></tbody>
                 </table>
               </div>
-              <div class="buttons"><button type="button" id="ed-add" class="secondary" data-icon="plus">Add item</button>
-                <button type="button" id="ed-import" class="secondary" data-icon="history">Import tracked work</button></div>
+              <div class="buttons"><button type="button" id="ed-add" class="secondary" data-icon="plus">Add
+                  item</button>
+                <button type="button" id="ed-import" class="secondary" data-icon="history">Import tracked work</button>
+              </div>
               <div class="invoice-editor-adjustments">
                 <div class="p-form__group"><label class="p-form__label" for="ed-discount">Discount %</label><input
                     class="p-form__control" id="ed-discount" type="number" min="0" max="100" step="0.01" value="0"
@@ -968,7 +995,8 @@
                     inputmode="decimal"></div>
               </div>
               <dl id="ed-totals" class="ip-facts"></dl>
-              <div class="p-form__group"><label class="p-form__label" for="ed-notes">Notes</label><textarea class="p-form__control" id="ed-notes" rows="5" maxlength="4000"></textarea></div>
+              <div class="p-form__group"><label class="p-form__label" for="ed-notes">Notes</label><textarea
+                  class="p-form__control" id="ed-notes" rows="5" maxlength="4000"></textarea></div>
               <button type="button" id="ed-defaults" class="link">Reset document defaults</button>
               <p id="ed-defaults-state" role="status" aria-live="polite"></p>
               <div class="p-form-validation is-error">
@@ -1520,8 +1548,7 @@
               <div class="p-card__content">
                 <p class="p-form-help-text">Choose the categories available when recording expenses. Removing a
                   category is blocked while an expense still uses it.</p>
-                <dialog id="category-dialog" class="p-modal" aria-modal="true"
-                  aria-labelledby="category-dialog-title">
+                <dialog id="category-dialog" class="p-modal" aria-modal="true" aria-labelledby="category-dialog-title">
                   <div class="p-modal__dialog">
                     <header class="p-modal__header">
                       <h2 class="p-modal__title" id="category-dialog-title">Add category</h2>
@@ -1534,9 +1561,9 @@
                       <div class="p-form-validation is-error">
                         <p class="p-form-validation__message" id="category-error" role="alert" hidden></p>
                       </div>
-                      <footer class="buttons p-modal__footer"><button data-positive="1" type="submit"
-                          id="category-save" class="p-button--positive">Add category</button><button type="button"
-                          id="category-cancel" class="p-button">Cancel</button></footer>
+                      <footer class="buttons p-modal__footer"><button data-positive="1" type="submit" id="category-save"
+                          class="p-button--positive">Add category</button><button type="button" id="category-cancel"
+                          class="p-button">Cancel</button></footer>
                     </form>
                   </div>
                 </dialog>
@@ -2115,7 +2142,10 @@
         <div class="p-form__group"><label class="p-form__label" for="customer-email">Billing email (optional, for
             invoice delivery)</label><input class="p-form__control" id="customer-email" type="email" maxlength="200"
             autocomplete="off"></div>
-        <div class="p-form__group"><label class="p-form__label" for="customer-invoice-prefix">Invoice prefix (optional)</label><input class="p-form__control" id="customer-invoice-prefix" type="text" maxlength="21" placeholder="CUST1" autocapitalize="characters" autocomplete="off" title="CUST1 produces CUST1-001; leave empty for INV-0001"></div>
+        <div class="p-form__group"><label class="p-form__label" for="customer-invoice-prefix">Invoice prefix
+            (optional)</label><input class="p-form__control" id="customer-invoice-prefix" type="text" maxlength="21"
+            placeholder="CUST1" autocapitalize="characters" autocomplete="off"
+            title="CUST1 produces CUST1-001; leave empty for INV-0001"></div>
         <details class="customer-extra-details">
           <summary>Billing and invoice defaults</summary>
           <fieldset class="p-form__group">

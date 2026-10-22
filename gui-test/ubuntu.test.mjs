@@ -50,9 +50,11 @@ test('local PDF renderer and worker match pinned hashes and ship licences', () =
 test('static official icons are decorative and icon-only controls have names', () => {
   const document = new JSDOM(readFileSync(new URL('../web/index.html', import.meta.url), 'utf8')).window.document;
   const bundledIcons = new Set();
-  walk(parse(css), { visit: 'ClassSelector', enter(node) {
-    if (node.name.startsWith('p-icon--')) bundledIcons.add(node.name);
-  } });
+  walk(parse(css), {
+    visit: 'ClassSelector', enter(node) {
+      if (node.name.startsWith('p-icon--')) bundledIcons.add(node.name);
+    }
+  });
   for (const icon of document.querySelectorAll('[class*="p-icon--"]')) {
     for (const name of icon.classList) {
       if (name.startsWith('p-icon--')) assert.ok(bundledIcons.has(name), `${name} exists in the compiled Vanilla bundle`);
@@ -66,13 +68,15 @@ test('static official icons are decorative and icon-only controls have names', (
 
 test('official positive buttons meet AA text contrast in both framework themes', () => {
   const themes = [];
-  walk(parse(css), { visit: 'Rule', enter(node) {
-    const values = {};
-    node.block.children.forEach((declaration) => {
-      if (declaration.type === 'Declaration') values[declaration.property] = generate(declaration.value);
-    });
-    if (values['--vf-color-button-positive-default']) themes.push(values);
-  } });
+  walk(parse(css), {
+    visit: 'Rule', enter(node) {
+      const values = {};
+      node.block.children.forEach((declaration) => {
+        if (declaration.type === 'Declaration') values[declaration.property] = generate(declaration.value);
+      });
+      if (values['--vf-color-button-positive-default']) themes.push(values);
+    }
+  });
   assert.ok(themes.length >= 2);
   const colourDom = new JSDOM('<span></span>');
   const swatch = colourDom.window.document.querySelector('span');

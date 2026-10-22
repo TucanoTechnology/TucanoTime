@@ -39,6 +39,8 @@ guide that matches what you are trying to do.
 
 - [Invoicing and expenses](invoicing-and-expenses.md) — the invoice lifecycle,
   expenses, claims, retainers, catalog, templates and accounting sync.
+- [Harvest import status](harvest-import.md) — the read-only parser milestone
+  and remaining safeguards before financial records can be imported.
 
 ## Testing
 
